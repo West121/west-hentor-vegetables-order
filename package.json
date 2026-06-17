@@ -1,0 +1,39 @@
+{
+  "name": "hentor-vegetables-order",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.32.1",
+  "scripts": {
+    "dev:admin": "pnpm --filter @hentor/admin-web dev",
+    "dev:mini": "pnpm --filter @hentor/miniapp dev:weapp",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "db:generate": "pnpm --filter @hentor/db prisma generate",
+    "db:migrate:init": "pnpm --filter @hentor/db prisma migrate dev --name init",
+    "db:migrate": "pnpm --filter @hentor/db prisma migrate dev",
+    "db:seed": "pnpm --filter @hentor/db prisma db seed",
+    "db:studio": "pnpm --filter @hentor/db prisma studio"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nutui/nutui-react-taro",
+      "@parcel/watcher",
+      "@prisma/engines",
+      "@swc/core",
+      "@tarojs/binding",
+      "@tarojs/cli",
+      "core-js",
+      "core-js-pure",
+      "esbuild",
+      "prisma",
+      "sharp"
+    ]
+  }
+}

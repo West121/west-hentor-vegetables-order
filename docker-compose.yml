@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hentor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hentor_vegetables
+      POSTGRES_USER: hentor
+      POSTGRES_PASSWORD: hentor_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hentor -d hentor_vegetables"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: hentor-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: hentor_minio
+      MINIO_ROOT_PASSWORD: hentor_minio_password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: hentor-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 hentor_minio hentor_minio_password;
+      mc mb --ignore-existing local/hentor-assets;
+      mc anonymous set download local/hentor-assets;
+      "
+
+volumes:
+  postgres_data:
+  minio_data:

@@ -1,0 +1,503 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum StoreType {
+  DIRECT
+  FRANCHISE
+}
+
+enum StoreStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum FranchiseeStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+}
+
+enum AdminStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum BindingStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum PackageStatus {
+  ACTIVE
+  FROZEN
+  EXPIRED
+  USED_UP
+}
+
+enum DishCategory {
+  LEAFY
+  FRUIT
+  ROOT
+  MUSHROOM
+  ACTIVITY
+}
+
+enum DishStatus {
+  ON_SALE
+  OFF_SALE
+}
+
+enum TaskStatus {
+  DRAFT
+  ACTIVE
+  DISABLED
+}
+
+enum OrderStatus {
+  PENDING_SHIPMENT
+  SHIPPED
+  SIGNED
+  CANCELED
+  VOIDED
+}
+
+enum PurchaseStatus {
+  CREATED
+  PAYMENT_NOT_ENABLED
+  PENDING_PAYMENT
+  PAID
+  CANCELED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  SUCCESS
+  FAILED
+  CLOSED
+}
+
+model Franchisee {
+  id            String            @id @default(cuid())
+  name          String
+  contactName   String
+  contactPhone  String
+  status        FranchiseeStatus  @default(ACTIVE)
+  contractEndsAt DateTime?
+  remark        String?
+  stores        Store[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+model Store {
+  id                 String                @id @default(cuid())
+  franchiseeId       String?
+  code               String                @unique
+  name               String
+  type               StoreType             @default(FRANCHISE)
+  status             StoreStatus           @default(ACTIVE)
+  contactName        String
+  contactPhone       String
+  province           String?
+  city               String?
+  district           String?
+  address            String?
+  customerServiceTel String?
+  cutoffTime         String                @default("18:00")
+  franchiseEndsAt    DateTime?
+  franchisee         Franchisee?           @relation(fields: [franchiseeId], references: [id])
+  memberBindings     MemberStoreBinding[]
+  defaultUsers       User[]                @relation("DefaultStore")
+  addresses          Address[]
+  packageTemplates   PackageTemplate[]
+  userPackages       UserPackage[]
+  dishes             Dish[]
+  orders             Order[]
+  tasks              Task[]
+  inventoryLogs      InventoryLog[]
+  adminUserStores    AdminUserStore[]
+  operationLogs      AdminOperationLog[]
+  systemConfigs      SystemConfig[]
+  purchaseOrders     PackagePurchaseOrder[]
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+}
+
+model User {
+  id              String                @id @default(cuid())
+  openid          String                @unique
+  unionid         String?
+  phone           String?
+  nickname        String?
+  avatarUrl       String?
+  status          UserStatus            @default(ACTIVE)
+  disabledReason  String?
+  remark          String?
+  defaultStoreId  String?
+  defaultStore    Store?                @relation("DefaultStore", fields: [defaultStoreId], references: [id])
+  storeBindings   MemberStoreBinding[]
+  addresses       Address[]
+  packages        UserPackage[]
+  orders          Order[]
+  purchaseOrders  PackagePurchaseOrder[]
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+}
+
+model MemberStoreBinding {
+  id          String        @id @default(cuid())
+  userId      String
+  storeId     String
+  status      BindingStatus @default(ACTIVE)
+  source      String?
+  isDefault   Boolean       @default(false)
+  user        User          @relation(fields: [userId], references: [id])
+  store       Store         @relation(fields: [storeId], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([userId, storeId])
+  @@index([storeId])
+}
+
+model Address {
+  id            String   @id @default(cuid())
+  userId        String
+  storeId       String
+  receiverName  String
+  receiverPhone String
+  province      String?
+  city          String?
+  district      String?
+  detail        String
+  isDefault     Boolean  @default(false)
+  user          User     @relation(fields: [userId], references: [id])
+  store         Store    @relation(fields: [storeId], references: [id])
+  orders        Order[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId, storeId])
+}
+
+model PackageTemplate {
+  id              String        @id @default(cuid())
+  storeId         String?
+  name            String
+  totalTimes      Int
+  weightLimitJin  Decimal       @db.Decimal(8, 2)
+  validDays       Int
+  status          StoreStatus    @default(ACTIVE)
+  sortOrder       Int           @default(0)
+  store           Store?         @relation(fields: [storeId], references: [id])
+  userPackages    UserPackage[]
+  purchaseOrders  PackagePurchaseOrder[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([storeId])
+}
+
+model UserPackage {
+  id             String        @id @default(cuid())
+  userId         String
+  storeId        String
+  templateId     String
+  nameSnapshot   String
+  totalTimes     Int
+  usedTimes      Int           @default(0)
+  weightLimitJin Decimal       @db.Decimal(8, 2)
+  status         PackageStatus @default(ACTIVE)
+  frozenReason   String?
+  startsAt       DateTime      @default(now())
+  expiresAt      DateTime
+  lastUsedAt     DateTime?
+  nextOrderDate  DateTime?
+  user           User          @relation(fields: [userId], references: [id])
+  store          Store         @relation(fields: [storeId], references: [id])
+  template       PackageTemplate @relation(fields: [templateId], references: [id])
+  orders         Order[]
+  operationLogs  PackageOperationLog[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([userId, storeId, status])
+}
+
+model Dish {
+  id             String        @id @default(cuid())
+  storeId        String
+  name           String
+  category       DishCategory
+  status         DishStatus    @default(ON_SALE)
+  stepJin        Decimal       @db.Decimal(8, 2)
+  stockJin       Decimal       @db.Decimal(10, 2)
+  imageKey       String?
+  imageUrl       String?
+  description    String?
+  sortOrder      Int           @default(0)
+  deletedAt      DateTime?
+  store          Store         @relation(fields: [storeId], references: [id])
+  taskDishes     TaskDish[]
+  orderItems     OrderItem[]
+  inventoryLogs  InventoryLog[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([storeId, category, status])
+}
+
+model InventoryLog {
+  id          String   @id @default(cuid())
+  storeId     String
+  dishId      String
+  beforeJin   Decimal  @db.Decimal(10, 2)
+  changeJin   Decimal  @db.Decimal(10, 2)
+  afterJin    Decimal  @db.Decimal(10, 2)
+  reason      String
+  operatorId  String?
+  store       Store    @relation(fields: [storeId], references: [id])
+  dish        Dish     @relation(fields: [dishId], references: [id])
+  operator    AdminUser? @relation(fields: [operatorId], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([storeId, dishId])
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  storeId     String
+  name        String
+  status      TaskStatus @default(DRAFT)
+  startsAt    DateTime
+  endsAt      DateTime
+  cutoffTime  String
+  tag         String?
+  store       Store      @relation(fields: [storeId], references: [id])
+  dishes      TaskDish[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([storeId, status])
+}
+
+model TaskDish {
+  taskId    String
+  dishId    String
+  sortOrder Int    @default(0)
+  task      Task   @relation(fields: [taskId], references: [id])
+  dish      Dish   @relation(fields: [dishId], references: [id])
+
+  @@id([taskId, dishId])
+}
+
+model Order {
+  id                  String       @id @default(cuid())
+  storeId             String
+  userId              String
+  userPackageId       String
+  addressId           String?
+  orderNo             String       @unique
+  status              OrderStatus  @default(PENDING_SHIPMENT)
+  totalWeightJin      Decimal      @db.Decimal(8, 2)
+  addressSnapshot     Json
+  userVisibleRemark   String?
+  internalRemark      String?
+  cancelReason        String?
+  logisticsNo         String?
+  shippedAt           DateTime?
+  signedAt            DateTime?
+  canceledAt          DateTime?
+  modifiedAt          DateTime?
+  deletedByUserAt     DateTime?
+  store               Store        @relation(fields: [storeId], references: [id])
+  user                User         @relation(fields: [userId], references: [id])
+  userPackage         UserPackage  @relation(fields: [userPackageId], references: [id])
+  address             Address?     @relation(fields: [addressId], references: [id])
+  items               OrderItem[]
+  changeLogs          OrderChangeLog[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([storeId, status, createdAt])
+  @@index([userId, storeId])
+}
+
+model OrderItem {
+  id               String   @id @default(cuid())
+  orderId          String
+  dishId           String
+  dishNameSnapshot String
+  weightJin        Decimal  @db.Decimal(8, 2)
+  stepJinSnapshot  Decimal  @db.Decimal(8, 2)
+  order            Order    @relation(fields: [orderId], references: [id])
+  dish             Dish     @relation(fields: [dishId], references: [id])
+
+  @@index([dishId])
+}
+
+model OrderChangeLog {
+  id          String   @id @default(cuid())
+  orderId     String
+  beforeItems Json
+  afterItems  Json
+  beforeAddress Json?
+  afterAddress  Json?
+  source      String
+  operatorId  String?
+  order       Order    @relation(fields: [orderId], references: [id])
+  operator    AdminUser? @relation(fields: [operatorId], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+model PackageOperationLog {
+  id            String      @id @default(cuid())
+  userPackageId String
+  beforeValue    Json?
+  afterValue     Json?
+  reason         String
+  operatorId     String?
+  userPackage    UserPackage @relation(fields: [userPackageId], references: [id])
+  operator       AdminUser?  @relation(fields: [operatorId], references: [id])
+  createdAt      DateTime    @default(now())
+}
+
+model AdminUser {
+  id             String              @id @default(cuid())
+  username       String              @unique
+  name           String
+  phone          String?
+  passwordHash   String
+  status         AdminStatus         @default(ACTIVE)
+  lastLoginAt    DateTime?
+  roles          AdminUserRole[]
+  stores         AdminUserStore[]
+  inventoryLogs  InventoryLog[]
+  orderChangeLogs OrderChangeLog[]
+  packageLogs    PackageOperationLog[]
+  operationLogs  AdminOperationLog[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+}
+
+model AdminRole {
+  id          String                @id @default(cuid())
+  code        String                @unique
+  name        String
+  users       AdminUserRole[]
+  permissions AdminRolePermission[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+}
+
+model AdminUserRole {
+  adminUserId String
+  roleId      String
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id])
+  role        AdminRole @relation(fields: [roleId], references: [id])
+
+  @@id([adminUserId, roleId])
+}
+
+model AdminPermission {
+  id        String                @id @default(cuid())
+  code      String                @unique
+  name      String
+  roles     AdminRolePermission[]
+  createdAt DateTime              @default(now())
+}
+
+model AdminRolePermission {
+  roleId       String
+  permissionId String
+  role         AdminRole       @relation(fields: [roleId], references: [id])
+  permission   AdminPermission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+}
+
+model AdminUserStore {
+  adminUserId String
+  storeId     String
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id])
+  store       Store     @relation(fields: [storeId], references: [id])
+
+  @@id([adminUserId, storeId])
+}
+
+model AdminOperationLog {
+  id          String    @id @default(cuid())
+  storeId     String?
+  operatorId  String
+  resource    String
+  resourceId  String?
+  action      String
+  beforeValue Json?
+  afterValue  Json?
+  ip          String?
+  userAgent   String?
+  store       Store?    @relation(fields: [storeId], references: [id])
+  operator    AdminUser @relation(fields: [operatorId], references: [id])
+  createdAt   DateTime  @default(now())
+
+  @@index([storeId, resource, createdAt])
+}
+
+model SystemConfig {
+  id        String   @id @default(cuid())
+  storeId   String?
+  key       String
+  value     Json
+  store     Store?   @relation(fields: [storeId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([storeId, key])
+}
+
+model PackagePurchaseOrder {
+  id           String         @id @default(cuid())
+  storeId      String
+  userId       String
+  templateId   String
+  amountFen    Int
+  status       PurchaseStatus @default(PAYMENT_NOT_ENABLED)
+  payChannel   String?
+  expiresAt    DateTime?
+  store        Store          @relation(fields: [storeId], references: [id])
+  user         User           @relation(fields: [userId], references: [id])
+  template     PackageTemplate @relation(fields: [templateId], references: [id])
+  payments     PaymentOrder[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([storeId, userId, status])
+}
+
+model PaymentOrder {
+  id                  String        @id @default(cuid())
+  purchaseOrderId     String
+  channel             String
+  status              PaymentStatus @default(CREATED)
+  wechatPrepayId      String?
+  wechatTransactionId String?
+  paidAt              DateTime?
+  callbackDigest      String?
+  purchaseOrder       PackagePurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+}

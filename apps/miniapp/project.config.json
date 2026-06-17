@@ -1,0 +1,12 @@
+{
+  "appid": "wx165126960d67638f",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "dist",
+  "projectname": "hentor-vegetables-miniapp",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": true,
+    "minified": true
+  }
+}

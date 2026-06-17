@@ -4,6 +4,8 @@ node_modules/
 
 # Build outputs
 .next/
+.swc/
+.turbo/
 out/
 dist/
 build/
@@ -19,6 +21,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+*.log
 
 # OS/editor
 .DS_Store
@@ -26,3 +29,7 @@ pnpm-debug.log*
 
 # Generated
 *.tsbuildinfo
+apps/miniapp/dist
+packages/*/dist
+packages/db/generated
+packages/db/src/generated

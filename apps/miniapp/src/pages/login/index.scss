@@ -1,0 +1,54 @@
+.login {
+  min-height: 100vh;
+  padding: 42px 26px;
+}
+
+.login__hero {
+  align-items: center;
+  background: #fff;
+  border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  padding: 34px 22px;
+}
+
+.login__image {
+  background: linear-gradient(135deg, #e4f4dc, #ffffff);
+  border-radius: 28px;
+  height: 170px;
+  width: 100%;
+}
+
+.login__title {
+  font-size: 26px;
+  font-weight: 800;
+  margin-top: 24px;
+}
+
+.login__sub {
+  color: #66756d;
+  font-size: 14px;
+  line-height: 22px;
+  margin-top: 8px;
+  text-align: center;
+}
+
+.login__button {
+  background: #1f8f4f;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 800;
+  margin-top: 28px;
+  padding: 16px 0;
+  text-align: center;
+  width: 100%;
+}
+
+.login__agreement {
+  color: #8a9a90;
+  font-size: 12px;
+  line-height: 20px;
+  margin-top: 18px;
+  text-align: center;
+}
