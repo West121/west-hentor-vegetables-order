@@ -42,7 +42,7 @@ export default async function LoginPage() {
             <div className="text-sm font-medium text-[#1f8f4f]">管理系统登录</div>
             <h2 className="mt-2 text-3xl font-semibold">欢迎回来</h2>
             <p className="mt-2 text-sm leading-6 text-[#66756d]">
-              使用后台账号登录。默认种子账号：admin / Admin123456。
+              使用后台账号登录，按角色和授权门店进入运营工作台。
             </p>
           </div>
           <LoginForm />

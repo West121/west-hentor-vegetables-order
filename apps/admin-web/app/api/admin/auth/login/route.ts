@@ -1,7 +1,7 @@
 import { compare } from "bcryptjs";
 import { z } from "zod";
 
-import { prisma } from "@hentor/db";
+import { listAccessibleStores, prisma } from "@hentor/db";
 
 import { fail, ok } from "@/app/lib/api";
 import { setAdminSession } from "@/app/lib/session";
@@ -51,12 +51,14 @@ export async function POST(request: Request) {
     issuedAt: Date.now(),
   });
 
+  const storeAccess = await listAccessibleStores(admin.id);
+
   return ok({
     id: admin.id,
     username: admin.username,
     name: admin.name,
     roles: admin.roles.map(({ role }) => role.name),
-    stores: admin.stores.map(({ store }) => ({
+    stores: storeAccess.stores.map((store) => ({
       id: store.id,
       code: store.code,
       name: store.name,

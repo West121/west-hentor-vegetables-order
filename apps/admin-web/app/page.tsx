@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 
 import {
+  listAccessibleStores,
+  listAdminOperationLogs,
+  listAdminUsers,
   listDishes,
   listPackageTemplates,
   listStoreMembers,
@@ -34,33 +37,59 @@ import {
 } from "./ui/package-template-management-panel";
 import { StoreSwitcher } from "./ui/store-switcher";
 import {
+  SystemManagementPanel,
+  type AdminUserPanelItem,
+  type OperationLogPanelItem,
+} from "./ui/system-management-panel";
+import {
   TaskManagementPanel,
   type TaskDishOption,
   type TaskPanelItem,
 } from "./ui/task-management-panel";
 
-async function getDashboardData(selectedStoreId?: string) {
-  const stores = await prisma.store.findMany({
-    orderBy: { createdAt: "asc" },
-    include: { franchisee: true },
-  });
+async function getDashboardData(adminUserId: string, selectedStoreId?: string) {
+  const [storeAccess, adminRoles, currentAdmin] = await Promise.all([
+    listAccessibleStores(adminUserId),
+    prisma.adminRole.findMany({ orderBy: { createdAt: "asc" } }),
+    prisma.adminUser.findUnique({
+      where: { id: adminUserId },
+      include: {
+        roles: {
+          include: { role: true },
+        },
+      },
+    }),
+  ]);
+  const stores = storeAccess.stores;
   const activeStore =
     stores.find((store) => store.id === selectedStoreId) ?? stores[0] ?? null;
+  const accessibleStoreIds = stores.map((store) => store.id);
 
   const [
     members,
     orders,
     activePackages,
+    adminUsers,
     storeOrders,
     storeMembers,
     packageTemplates,
     dishes,
     tasks,
     userPackages,
+    operationLogs,
   ] = await Promise.all([
-      prisma.memberStoreBinding.count({ where: { status: "ACTIVE" } }),
-      prisma.order.count(),
-      prisma.userPackage.count({ where: { status: "ACTIVE" } }),
+      prisma.memberStoreBinding.count({
+        where: { status: "ACTIVE", storeId: { in: accessibleStoreIds } },
+      }),
+      prisma.order.count({ where: { storeId: { in: accessibleStoreIds } } }),
+      prisma.userPackage.count({
+        where: { status: "ACTIVE", storeId: { in: accessibleStoreIds } },
+      }),
+      listAdminUsers({
+        ...(storeAccess.scope === "ALL"
+          ? {}
+          : { storeIds: accessibleStoreIds }),
+      }),
       activeStore
         ? listStoreOrders({ storeId: activeStore.id, take: 10 })
         : Promise.resolve({
@@ -103,20 +132,45 @@ async function getDashboardData(selectedStoreId?: string) {
             items: [],
             summary: { active: 0, expired: 0, frozen: 0, total: 0 },
           }),
+      activeStore
+        ? listAdminOperationLogs({
+            resource: "admin_user",
+            storeId: activeStore.id,
+            take: 10,
+          })
+        : storeAccess.scope === "ALL"
+          ? listAdminOperationLogs({
+              resource: "admin_user",
+              take: 10,
+            })
+          : Promise.resolve({ items: [], summary: { total: 0 } }),
     ]);
 
   return {
     activeStore,
     activePackages,
+    adminUsers: adminUsers.items.map(serializeAdminUserPanelItem),
     dishes: dishes.items.map(serializeDishPanelItem),
     dishOptions: dishes.items.map(serializeTaskDishOption),
+    operationLogs: operationLogs.items.map(serializeOperationLogPanelItem),
     members,
     packageTemplates: packageTemplates.items.map(serializePackageTemplatePanelItem),
+    roles: adminRoles.map((role) => ({
+      id: role.id,
+      name: role.name,
+    })),
     storeMembers: storeMembers.items.map(serializeMemberPanelItem),
     orders,
     storeOrders: storeOrders.items.map(serializeOrderPanelItem),
+    storeAccessScope: storeAccess.scope,
     stores,
     tasks: tasks.items.map(serializeTaskPanelItem),
+    userDisplay: {
+      name: currentAdmin?.name ?? "管理员",
+      roles:
+        currentAdmin?.roles.map(({ role }) => role.name).join("、") ??
+        "后台用户",
+    },
     userPackages: userPackages.items.map(serializePackagePanelItem),
   };
 }
@@ -205,6 +259,36 @@ function serializePackagePanelItem(
   };
 }
 
+function serializeAdminUserPanelItem(
+  item: Awaited<ReturnType<typeof listAdminUsers>>["items"][number],
+): AdminUserPanelItem {
+  return {
+    ...item,
+    createdAt: item.createdAt.toISOString(),
+    lastLoginAt: item.lastLoginAt?.toISOString() ?? null,
+    updatedAt: item.updatedAt.toISOString(),
+  };
+}
+
+function serializeOperationLogPanelItem(
+  item: Awaited<ReturnType<typeof listAdminOperationLogs>>["items"][number],
+): OperationLogPanelItem {
+  return {
+    action: item.action,
+    createdAt: item.createdAt.toISOString(),
+    id: item.id,
+    operator: item.operator,
+    resource: item.resource,
+    resourceId: item.resourceId,
+    store: item.store
+      ? {
+          id: item.store.id,
+          name: item.store.name,
+        }
+      : null,
+  };
+}
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -217,7 +301,7 @@ export default async function DashboardPage({
   }
 
   const params = await searchParams;
-  const data = await getDashboardData(params?.storeId);
+  const data = await getDashboardData(session.adminUserId, params?.storeId);
   const activeStore = data.activeStore;
 
   return (
@@ -242,8 +326,13 @@ export default async function DashboardPage({
               {session.name.slice(0, 1).toUpperCase()}
             </div>
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">{session.name}</div>
-              <div className="text-xs text-[#66756d]">超级管理员 · 全部门店</div>
+              <div className="truncate text-sm font-semibold">
+                {data.userDisplay.name}
+              </div>
+              <div className="text-xs text-[#66756d]">
+                {data.userDisplay.roles} ·{" "}
+                {data.storeAccessScope === "ALL" ? "全部门店" : "授权门店"}
+              </div>
             </div>
             <LogoutButton />
           </div>
@@ -340,6 +429,17 @@ export default async function DashboardPage({
                 }
               : null
           }
+        />
+
+        <SystemManagementPanel
+          initialAdminUsers={data.adminUsers}
+          initialLogs={data.operationLogs}
+          logStoreId={activeStore?.id ?? null}
+          roles={data.roles}
+          stores={data.stores.map((store) => ({
+            id: store.id,
+            name: store.name,
+          }))}
         />
 
         <section className="grid gap-5 xl:grid-cols-[1fr_360px]">

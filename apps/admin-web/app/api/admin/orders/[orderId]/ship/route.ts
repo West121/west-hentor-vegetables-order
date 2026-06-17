@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { OrderServiceError, shipOrder } from "@hentor/db";
 
+import { getStoreAccessFailure } from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -34,6 +35,14 @@ export async function POST(
   const parsed = shipOrderSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return fail("INVALID_PARAMS", "发货参数不完整");
+  }
+
+  const accessFailure = await getStoreAccessFailure(
+    session.adminUserId,
+    parsed.data.storeId,
+  );
+  if (accessFailure) {
+    return accessFailure;
   }
 
   const { orderId } = await context.params;

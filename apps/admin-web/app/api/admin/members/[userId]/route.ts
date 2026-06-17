@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { MemberServiceError, updateStoreMember } from "@hentor/db";
 
+import { getStoreAccessFailure } from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -28,6 +29,14 @@ export async function PATCH(
   const parsed = updateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return fail("INVALID_PARAMS", "会员参数不完整");
+  }
+
+  const accessFailure = await getStoreAccessFailure(
+    session.adminUserId,
+    parsed.data.storeId,
+  );
+  if (accessFailure) {
+    return accessFailure;
   }
 
   const { userId } = await context.params;

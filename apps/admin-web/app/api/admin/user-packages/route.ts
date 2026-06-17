@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { listUserPackages } from "@hentor/db";
 
+import { getStoreAccessFailure } from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -28,6 +29,14 @@ export async function GET(request: Request) {
 
   if (!parsed.success) {
     return fail("INVALID_PARAMS", "查询参数不完整");
+  }
+
+  const accessFailure = await getStoreAccessFailure(
+    session.adminUserId,
+    parsed.data.storeId,
+  );
+  if (accessFailure) {
+    return accessFailure;
   }
 
   return ok(await listUserPackages(parsed.data));

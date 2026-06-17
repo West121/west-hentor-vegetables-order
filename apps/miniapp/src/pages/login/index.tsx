@@ -23,7 +23,7 @@ export default function LoginPage() {
       data: {
         loginCode: login.code,
         phoneCode: event.detail.code,
-        storeCode: "lotus-garden",
+        storeCode: process.env.TARO_APP_STORE_CODE ?? "lotus-garden",
       },
       success(response) {
         const token = (response.data as { data?: { token?: string } })?.data?.token;

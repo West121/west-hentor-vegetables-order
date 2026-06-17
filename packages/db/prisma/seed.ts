@@ -41,6 +41,45 @@ async function main() {
     },
   });
 
+  const branchFranchisee = await prisma.franchisee.upsert({
+    where: { id: "seed-franchisee-east" },
+    update: {
+      name: "恒拓东区加盟商",
+      status: "ACTIVE",
+    },
+    create: {
+      id: "seed-franchisee-east",
+      name: "恒拓东区加盟商",
+      contactName: "李明",
+      contactPhone: "13800000002",
+      contractEndsAt: new Date("2027-10-31T23:59:59+08:00"),
+    },
+  });
+
+  const branchStore = await prisma.store.upsert({
+    where: { code: "osmanthus-garden" },
+    update: {
+      name: "桂花苑加盟店",
+      status: "ACTIVE",
+    },
+    create: {
+      id: "seed-store-osmanthus",
+      franchiseeId: branchFranchisee.id,
+      code: "osmanthus-garden",
+      name: "桂花苑加盟店",
+      type: "FRANCHISE",
+      contactName: "李店长",
+      contactPhone: "13900000002",
+      province: "北京市",
+      city: "北京市",
+      district: "海淀区",
+      address: "清河街道 6 号院",
+      customerServiceTel: "400-800-1001",
+      cutoffTime: "17:30",
+      franchiseEndsAt: new Date("2027-10-31T23:59:59+08:00"),
+    },
+  });
+
   const permissions = [
     ["orders.read", "查看订单"],
     ["orders.write", "处理订单"],
@@ -198,6 +237,24 @@ async function main() {
     },
   });
 
+  await prisma.packageTemplate.upsert({
+    where: { id: "seed-package-6jin-weekly-osmanthus" },
+    update: {
+      name: "6斤轻享套餐",
+      weightLimitJin: new Prisma.Decimal("6.00"),
+      totalTimes: 6,
+    },
+    create: {
+      id: "seed-package-6jin-weekly-osmanthus",
+      storeId: branchStore.id,
+      name: "6斤轻享套餐",
+      totalTimes: 6,
+      weightLimitJin: new Prisma.Decimal("6.00"),
+      validDays: 60,
+      sortOrder: 1,
+    },
+  });
+
   const userPackage = await prisma.userPackage.upsert({
     where: { id: "seed-user-package-lotus-001" },
     update: {
@@ -248,6 +305,33 @@ async function main() {
     });
   }
 
+  const branchDishSeed = [
+    ["seed-dish-cabbage-osmanthus", "娃娃菜", "LEAFY", "0.50", "56.00"],
+    ["seed-dish-carrot-osmanthus", "胡萝卜", "ROOT", "1.00", "64.00"],
+    ["seed-dish-mushroom-osmanthus", "平菇", "MUSHROOM", "0.50", "28.00"],
+  ] as const;
+
+  for (const [id, name, category, stepJin, stockJin] of branchDishSeed) {
+    await prisma.dish.upsert({
+      where: { id },
+      update: {
+        name,
+        stockJin: new Prisma.Decimal(stockJin),
+        status: "ON_SALE",
+      },
+      create: {
+        id,
+        storeId: branchStore.id,
+        name,
+        category,
+        stepJin: new Prisma.Decimal(stepJin),
+        stockJin: new Prisma.Decimal(stockJin),
+        status: "ON_SALE",
+        description: "桂花苑门店本周菜品",
+      },
+    });
+  }
+
   const weeklyTask = await prisma.task.upsert({
     where: { id: "seed-task-weekly-reservation" },
     update: {
@@ -279,6 +363,51 @@ async function main() {
       { taskId: weeklyTask.id, dishId: "seed-dish-tomato", sortOrder: 1 },
       { taskId: weeklyTask.id, dishId: "seed-dish-cucumber", sortOrder: 2 },
       { taskId: weeklyTask.id, dishId: "seed-dish-lettuce", sortOrder: 3 },
+    ],
+  });
+
+  const branchTask = await prisma.task.upsert({
+    where: { id: "seed-task-osmanthus-weekly" },
+    update: {
+      cutoffTime: "17:30",
+      endsAt: new Date("2099-12-31T23:59:59+08:00"),
+      name: "桂花苑本周预订任务",
+      startsAt: new Date("2026-01-01T00:00:00+08:00"),
+      status: "ACTIVE",
+      tag: "加盟店精选",
+    },
+    create: {
+      id: "seed-task-osmanthus-weekly",
+      storeId: branchStore.id,
+      name: "桂花苑本周预订任务",
+      status: "ACTIVE",
+      startsAt: new Date("2026-01-01T00:00:00+08:00"),
+      endsAt: new Date("2099-12-31T23:59:59+08:00"),
+      cutoffTime: "17:30",
+      tag: "加盟店精选",
+    },
+  });
+
+  await prisma.taskDish.deleteMany({
+    where: { taskId: branchTask.id },
+  });
+  await prisma.taskDish.createMany({
+    data: [
+      {
+        taskId: branchTask.id,
+        dishId: "seed-dish-cabbage-osmanthus",
+        sortOrder: 0,
+      },
+      {
+        taskId: branchTask.id,
+        dishId: "seed-dish-carrot-osmanthus",
+        sortOrder: 1,
+      },
+      {
+        taskId: branchTask.id,
+        dishId: "seed-dish-mushroom-osmanthus",
+        sortOrder: 2,
+      },
     ],
   });
 

@@ -7,6 +7,7 @@ import {
   type Dish,
 } from "@hentor/db";
 
+import { getStoreAccessFailure } from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -72,6 +73,14 @@ export async function GET(request: Request) {
     return fail("INVALID_PARAMS", "查询参数不完整");
   }
 
+  const accessFailure = await getStoreAccessFailure(
+    session.adminUserId,
+    parsed.data.storeId,
+  );
+  if (accessFailure) {
+    return accessFailure;
+  }
+
   return ok(await listDishes(parsed.data));
 }
 
@@ -84,6 +93,14 @@ export async function POST(request: Request) {
   const parsed = createSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return fail("INVALID_PARAMS", "菜品参数不完整");
+  }
+
+  const accessFailure = await getStoreAccessFailure(
+    session.adminUserId,
+    parsed.data.storeId,
+  );
+  if (accessFailure) {
+    return accessFailure;
   }
 
   try {

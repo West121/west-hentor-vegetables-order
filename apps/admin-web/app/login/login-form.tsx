@@ -44,7 +44,6 @@ export function LoginForm() {
           className="h-12 w-full rounded-xl border border-[#dbe6dc] bg-white px-4 text-base outline-none transition focus:border-[#1f8f4f] focus:ring-4 focus:ring-[#1f8f4f]/10"
           name="username"
           placeholder="请输入后台账号"
-          defaultValue="admin"
           autoComplete="username"
         />
       </label>
@@ -55,7 +54,6 @@ export function LoginForm() {
           name="password"
           type="password"
           placeholder="请输入密码"
-          defaultValue="Admin123456"
           autoComplete="current-password"
         />
       </label>
