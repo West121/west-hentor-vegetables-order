@@ -1,4 +1,4 @@
-import { prisma, Prisma } from "@hentor/db";
+import { getActiveTaskForStore, prisma, Prisma } from "@hentor/db";
 import { calculateReservationSummary, storeCodeSchema } from "@hentor/shared";
 
 import { fail, ok } from "@/app/lib/api";
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     return fail("STORE_NOT_FOUND", "门店不存在或已停用", 404);
   }
 
-  const [userPackage, dishes, order] = await Promise.all([
+  const [userPackage, activeTask, fallbackDishes, order] = await Promise.all([
     prisma.userPackage.findFirst({
       where: {
         userId: auth.session.userId,
@@ -47,6 +47,7 @@ export async function GET(request: Request) {
       orderBy: { createdAt: "desc" },
       include: { user: true },
     }),
+    getActiveTaskForStore({ storeId: store.id }),
     prisma.dish.findMany({
       where: {
         storeId: store.id,
@@ -69,6 +70,7 @@ export async function GET(request: Request) {
       },
     }),
   ]);
+  const dishes = activeTask?.dishes ?? fallbackDishes;
   const defaultAddress = userPackage
     ? await prisma.address.findFirst({
         where: {
@@ -96,9 +98,19 @@ export async function GET(request: Request) {
       id: store.id,
       code: store.code,
       name: store.name,
-      cutoffTime: store.cutoffTime,
+      cutoffTime: activeTask?.cutoffTime ?? store.cutoffTime,
       customerServiceTel: store.customerServiceTel,
     },
+    task: activeTask
+      ? {
+          cutoffTime: activeTask.cutoffTime,
+          endsAt: activeTask.endsAt.toISOString(),
+          id: activeTask.id,
+          name: activeTask.name,
+          startsAt: activeTask.startsAt.toISOString(),
+          tag: activeTask.tag,
+        }
+      : null,
     package: userPackage
       ? {
           id: userPackage.id,

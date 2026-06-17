@@ -248,6 +248,40 @@ async function main() {
     });
   }
 
+  const weeklyTask = await prisma.task.upsert({
+    where: { id: "seed-task-weekly-reservation" },
+    update: {
+      cutoffTime: "18:00",
+      endsAt: new Date("2099-12-31T23:59:59+08:00"),
+      name: "本周精选预订任务",
+      startsAt: new Date("2026-01-01T00:00:00+08:00"),
+      status: "ACTIVE",
+      tag: "本周精选",
+    },
+    create: {
+      id: "seed-task-weekly-reservation",
+      storeId: store.id,
+      name: "本周精选预订任务",
+      status: "ACTIVE",
+      startsAt: new Date("2026-01-01T00:00:00+08:00"),
+      endsAt: new Date("2099-12-31T23:59:59+08:00"),
+      cutoffTime: "18:00",
+      tag: "本周精选",
+    },
+  });
+
+  await prisma.taskDish.deleteMany({
+    where: { taskId: weeklyTask.id },
+  });
+  await prisma.taskDish.createMany({
+    data: [
+      { taskId: weeklyTask.id, dishId: "seed-dish-spinach", sortOrder: 0 },
+      { taskId: weeklyTask.id, dishId: "seed-dish-tomato", sortOrder: 1 },
+      { taskId: weeklyTask.id, dishId: "seed-dish-cucumber", sortOrder: 2 },
+      { taskId: weeklyTask.id, dishId: "seed-dish-lettuce", sortOrder: 3 },
+    ],
+  });
+
   await prisma.order.upsert({
     where: { orderNo: "OD202606170042" },
     update: {},

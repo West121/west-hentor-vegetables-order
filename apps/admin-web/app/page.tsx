@@ -5,6 +5,7 @@ import {
   listPackageTemplates,
   listStoreMembers,
   listStoreOrders,
+  listTasks,
   listUserPackages,
   prisma,
 } from "@hentor/db";
@@ -32,6 +33,11 @@ import {
   type PackageTemplatePanelItem,
 } from "./ui/package-template-management-panel";
 import { StoreSwitcher } from "./ui/store-switcher";
+import {
+  TaskManagementPanel,
+  type TaskDishOption,
+  type TaskPanelItem,
+} from "./ui/task-management-panel";
 
 async function getDashboardData(selectedStoreId?: string) {
   const stores = await prisma.store.findMany({
@@ -49,6 +55,7 @@ async function getDashboardData(selectedStoreId?: string) {
     storeMembers,
     packageTemplates,
     dishes,
+    tasks,
     userPackages,
   ] = await Promise.all([
       prisma.memberStoreBinding.count({ where: { status: "ACTIVE" } }),
@@ -85,6 +92,12 @@ async function getDashboardData(selectedStoreId?: string) {
             summary: { offSale: 0, onSale: 0, total: 0 },
           }),
       activeStore
+        ? listTasks({ storeId: activeStore.id })
+        : Promise.resolve({
+            items: [],
+            summary: { active: 0, disabled: 0, draft: 0, total: 0 },
+          }),
+      activeStore
         ? listUserPackages({ storeId: activeStore.id })
         : Promise.resolve({
             items: [],
@@ -96,13 +109,39 @@ async function getDashboardData(selectedStoreId?: string) {
     activeStore,
     activePackages,
     dishes: dishes.items.map(serializeDishPanelItem),
+    dishOptions: dishes.items.map(serializeTaskDishOption),
     members,
     packageTemplates: packageTemplates.items.map(serializePackageTemplatePanelItem),
     storeMembers: storeMembers.items.map(serializeMemberPanelItem),
     orders,
     storeOrders: storeOrders.items.map(serializeOrderPanelItem),
     stores,
+    tasks: tasks.items.map(serializeTaskPanelItem),
     userPackages: userPackages.items.map(serializePackagePanelItem),
+  };
+}
+
+function serializeTaskDishOption(
+  item: Awaited<ReturnType<typeof listDishes>>["items"][number],
+): TaskDishOption {
+  return {
+    category: item.category,
+    id: item.id,
+    name: item.name,
+    status: item.status,
+    stockJin: item.stockJin,
+  };
+}
+
+function serializeTaskPanelItem(
+  item: Awaited<ReturnType<typeof listTasks>>["items"][number],
+): TaskPanelItem {
+  return {
+    ...item,
+    createdAt: item.createdAt.toISOString(),
+    endsAt: item.endsAt.toISOString(),
+    startsAt: item.startsAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString(),
   };
 }
 
@@ -268,6 +307,19 @@ export default async function DashboardPage({
 
         <DishManagementPanel
           initialItems={data.dishes}
+          store={
+            activeStore
+              ? {
+                  id: activeStore.id,
+                  name: activeStore.name,
+                }
+              : null
+          }
+        />
+
+        <TaskManagementPanel
+          dishOptions={data.dishOptions}
+          initialItems={data.tasks}
           store={
             activeStore
               ? {
