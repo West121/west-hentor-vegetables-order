@@ -1,0 +1,94 @@
+.orders {
+  min-height: 100vh;
+  padding: 24px 18px 96px;
+}
+
+.header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.header__title {
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.header__meta {
+  color: #66756d;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+.header__refresh,
+.order__edit {
+  background: #1f8f4f;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 9px 14px;
+}
+
+.order {
+  background: #fff;
+  border-radius: 18px;
+  margin-top: 14px;
+  padding: 16px;
+}
+
+.order__top,
+.order__bottom {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.order__no {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.order__time {
+  color: #66756d;
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+.order__status {
+  background: #e8f6ed;
+  border-radius: 999px;
+  color: #1f8f4f;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 7px 10px;
+}
+
+.order__items {
+  color: #34443a;
+  font-size: 14px;
+  line-height: 22px;
+  margin-top: 14px;
+}
+
+.order__bottom {
+  border-top: 1px solid #edf2ed;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+.order__weight {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.empty {
+  background: #fff;
+  border-radius: 18px;
+  color: #66756d;
+  font-size: 14px;
+  line-height: 22px;
+  margin-top: 14px;
+  padding: 24px 16px;
+  text-align: center;
+}

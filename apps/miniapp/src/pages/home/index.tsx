@@ -8,7 +8,7 @@ import "./index.scss";
 
 const API_BASE_URL =
   process.env.TARO_APP_API_BASE_URL || "http://127.0.0.1:3000";
-const STORE_CODE = "lotus-garden";
+const STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 
 const categories = ["叶菜", "水果", "根茎", "菌菇", "活动"];
 

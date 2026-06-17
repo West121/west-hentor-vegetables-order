@@ -4,21 +4,86 @@
 }
 
 .profile {
+  align-items: center;
   background: linear-gradient(135deg, #0f4b2d, #1f8f4f);
   border-radius: 22px;
   color: #fff;
-  padding: 22px;
+  display: flex;
+  gap: 14px;
+  padding: 20px;
+}
+
+.profile__avatar {
+  align-items: center;
+  background: rgb(255 255 255 / 22%);
+  border-radius: 999px;
+  display: flex;
+  flex: 0 0 52px;
+  font-size: 22px;
+  font-weight: 800;
+  height: 52px;
+  justify-content: center;
+}
+
+.profile__body {
+  min-width: 0;
 }
 
 .profile__name {
   font-size: 24px;
   font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .profile__meta {
   color: rgb(255 255 255 / 72%);
   font-size: 13px;
   margin-top: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.package-hero {
+  align-items: center;
+  background: #fff;
+  border-radius: 18px;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 18px;
+}
+
+.package-hero__label {
+  color: #1f8f4f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.package-hero__name {
+  font-size: 21px;
+  font-weight: 800;
+  margin-top: 6px;
+}
+
+.package-hero__meta {
+  color: #66756d;
+  font-size: 12px;
+  line-height: 18px;
+  margin-top: 5px;
+}
+
+.package-hero__button,
+.today__button {
+  background: #1f8f4f;
+  border-radius: 999px;
+  color: #fff;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 10px 16px;
 }
 
 .card {
@@ -28,9 +93,32 @@
   padding: 16px;
 }
 
+.card--muted {
+  color: #66756d;
+  font-size: 14px;
+}
+
 .card__title {
   font-size: 16px;
   font-weight: 800;
+}
+
+.today {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.today__main {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.today__meta {
+  color: #66756d;
+  font-size: 12px;
+  margin-top: 5px;
 }
 
 .entry {
@@ -53,7 +141,9 @@
 .entry__meta {
   color: #66756d;
   font-size: 12px;
+  line-height: 18px;
   margin-top: 5px;
+  max-width: 260px;
 }
 
 .entry__arrow {

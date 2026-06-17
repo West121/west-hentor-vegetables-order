@@ -1,0 +1,375 @@
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  Prisma,
+  prisma,
+  type Address,
+  type Dish,
+  type Store,
+  type User,
+  type UserPackage,
+} from "./index";
+import * as miniapp from "./miniapp";
+
+type Fixture = {
+  address: Address;
+  dish: Dish;
+  otherStore: Store;
+  store: Store;
+  user: User;
+  userPackage: UserPackage;
+};
+
+const createdStoreIds = new Set<string>();
+const createdUserIds = new Set<string>();
+
+async function cleanup() {
+  const storeIds = [...createdStoreIds];
+  const userIds = [...createdUserIds];
+
+  if (storeIds.length) {
+    await prisma.paymentOrder.deleteMany({
+      where: { purchaseOrder: { storeId: { in: storeIds } } },
+    });
+    await prisma.packagePurchaseOrder.deleteMany({
+      where: { storeId: { in: storeIds } },
+    });
+    await prisma.orderChangeLog.deleteMany({
+      where: { order: { storeId: { in: storeIds } } },
+    });
+    await prisma.orderItem.deleteMany({
+      where: { order: { storeId: { in: storeIds } } },
+    });
+    await prisma.order.deleteMany({ where: { storeId: { in: storeIds } } });
+    await prisma.packageOperationLog.deleteMany({
+      where: { userPackage: { storeId: { in: storeIds } } },
+    });
+    await prisma.userPackage.deleteMany({ where: { storeId: { in: storeIds } } });
+    await prisma.address.deleteMany({ where: { storeId: { in: storeIds } } });
+    await prisma.memberStoreBinding.deleteMany({
+      where: { storeId: { in: storeIds } },
+    });
+    await prisma.dish.deleteMany({ where: { storeId: { in: storeIds } } });
+    await prisma.packageTemplate.deleteMany({
+      where: { storeId: { in: storeIds } },
+    });
+    await prisma.store.deleteMany({ where: { id: { in: storeIds } } });
+  }
+
+  if (userIds.length) {
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  }
+
+  createdStoreIds.clear();
+  createdUserIds.clear();
+}
+
+afterEach(async () => {
+  await cleanup();
+});
+
+async function createFixture(): Promise<Fixture> {
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const storeId = `miniapp-test-store-${suffix}`;
+  const otherStoreId = `miniapp-other-store-${suffix}`;
+  const userId = `miniapp-test-user-${suffix}`;
+  const otherUserId = `miniapp-other-user-${suffix}`;
+  createdStoreIds.add(storeId);
+  createdStoreIds.add(otherStoreId);
+  createdUserIds.add(userId);
+  createdUserIds.add(otherUserId);
+
+  const store = await prisma.store.create({
+    data: {
+      id: storeId,
+      code: storeId,
+      contactName: "小程序店长",
+      contactPhone: "13900005555",
+      cutoffTime: "18:00",
+      name: "小程序测试加盟店",
+      status: "ACTIVE",
+      type: "FRANCHISE",
+    },
+  });
+  const otherStore = await prisma.store.create({
+    data: {
+      id: otherStoreId,
+      code: otherStoreId,
+      contactName: "其他店长",
+      contactPhone: "13900006666",
+      name: "其他加盟店",
+      status: "ACTIVE",
+      type: "FRANCHISE",
+    },
+  });
+
+  const user = await prisma.user.create({
+    data: {
+      id: userId,
+      defaultStoreId: store.id,
+      nickname: "小程序张三",
+      openid: `miniapp-openid-${suffix}`,
+      phone: "13800005555",
+    },
+  });
+  const otherUser = await prisma.user.create({
+    data: {
+      id: otherUserId,
+      defaultStoreId: otherStore.id,
+      openid: `miniapp-other-openid-${suffix}`,
+      phone: "13800006666",
+    },
+  });
+
+  await prisma.memberStoreBinding.createMany({
+    data: [
+      {
+        isDefault: true,
+        source: "test",
+        status: "ACTIVE",
+        storeId: store.id,
+        userId: user.id,
+      },
+      {
+        isDefault: true,
+        source: "test",
+        status: "ACTIVE",
+        storeId: otherStore.id,
+        userId: otherUser.id,
+      },
+    ],
+  });
+
+  const address = await prisma.address.create({
+    data: {
+      id: `miniapp-address-${suffix}`,
+      detail: "莲花小区 3 栋 602",
+      isDefault: true,
+      receiverName: "小程序张三",
+      receiverPhone: "13800005555",
+      storeId: store.id,
+      userId: user.id,
+    },
+  });
+
+  const template = await prisma.packageTemplate.create({
+    data: {
+      id: `miniapp-template-${suffix}`,
+      name: "8斤周套餐",
+      sortOrder: 1,
+      status: "ACTIVE",
+      storeId: store.id,
+      totalTimes: 8,
+      validDays: 90,
+      weightLimitJin: new Prisma.Decimal("8.00"),
+    },
+  });
+  await prisma.packageTemplate.create({
+    data: {
+      id: `miniapp-buy-template-${suffix}`,
+      name: "12斤家庭套餐",
+      sortOrder: 2,
+      status: "ACTIVE",
+      storeId: store.id,
+      totalTimes: 12,
+      validDays: 120,
+      weightLimitJin: new Prisma.Decimal("12.00"),
+    },
+  });
+  const otherTemplate = await prisma.packageTemplate.create({
+    data: {
+      id: `miniapp-other-template-${suffix}`,
+      name: "其他门店套餐",
+      status: "ACTIVE",
+      storeId: otherStore.id,
+      totalTimes: 4,
+      validDays: 30,
+      weightLimitJin: new Prisma.Decimal("4.00"),
+    },
+  });
+
+  const userPackage = await prisma.userPackage.create({
+    data: {
+      expiresAt: new Date("2099-12-31T15:59:59.000Z"),
+      id: `miniapp-user-package-${suffix}`,
+      nameSnapshot: template.name,
+      nextOrderDate: new Date("2026-06-24T00:00:00.000Z"),
+      status: "ACTIVE",
+      storeId: store.id,
+      templateId: template.id,
+      totalTimes: 8,
+      usedTimes: 2,
+      userId: user.id,
+      weightLimitJin: new Prisma.Decimal("8.00"),
+    },
+  });
+  await prisma.userPackage.create({
+    data: {
+      expiresAt: new Date("2099-12-31T15:59:59.000Z"),
+      id: `miniapp-other-user-package-${suffix}`,
+      nameSnapshot: otherTemplate.name,
+      status: "ACTIVE",
+      storeId: otherStore.id,
+      templateId: otherTemplate.id,
+      totalTimes: 4,
+      usedTimes: 0,
+      userId: otherUser.id,
+      weightLimitJin: new Prisma.Decimal("4.00"),
+    },
+  });
+
+  const dish = await prisma.dish.create({
+    data: {
+      id: `miniapp-dish-${suffix}`,
+      category: "LEAFY",
+      name: "菠菜",
+      status: "ON_SALE",
+      stepJin: new Prisma.Decimal("0.50"),
+      stockJin: new Prisma.Decimal("20.00"),
+      storeId: store.id,
+    },
+  });
+
+  await prisma.order.create({
+    data: {
+      addressId: address.id,
+      addressSnapshot: {
+        detail: address.detail,
+        receiverName: address.receiverName,
+        receiverPhone: address.receiverPhone,
+      },
+      items: {
+        create: {
+          dishId: dish.id,
+          dishNameSnapshot: dish.name,
+          stepJinSnapshot: dish.stepJin,
+          weightJin: new Prisma.Decimal("2.00"),
+        },
+      },
+      orderNo: `MP${Date.now()}A${Math.random().toString(36).slice(2, 6)}`,
+      status: "PENDING_SHIPMENT",
+      storeId: store.id,
+      totalWeightJin: new Prisma.Decimal("2.00"),
+      userId: user.id,
+      userPackageId: userPackage.id,
+    },
+  });
+  await prisma.order.create({
+    data: {
+      addressId: address.id,
+      addressSnapshot: {
+        detail: address.detail,
+        receiverName: address.receiverName,
+        receiverPhone: address.receiverPhone,
+      },
+      items: {
+        create: {
+          dishId: dish.id,
+          dishNameSnapshot: dish.name,
+          stepJinSnapshot: dish.stepJin,
+          weightJin: new Prisma.Decimal("1.00"),
+        },
+      },
+      orderNo: `MS${Date.now()}B${Math.random().toString(36).slice(2, 6)}`,
+      shippedAt: new Date("2026-06-18T02:00:00.000Z"),
+      status: "SHIPPED",
+      storeId: store.id,
+      totalWeightJin: new Prisma.Decimal("1.00"),
+      userId: user.id,
+      userPackageId: userPackage.id,
+    },
+  });
+  await prisma.order.create({
+    data: {
+      addressSnapshot: { detail: "其他门店地址" },
+      orderNo: `MO${Date.now()}C${Math.random().toString(36).slice(2, 6)}`,
+      status: "PENDING_SHIPMENT",
+      storeId: otherStore.id,
+      totalWeightJin: new Prisma.Decimal("1.00"),
+      userId: otherUser.id,
+      userPackageId: `miniapp-other-user-package-${suffix}`,
+    },
+  });
+
+  return { address, dish, otherStore, store, user, userPackage };
+}
+
+describe("mini app customer portal", () => {
+  it("returns profile, package and order summaries scoped to one member store", async () => {
+    const fixture = await createFixture();
+
+    const profile = await miniapp.getMiniappProfile({
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+    const orders = await miniapp.listMiniappOrders({
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+    const packages = await miniapp.listMiniappPackages({
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(profile).toMatchObject({
+      currentPackage: {
+        id: fixture.userPackage.id,
+        nameSnapshot: "8斤周套餐",
+        remainingTimes: 6,
+        status: "ACTIVE",
+        weightLimitJin: 8,
+      },
+      defaultAddress: {
+        detail: fixture.address.detail,
+        receiverPhone: fixture.address.receiverPhone,
+      },
+      member: {
+        id: fixture.user.id,
+        nickname: "小程序张三",
+        phone: "13800005555",
+      },
+      orderSummary: {
+        pendingShipment: 1,
+        shipped: 1,
+        total: 2,
+      },
+      store: {
+        id: fixture.store.id,
+        name: "小程序测试加盟店",
+      },
+    });
+    expect(orders.items).toHaveLength(2);
+    expect(orders.items[0]).toMatchObject({
+      canEdit: true,
+      items: [{ dishNameSnapshot: fixture.dish.name, weightJin: 2 }],
+      status: "PENDING_SHIPMENT",
+      totalWeightJin: 2,
+    });
+    expect(orders.items[1]).toMatchObject({
+      canEdit: false,
+      status: "SHIPPED",
+      totalWeightJin: 1,
+    });
+    expect(packages.items).toEqual([
+      expect.objectContaining({
+        id: fixture.userPackage.id,
+        remainingTimes: 6,
+        status: "ACTIVE",
+      }),
+    ]);
+    expect(packages.purchaseReserve).toMatchObject({
+      enabled: false,
+      status: "PAYMENT_NOT_ENABLED",
+      templates: [
+        expect.objectContaining({ name: "8斤周套餐", weightLimitJin: 8 }),
+        expect.objectContaining({ name: "12斤家庭套餐", weightLimitJin: 12 }),
+      ],
+    });
+
+    const otherStoreOrders = await miniapp.listMiniappOrders({
+      storeId: fixture.otherStore.id,
+      userId: fixture.user.id,
+    });
+    expect(otherStoreOrders.items).toHaveLength(0);
+  });
+});
