@@ -1,13 +1,16 @@
 import { redirect } from "next/navigation";
 
-import { listUserPackages, prisma } from "@hentor/db";
+import { listStoreOrders, listUserPackages, prisma } from "@hentor/db";
 
 import { ADMIN_NAV_GROUPS } from "@/app/lib/admin-navigation";
 import { getAdminSession } from "@/app/lib/session";
 
 import { AdminShell } from "./ui/admin-shell";
 import { LogoutButton } from "./ui/logout-button";
-import { OrderModalPreview } from "./ui/order-modal-preview";
+import {
+  OrderManagementPanel,
+  type OrderPanelItem,
+} from "./ui/order-management-panel";
 import {
   PackageManagementPanel,
   type PackagePanelItem,
@@ -20,20 +23,23 @@ async function getDashboardData() {
   });
   const activeStore = stores[0] ?? null;
 
-  const [members, orders, activePackages, latestOrders, userPackages] =
+  const [members, orders, activePackages, storeOrders, userPackages] =
     await Promise.all([
       prisma.memberStoreBinding.count({ where: { status: "ACTIVE" } }),
       prisma.order.count(),
       prisma.userPackage.count({ where: { status: "ACTIVE" } }),
-      prisma.order.findMany({
-        take: 6,
-        orderBy: { createdAt: "desc" },
-        include: {
-          store: true,
-          user: true,
-          items: true,
-        },
-      }),
+      activeStore
+        ? listStoreOrders({ storeId: activeStore.id, take: 10 })
+        : Promise.resolve({
+            items: [],
+            summary: {
+              canceled: 0,
+              pendingShipment: 0,
+              shipped: 0,
+              signed: 0,
+              total: 0,
+            },
+          }),
       activeStore
         ? listUserPackages({ storeId: activeStore.id })
         : Promise.resolve({
@@ -45,11 +51,26 @@ async function getDashboardData() {
   return {
     activeStore,
     activePackages,
-    latestOrders,
     members,
     orders,
+    storeOrders: storeOrders.items.map(serializeOrderPanelItem),
     stores,
     userPackages: userPackages.items.map(serializePackagePanelItem),
+  };
+}
+
+function serializeOrderPanelItem(
+  item: Awaited<ReturnType<typeof listStoreOrders>>["items"][number],
+): OrderPanelItem {
+  return {
+    ...item,
+    addressSnapshot: item.addressSnapshot,
+    canceledAt: item.canceledAt?.toISOString() ?? null,
+    createdAt: item.createdAt.toISOString(),
+    modifiedAt: item.modifiedAt?.toISOString() ?? null,
+    shippedAt: item.shippedAt?.toISOString() ?? null,
+    signedAt: item.signedAt?.toISOString() ?? null,
+    updatedAt: item.updatedAt.toISOString(),
   };
 }
 
@@ -66,14 +87,6 @@ function serializePackagePanelItem(
     updatedAt: item.updatedAt.toISOString(),
   };
 }
-
-const ORDER_STATUS_LABELS: Record<string, string> = {
-  CANCELED: "已取消",
-  PENDING_SHIPMENT: "待配送",
-  SHIPPED: "已发货",
-  SIGNED: "已签收",
-  VOIDED: "已作废",
-};
 
 export default async function DashboardPage() {
   const session = await getAdminSession();
@@ -132,6 +145,18 @@ export default async function DashboardPage() {
           ))}
         </section>
 
+        <OrderManagementPanel
+          initialItems={data.storeOrders}
+          store={
+            activeStore
+              ? {
+                  id: activeStore.id,
+                  name: activeStore.name,
+                }
+              : null
+          }
+        />
+
         <PackageManagementPanel
           initialItems={data.userPackages}
           store={
@@ -145,48 +170,6 @@ export default async function DashboardPage() {
         />
 
         <section className="grid gap-5 xl:grid-cols-[1fr_360px]">
-          <div className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">订单列表</h2>
-                <p className="mt-1 text-sm text-[#66756d]">
-                  弹窗支持拖拽、全屏和伸缩，列表保持清晰扫描。
-                </p>
-              </div>
-              <OrderModalPreview />
-            </div>
-            <div className="overflow-hidden rounded-xl border border-[#dbe6dc]">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead className="bg-[#f5f8f3] text-[#66756d]">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">订单号</th>
-                    <th className="px-4 py-3 font-medium">会员</th>
-                    <th className="px-4 py-3 font-medium">门店</th>
-                    <th className="px-4 py-3 font-medium">重量</th>
-                    <th className="px-4 py-3 font-medium">状态</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#edf2ed]">
-                  {data.latestOrders.map((order) => (
-                    <tr key={order.id}>
-                      <td className="px-4 py-4 font-medium">{order.orderNo}</td>
-                      <td className="px-4 py-4">
-                        {order.user.nickname ?? order.user.phone}
-                      </td>
-                      <td className="px-4 py-4">{order.store.name}</td>
-                      <td className="px-4 py-4">{Number(order.totalWeightJin)} 斤</td>
-                      <td className="px-4 py-4">
-                        <span className="rounded-full bg-[#e8f6ed] px-3 py-1 text-xs font-semibold text-[#1f8f4f]">
-                          {ORDER_STATUS_LABELS[order.status] ?? order.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
           <aside className="space-y-5">
             <div className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold">门店加盟模型</h2>

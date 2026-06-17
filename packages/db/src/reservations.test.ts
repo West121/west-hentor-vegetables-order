@@ -10,7 +10,7 @@ import {
   type User,
   type UserPackage,
 } from "./index";
-import { shipOrder } from "./orders";
+import * as orderOperations from "./orders";
 import * as packageOperations from "./packages";
 import { ReservationServiceError, submitReservation } from "./reservations";
 
@@ -313,7 +313,7 @@ describe("shipOrder", () => {
       userPackageId: fixture.userPackage.id,
     });
 
-    const shipped = await shipOrder({
+    const shipped = await orderOperations.shipOrder({
       logisticsNo: "SF123456789",
       operatorId: fixture.admin.id,
       orderId: order.id,
@@ -327,6 +327,126 @@ describe("shipOrder", () => {
       prisma.adminOperationLog.count({
         where: {
           action: "ORDER_SHIPPED",
+          operatorId: fixture.admin.id,
+          resourceId: order.id,
+        },
+      }),
+    ).resolves.toBe(1);
+  });
+
+  it("lists store orders with member, address, item details and status summary", async () => {
+    const fixture = await createFixture();
+    const otherStoreFixture = await createFixture();
+    const order = await submitReservation({
+      addressId: fixture.address.id,
+      items: [
+        { dishId: fixture.dishes.spinach.id, weightJin: 1 },
+        { dishId: fixture.dishes.cucumber.id, weightJin: 1.5 },
+      ],
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+      userPackageId: fixture.userPackage.id,
+      userVisibleRemark: "配送前电话确认",
+    });
+    await submitReservation({
+      addressId: otherStoreFixture.address.id,
+      items: [{ dishId: otherStoreFixture.dishes.spinach.id, weightJin: 1 }],
+      storeId: otherStoreFixture.store.id,
+      userId: otherStoreFixture.user.id,
+      userPackageId: otherStoreFixture.userPackage.id,
+    });
+
+    const result = await (
+      orderOperations as typeof orderOperations & {
+        listStoreOrders: (input: { storeId: string }) => Promise<{
+          items: Array<{
+            id: string;
+            addressSnapshot: {
+              detail?: string;
+              receiverName?: string;
+              receiverPhone?: string;
+            };
+            items: Array<{ dishNameSnapshot: string; weightJin: number }>;
+            orderNo: string;
+            totalWeightJin: number;
+            user: { id: string; nickname: string | null; phone: string | null };
+          }>;
+          summary: {
+            canceled: number;
+            pendingShipment: number;
+            shipped: number;
+            signed: number;
+            total: number;
+          };
+        }>;
+      }
+    ).listStoreOrders({ storeId: fixture.store.id });
+
+    expect(result.summary).toEqual({
+      canceled: 0,
+      pendingShipment: 1,
+      shipped: 0,
+      signed: 0,
+      total: 1,
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: order.id,
+      addressSnapshot: {
+        detail: "测试小区 1 栋 101",
+        receiverName: "测试会员",
+        receiverPhone: "13800001111",
+      },
+      orderNo: order.orderNo,
+      totalWeightJin: 2.5,
+      user: {
+        id: fixture.user.id,
+        nickname: "测试会员",
+        phone: "13800001111",
+      },
+    });
+    expect(
+      result.items[0]?.items.map((item) => ({
+        dishNameSnapshot: item.dishNameSnapshot,
+        weightJin: item.weightJin,
+      })),
+    ).toEqual([
+      { dishNameSnapshot: "菠菜", weightJin: 1 },
+      { dishNameSnapshot: "黄瓜", weightJin: 1.5 },
+    ]);
+  });
+
+  it("updates an order internal remark and records an admin operation log", async () => {
+    const fixture = await createFixture();
+    const order = await submitReservation({
+      addressId: fixture.address.id,
+      items: [{ dishId: fixture.dishes.spinach.id, weightJin: 1 }],
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+      userPackageId: fixture.userPackage.id,
+    });
+
+    const updated = await (
+      orderOperations as typeof orderOperations & {
+        updateOrderInternalRemark: (input: {
+          internalRemark: string;
+          operatorId: string;
+          orderId: string;
+          storeId: string;
+        }) => Promise<{ id: string; internalRemark: string | null }>;
+      }
+    ).updateOrderInternalRemark({
+      internalRemark: "客户要求 18 点后配送",
+      operatorId: fixture.admin.id,
+      orderId: order.id,
+      storeId: fixture.store.id,
+    });
+
+    expect(updated.internalRemark).toBe("客户要求 18 点后配送");
+    await expect(
+      prisma.adminOperationLog.count({
+        where: {
+          action: "ORDER_INTERNAL_REMARK_UPDATED",
           operatorId: fixture.admin.id,
           resourceId: order.id,
         },
