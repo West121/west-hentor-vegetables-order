@@ -3,8 +3,8 @@ import { z } from "zod";
 import {
   AddressServiceError,
   createMiniappAddress,
+  findAvailableMiniappStore,
   listMiniappAddresses,
-  prisma,
 } from "@hentor/db";
 import { storeCodeSchema } from "@hentor/shared";
 
@@ -32,18 +32,9 @@ async function getSessionStore(request: Request, storeCode?: string) {
     return { response: auth.response, session: null, storeId: null };
   }
 
-  const store = await prisma.store.findFirst({
-    where: storeCode
-      ? {
-          code: storeCode,
-          id: auth.session.storeId,
-          status: "ACTIVE",
-        }
-      : {
-          id: auth.session.storeId,
-          status: "ACTIVE",
-        },
-    select: { id: true },
+  const store = await findAvailableMiniappStore({
+    storeCode,
+    storeId: auth.session.storeId,
   });
 
   if (!store) {

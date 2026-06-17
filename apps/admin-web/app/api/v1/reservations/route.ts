@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import {
-  prisma,
+  findAvailableMiniappStore,
   ReservationServiceError,
   submitReservation,
 } from "@hentor/db";
@@ -50,21 +50,12 @@ export async function POST(request: Request) {
     return fail("INVALID_PARAMS", "预订参数不完整");
   }
 
-  const storeId = (
-    await prisma.store.findFirst({
-      where: parsed.data.storeCode
-        ? {
-            code: parsed.data.storeCode,
-            id: auth.session.storeId,
-            status: "ACTIVE",
-          }
-        : { id: auth.session.storeId, status: "ACTIVE" },
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    })
-  )?.id;
+  const store = await findAvailableMiniappStore({
+    storeCode: parsed.data.storeCode,
+    storeId: auth.session.storeId,
+  });
 
-  if (!storeId) {
+  if (!store) {
     return fail("STORE_NOT_FOUND", "当前门店不可用", 404);
   }
 
@@ -73,7 +64,7 @@ export async function POST(request: Request) {
       addressId: parsed.data.addressId,
       items: parsed.data.items,
       orderId: parsed.data.orderId,
-      storeId,
+      storeId: store.id,
       userId: auth.session.userId,
       userPackageId: parsed.data.userPackageId,
       userVisibleRemark: parsed.data.userVisibleRemark,

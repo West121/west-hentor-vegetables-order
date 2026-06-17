@@ -24,6 +24,7 @@ type Fixture = {
 
 const createdStoreIds = new Set<string>();
 const createdUserIds = new Set<string>();
+const createdFranchiseeIds = new Set<string>();
 
 async function cleanup() {
   const storeIds = [...createdStoreIds];
@@ -58,12 +59,19 @@ async function cleanup() {
     await prisma.store.deleteMany({ where: { id: { in: storeIds } } });
   }
 
+  if (createdFranchiseeIds.size) {
+    await prisma.franchisee.deleteMany({
+      where: { id: { in: [...createdFranchiseeIds] } },
+    });
+  }
+
   if (userIds.length) {
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   }
 
   createdStoreIds.clear();
   createdUserIds.clear();
+  createdFranchiseeIds.clear();
 }
 
 afterEach(async () => {
@@ -306,6 +314,135 @@ async function createFixture(): Promise<Fixture> {
 }
 
 describe("mini app customer portal", () => {
+  it("only resolves stores available to mini app customers", async () => {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const now = new Date("2026-06-18T00:00:00.000Z");
+    const activeFranchiseeId = `miniapp-active-franchisee-${suffix}`;
+    const suspendedFranchiseeId = `miniapp-suspended-franchisee-${suffix}`;
+    const expiredFranchiseeId = `miniapp-expired-franchisee-${suffix}`;
+    const directStoreId = `miniapp-direct-store-${suffix}`;
+    const activeStoreId = `miniapp-active-store-${suffix}`;
+    const suspendedStoreId = `miniapp-suspended-store-${suffix}`;
+    const expiredStoreId = `miniapp-expired-store-${suffix}`;
+    const expiredContractStoreId = `miniapp-expired-contract-store-${suffix}`;
+
+    createdFranchiseeIds.add(activeFranchiseeId);
+    createdFranchiseeIds.add(suspendedFranchiseeId);
+    createdFranchiseeIds.add(expiredFranchiseeId);
+    createdStoreIds.add(directStoreId);
+    createdStoreIds.add(activeStoreId);
+    createdStoreIds.add(suspendedStoreId);
+    createdStoreIds.add(expiredStoreId);
+    createdStoreIds.add(expiredContractStoreId);
+
+    await prisma.franchisee.createMany({
+      data: [
+        {
+          id: activeFranchiseeId,
+          contactName: "有效加盟商",
+          contactPhone: "13900001000",
+          contractEndsAt: new Date("2027-01-01T00:00:00.000Z"),
+          name: "有效加盟商",
+          status: "ACTIVE",
+        },
+        {
+          id: suspendedFranchiseeId,
+          contactName: "暂停加盟商",
+          contactPhone: "13900001001",
+          contractEndsAt: new Date("2027-01-01T00:00:00.000Z"),
+          name: "暂停加盟商",
+          status: "SUSPENDED",
+        },
+        {
+          id: expiredFranchiseeId,
+          contactName: "到期加盟商",
+          contactPhone: "13900001002",
+          contractEndsAt: new Date("2026-01-01T00:00:00.000Z"),
+          name: "到期加盟商",
+          status: "ACTIVE",
+        },
+      ],
+    });
+    await prisma.store.createMany({
+      data: [
+        {
+          id: directStoreId,
+          code: directStoreId,
+          contactName: "直营店长",
+          contactPhone: "13900002000",
+          name: "直营可用门店",
+          status: "ACTIVE",
+          type: "DIRECT",
+        },
+        {
+          id: activeStoreId,
+          code: activeStoreId,
+          contactName: "加盟店长",
+          contactPhone: "13900002001",
+          franchiseEndsAt: new Date("2027-01-01T00:00:00.000Z"),
+          franchiseeId: activeFranchiseeId,
+          name: "加盟可用门店",
+          status: "ACTIVE",
+          type: "FRANCHISE",
+        },
+        {
+          id: suspendedStoreId,
+          code: suspendedStoreId,
+          contactName: "暂停店长",
+          contactPhone: "13900002002",
+          franchiseeId: suspendedFranchiseeId,
+          name: "暂停加盟门店",
+          status: "ACTIVE",
+          type: "FRANCHISE",
+        },
+        {
+          id: expiredStoreId,
+          code: expiredStoreId,
+          contactName: "过期店长",
+          contactPhone: "13900002003",
+          franchiseeId: expiredFranchiseeId,
+          name: "加盟商过期门店",
+          status: "ACTIVE",
+          type: "FRANCHISE",
+        },
+        {
+          id: expiredContractStoreId,
+          code: expiredContractStoreId,
+          contactName: "合同过期店长",
+          contactPhone: "13900002004",
+          franchiseEndsAt: new Date("2026-01-01T00:00:00.000Z"),
+          franchiseeId: activeFranchiseeId,
+          name: "门店合同过期",
+          status: "ACTIVE",
+          type: "FRANCHISE",
+        },
+      ],
+    });
+
+    await expect(
+      miniapp.findAvailableMiniappStore({ storeCode: directStoreId, now }),
+    ).resolves.toMatchObject({ id: directStoreId, type: "DIRECT" });
+    await expect(
+      miniapp.findAvailableMiniappStore({ storeCode: activeStoreId, now }),
+    ).resolves.toMatchObject({
+      franchisee: { id: activeFranchiseeId },
+      id: activeStoreId,
+      type: "FRANCHISE",
+    });
+    await expect(
+      miniapp.findAvailableMiniappStore({ storeCode: suspendedStoreId, now }),
+    ).resolves.toBeNull();
+    await expect(
+      miniapp.findAvailableMiniappStore({ storeCode: expiredStoreId, now }),
+    ).resolves.toBeNull();
+    await expect(
+      miniapp.findAvailableMiniappStore({
+        storeCode: expiredContractStoreId,
+        now,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("returns profile, package and order summaries scoped to one member store", async () => {
     const fixture = await createFixture();
 

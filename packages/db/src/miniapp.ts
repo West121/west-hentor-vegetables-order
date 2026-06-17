@@ -1,9 +1,18 @@
 import { prisma } from "./client";
 import {
+  type FranchiseeStatus,
   Prisma,
   type OrderStatus,
   type PackageStatus,
+  type StoreStatus,
+  type StoreType,
 } from "./generated/prisma/client";
+
+export type MiniappStoreLookupInput = {
+  now?: Date;
+  storeCode?: string | null;
+  storeId?: string | null;
+};
 
 export type MiniappStoreUserInput = {
   storeId: string;
@@ -28,6 +37,38 @@ function normalizeAddressSnapshot(value: Prisma.JsonValue) {
   }
 
   return value as Record<string, unknown>;
+}
+
+function isFutureOrOpenEnded(value: Date | null, now: Date) {
+  return !value || value.getTime() >= now.getTime();
+}
+
+function isMiniappStoreAvailable(
+  store: {
+    franchiseEndsAt: Date | null;
+    franchisee: {
+      contractEndsAt: Date | null;
+      status: FranchiseeStatus;
+    } | null;
+    status: StoreStatus;
+    type: StoreType;
+  },
+  now: Date,
+) {
+  if (store.status !== "ACTIVE") {
+    return false;
+  }
+
+  if (store.type === "DIRECT") {
+    return true;
+  }
+
+  return (
+    !!store.franchisee &&
+    store.franchisee.status === "ACTIVE" &&
+    isFutureOrOpenEnded(store.franchiseEndsAt, now) &&
+    isFutureOrOpenEnded(store.franchisee.contractEndsAt, now)
+  );
 }
 
 function packageView(item: {
@@ -81,6 +122,30 @@ function summarizeOrders(rows: Array<{ status: OrderStatus; _count: { _all: numb
     },
     { canceled: 0, pendingShipment: 0, shipped: 0, signed: 0, total: 0 },
   );
+}
+
+export async function findAvailableMiniappStore(input: MiniappStoreLookupInput = {}) {
+  const now = input.now ?? new Date();
+  const stores = await prisma.store.findMany({
+    where: {
+      ...(input.storeCode ? { code: input.storeCode } : {}),
+      ...(input.storeId ? { id: input.storeId } : {}),
+      status: "ACTIVE",
+    },
+    orderBy: { createdAt: "asc" },
+    include: {
+      franchisee: {
+        select: {
+          contractEndsAt: true,
+          id: true,
+          name: true,
+          status: true,
+        },
+      },
+    },
+  });
+
+  return stores.find((store) => isMiniappStoreAvailable(store, now)) ?? null;
 }
 
 async function getStoreAndMember(input: MiniappStoreUserInput) {

@@ -12,6 +12,7 @@
     "typecheck": "pnpm -r typecheck",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
+    "setup:dev": "pnpm docker:up && pnpm db:generate && pnpm db:migrate && pnpm db:seed",
     "db:generate": "pnpm --filter @hentor/db prisma generate",
     "db:migrate:init": "pnpm --filter @hentor/db prisma migrate dev --name init",
     "db:migrate": "pnpm --filter @hentor/db prisma migrate dev",

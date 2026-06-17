@@ -1,4 +1,4 @@
-import { listMiniappOrders, prisma } from "@hentor/db";
+import { findAvailableMiniappStore, listMiniappOrders } from "@hentor/db";
 import { storeCodeSchema } from "@hentor/shared";
 
 import { fail, ok } from "@/app/lib/api";
@@ -18,13 +18,9 @@ export async function GET(request: Request) {
     return fail("INVALID_STORE_CODE", "门店编码不正确");
   }
 
-  const store = await prisma.store.findFirst({
-    where: {
-      code: parsedStoreCode.data,
-      id: auth.session.storeId,
-      status: "ACTIVE",
-    },
-    select: { id: true },
+  const store = await findAvailableMiniappStore({
+    storeCode: parsedStoreCode.data,
+    storeId: auth.session.storeId,
   });
 
   if (!store) {

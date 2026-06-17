@@ -1,4 +1,5 @@
 import {
+  findAvailableMiniappStore,
   getActiveTaskForStore,
   getMiniappEditableOrder,
   prisma,
@@ -32,14 +33,12 @@ export async function GET(request: Request) {
     return fail("INVALID_STORE_CODE", "门店编码不正确");
   }
 
-  const store = await prisma.store.findFirst({
-    where: {
-      code: parsedStoreCode.data,
-      id: auth.session.storeId,
-    },
+  const store = await findAvailableMiniappStore({
+    storeCode: parsedStoreCode.data,
+    storeId: auth.session.storeId,
   });
 
-  if (!store || store.status !== "ACTIVE") {
+  if (!store) {
     return fail("STORE_NOT_FOUND", "门店不存在或已停用", 404);
   }
 

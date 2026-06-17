@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { prisma } from "@hentor/db";
+import { findAvailableMiniappStore, prisma } from "@hentor/db";
 import { storeCodeSchema } from "@hentor/shared";
 
 import { fail, ok } from "@/app/lib/api";
@@ -31,11 +31,8 @@ export async function POST(request: Request) {
       exchangeWechatPhoneCode(parsed.data.phoneCode),
     ]);
 
-    const store = await prisma.store.findFirst({
-      where: parsed.data.storeCode
-        ? { code: parsed.data.storeCode, status: "ACTIVE" }
-        : { status: "ACTIVE" },
-      orderBy: { createdAt: "asc" },
+    const store = await findAvailableMiniappStore({
+      storeCode: parsed.data.storeCode,
     });
 
     if (!store) {
