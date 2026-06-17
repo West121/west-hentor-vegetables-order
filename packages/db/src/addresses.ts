@@ -30,6 +30,13 @@ export type UpdateMiniappAddressInput = MiniappAddressInput & {
   addressId: string;
 };
 
+export type DeleteMiniappAddressInput = MiniappAddressScope & {
+  addressId: string;
+};
+
+const MAX_ADDRESS_COUNT = 10;
+const MAINLAND_PHONE_PATTERN = /^1[3-9]\d{9}$/;
+
 function normalizeRequiredText(value: string, code: string, message: string) {
   const normalized = value.trim();
   if (!normalized) {
@@ -45,6 +52,19 @@ function normalizeNullableText(value?: string | null) {
 }
 
 function normalizeAddressInput(input: MiniappAddressInput) {
+  const receiverPhone = normalizeRequiredText(
+    input.receiverPhone,
+    "RECEIVER_PHONE_REQUIRED",
+    "请输入联系电话",
+  );
+
+  if (!MAINLAND_PHONE_PATTERN.test(receiverPhone)) {
+    throw new AddressServiceError(
+      "RECEIVER_PHONE_INVALID",
+      "请输入正确的手机号",
+    );
+  }
+
   return {
     city: normalizeNullableText(input.city),
     detail: normalizeRequiredText(input.detail, "DETAIL_REQUIRED", "请输入详细地址"),
@@ -55,11 +75,7 @@ function normalizeAddressInput(input: MiniappAddressInput) {
       "RECEIVER_NAME_REQUIRED",
       "请输入收货人",
     ),
-    receiverPhone: normalizeRequiredText(
-      input.receiverPhone,
-      "RECEIVER_PHONE_REQUIRED",
-      "请输入联系电话",
-    ),
+    receiverPhone,
   };
 }
 
@@ -143,6 +159,14 @@ export async function createMiniappAddress(input: MiniappAddressInput) {
         userId: input.userId,
       },
     });
+
+    if (addressCount >= MAX_ADDRESS_COUNT) {
+      throw new AddressServiceError(
+        "ADDRESS_LIMIT_EXCEEDED",
+        "最多只能保存 10 条地址",
+      );
+    }
+
     const isDefault = input.isDefault === true || addressCount === 0;
 
     if (isDefault) {
@@ -202,5 +226,52 @@ export async function updateMiniappAddress(input: UpdateMiniappAddressInput) {
         ...(input.isDefault === true ? { isDefault: true } : {}),
       },
     });
+  });
+}
+
+export async function deleteMiniappAddress(input: DeleteMiniappAddressInput) {
+  return prisma.$transaction(async (tx) => {
+    await ensureActiveMemberBinding(tx, input);
+
+    const existing = await tx.address.findFirst({
+      where: {
+        id: input.addressId,
+        storeId: input.storeId,
+        userId: input.userId,
+      },
+      select: {
+        id: true,
+        isDefault: true,
+      },
+    });
+
+    if (!existing) {
+      throw new AddressServiceError("ADDRESS_NOT_FOUND", "配送地址不存在");
+    }
+
+    const deleted = await tx.address.delete({
+      where: { id: existing.id },
+      select: { id: true },
+    });
+
+    if (existing.isDefault) {
+      const nextDefault = await tx.address.findFirst({
+        where: {
+          storeId: input.storeId,
+          userId: input.userId,
+        },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        select: { id: true },
+      });
+
+      if (nextDefault) {
+        await tx.address.update({
+          where: { id: nextDefault.id },
+          data: { isDefault: true },
+        });
+      }
+    }
+
+    return deleted;
   });
 }

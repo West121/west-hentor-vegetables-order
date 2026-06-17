@@ -227,4 +227,79 @@ describe("miniapp address management", () => {
       code: "MEMBER_STORE_NOT_FOUND",
     });
   });
+
+  it("validates phone, enforces address limit and deletes addresses safely", async () => {
+    const fixture = await createFixture();
+
+    await expect(
+      addressOperations.createMiniappAddress({
+        detail: "手机号错误地址",
+        receiverName: "张建国",
+        receiverPhone: "12345",
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "RECEIVER_PHONE_INVALID",
+      message: "请输入正确的手机号",
+    });
+
+    const created: Address[] = [];
+    for (let index = 0; index < 10; index += 1) {
+      created.push(
+        await addressOperations.createMiniappAddress({
+          detail: `莲花小区 ${index + 1} 栋 101`,
+          isDefault: index === 0,
+          receiverName: "张建国",
+          receiverPhone: "13800007777",
+          storeId: fixture.store.id,
+          userId: fixture.user.id,
+        }),
+      );
+    }
+
+    await expect(
+      addressOperations.createMiniappAddress({
+        detail: "第 11 个地址",
+        receiverName: "张建国",
+        receiverPhone: "13800007777",
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "ADDRESS_LIMIT_EXCEEDED",
+      message: "最多只能保存 10 条地址",
+    });
+
+    const deleted = await (
+      addressOperations as typeof addressOperations & {
+        deleteMiniappAddress: (input: {
+          addressId: string;
+          storeId: string;
+          userId: string;
+        }) => Promise<{ id: string }>;
+      }
+    ).deleteMiniappAddress({
+      addressId: created[0]!.id,
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(deleted.id).toBe(created[0]!.id);
+    await expect(
+      prisma.address.findUnique({ where: { id: created[0]!.id } }),
+    ).resolves.toBeNull();
+    await expect(
+      prisma.address.count({
+        where: { storeId: fixture.store.id, userId: fixture.user.id },
+      }),
+    ).resolves.toBe(9);
+
+    const list = await addressOperations.listMiniappAddresses({
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+    expect(list.defaultAddress).not.toBeNull();
+    expect(list.items.filter((item) => item.isDefault)).toHaveLength(1);
+  });
 });

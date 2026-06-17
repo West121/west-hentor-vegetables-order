@@ -56,6 +56,10 @@ function buildForm(item?: AddressItem | null): FormState {
   };
 }
 
+function isValidPhone(value: string) {
+  return /^1[3-9]\d{9}$/.test(value.trim());
+}
+
 export default function AddressesPage() {
   const [items, setItems] = useState<AddressItem[]>([]);
   const [editing, setEditing] = useState<AddressItem | null>(null);
@@ -117,6 +121,11 @@ export default function AddressesPage() {
   }, []);
 
   function openCreate() {
+    if (items.length >= 10) {
+      Taro.showToast({ icon: "none", title: "最多只能保存 10 条地址" });
+      return;
+    }
+
     setEditing(null);
     setForm(buildForm());
     setFormOpen(true);
@@ -135,6 +144,10 @@ export default function AddressesPage() {
     }
     if (!form.receiverPhone.trim()) {
       Taro.showToast({ icon: "none", title: "请输入联系电话" });
+      return;
+    }
+    if (!isValidPhone(form.receiverPhone)) {
+      Taro.showToast({ icon: "none", title: "请输入正确的手机号" });
       return;
     }
     if (!form.detail.trim()) {
@@ -226,6 +239,47 @@ export default function AddressesPage() {
     }
   }
 
+  async function deleteAddress(item: AddressItem) {
+    const modal = await Taro.showModal({
+      cancelText: "保留",
+      confirmText: "删除",
+      content: item.isDefault
+        ? "删除默认地址后，会自动选择其他地址作为默认。"
+        : "删除后不可恢复。",
+      title: "删除地址",
+    });
+
+    if (!modal.confirm) {
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const token = Taro.getStorageSync("mini_session_token");
+      const response = await Taro.request<ApiResponse<unknown>>({
+        header: { authorization: `Bearer ${token}` },
+        method: "DELETE",
+        url: `${API_BASE_URL}/api/v1/addresses/${item.id}?storeCode=${STORE_CODE}`,
+      });
+      const payload = response.data;
+
+      if (!payload.success) {
+        throw new Error(payload.error?.message ?? "删除失败");
+      }
+
+      await loadAddresses({ quiet: true });
+      Taro.showToast({ icon: "success", title: "已删除" });
+    } catch (error) {
+      Taro.showToast({
+        icon: "none",
+        title: error instanceof Error ? error.message : "删除失败",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <View className="addresses">
       <View className="header">
@@ -256,6 +310,12 @@ export default function AddressesPage() {
             {item.fullAddress || item.detail}
           </View>
           <View className="address-card__actions">
+            <Text
+              className="address-card__action address-card__action--danger"
+              onClick={() => void deleteAddress(item)}
+            >
+              删除
+            </Text>
             <Text
               className="address-card__action"
               onClick={() => openEdit(item)}

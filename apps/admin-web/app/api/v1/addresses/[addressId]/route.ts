@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   AddressServiceError,
+  deleteMiniappAddress,
   findAvailableMiniappStore,
   updateMiniappAddress,
 } from "@hentor/db";
@@ -83,6 +84,42 @@ export async function PATCH(
     });
 
     return ok({ address });
+  } catch (error) {
+    if (error instanceof AddressServiceError) {
+      return fail(error.code, error.message, statusForAddressError(error.code));
+    }
+
+    throw error;
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  context: { params: Promise<{ addressId: string }> },
+) {
+  const { searchParams } = new URL(request.url);
+  const storeCode = searchParams.get("storeCode") ?? "lotus-garden";
+  const parsedStoreCode = storeCodeSchema.safeParse(storeCode);
+
+  if (!parsedStoreCode.success) {
+    return fail("INVALID_STORE_CODE", "门店编码不正确");
+  }
+
+  const sessionStore = await getSessionStore(request, parsedStoreCode.data);
+  if (sessionStore.response) {
+    return sessionStore.response;
+  }
+
+  const { addressId } = await context.params;
+
+  try {
+    return ok({
+      address: await deleteMiniappAddress({
+        addressId,
+        storeId: sessionStore.storeId!,
+        userId: sessionStore.session!.userId,
+      }),
+    });
   } catch (error) {
     if (error instanceof AddressServiceError) {
       return fail(error.code, error.message, statusForAddressError(error.code));
