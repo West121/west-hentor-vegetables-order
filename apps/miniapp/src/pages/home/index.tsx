@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 
 import { calculateReservationSummary } from "@hentor/shared";
 
+import {
+  buildHomeUrl,
+  buildSelectedItems,
+  changeDishSelection,
+  getEditingOrderResolution,
+} from "../../lib/home";
 import "./index.scss";
 
 const API_BASE_URL =
@@ -90,9 +96,11 @@ export default function HomePage() {
       const editingOrderId = Taro.getStorageSync("editing_order_id") as
         | string
         | undefined;
-      const homeUrl = `${API_BASE_URL}/api/v1/home?storeCode=${STORE_CODE}${
-        editingOrderId ? `&orderId=${encodeURIComponent(editingOrderId)}` : ""
-      }`;
+      const homeUrl = buildHomeUrl({
+        apiBaseUrl: API_BASE_URL,
+        editingOrderId,
+        storeCode: STORE_CODE,
+      });
 
       const response = await Taro.request<ApiResponse<HomeData>>({
         url: homeUrl,
@@ -113,12 +121,15 @@ export default function HomePage() {
       }
 
       setHomeData(payload.data);
-      if (
-        editingOrderId &&
-        (!payload.data.currentOrder || payload.data.currentOrder.id !== editingOrderId)
-      ) {
+      const editingResolution = getEditingOrderResolution(editingOrderId, {
+        currentOrder: payload.data.currentOrder,
+      });
+      if (editingResolution.shouldClearEditingOrder) {
         Taro.removeStorageSync("editing_order_id");
-        Taro.showToast({ title: "该订单已不可修改", icon: "none" });
+        Taro.showToast({
+          title: editingResolution.toastTitle ?? "该订单已不可修改",
+          icon: "none",
+        });
       }
       setSelected(
         payload.data.currentOrder?.items.reduce<Record<string, number>>(
@@ -154,15 +165,8 @@ export default function HomePage() {
   const hasPackage = Boolean(packageInfo);
 
   const selectedItems = useMemo(
-    () =>
-      dishes
-        .map((dish) => ({
-          dishId: dish.id,
-          name: dish.name,
-          weightJin: selected[dish.id] ?? 0,
-        }))
-        .filter((item) => item.weightJin > 0),
-    [selected],
+    () => buildSelectedItems(dishes, selected),
+    [dishes, selected],
   );
   const summary = calculateReservationSummary(
     selectedItems,
@@ -175,13 +179,13 @@ export default function HomePage() {
       return;
     }
 
-    setSelected((value) => {
-      const next = Math.max(Number(((value[id] ?? 0) + delta).toFixed(2)), 0);
-      return {
-        ...value,
-        [id]: Math.round(next / step) * step,
-      };
-    });
+    setSelected((value) =>
+      changeDishSelection(value, {
+        delta,
+        dishId: id,
+        stepJin: step,
+      }),
+    );
   }
 
   async function submitOrder() {
