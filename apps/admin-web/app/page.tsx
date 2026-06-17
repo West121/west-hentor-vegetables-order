@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import {
+  listDishes,
   listPackageTemplates,
   listStoreMembers,
   listStoreOrders,
@@ -12,6 +13,7 @@ import { ADMIN_NAV_GROUPS } from "@/app/lib/admin-navigation";
 import { getAdminSession } from "@/app/lib/session";
 
 import { AdminShell } from "./ui/admin-shell";
+import { DishManagementPanel, type DishPanelItem } from "./ui/dish-management-panel";
 import { LogoutButton } from "./ui/logout-button";
 import {
   OrderManagementPanel,
@@ -46,6 +48,7 @@ async function getDashboardData(selectedStoreId?: string) {
     storeOrders,
     storeMembers,
     packageTemplates,
+    dishes,
     userPackages,
   ] = await Promise.all([
       prisma.memberStoreBinding.count({ where: { status: "ACTIVE" } }),
@@ -76,6 +79,12 @@ async function getDashboardData(selectedStoreId?: string) {
             summary: { active: 0, disabled: 0, total: 0 },
           }),
       activeStore
+        ? listDishes({ storeId: activeStore.id })
+        : Promise.resolve({
+            items: [],
+            summary: { offSale: 0, onSale: 0, total: 0 },
+          }),
+      activeStore
         ? listUserPackages({ storeId: activeStore.id })
         : Promise.resolve({
             items: [],
@@ -86,6 +95,7 @@ async function getDashboardData(selectedStoreId?: string) {
   return {
     activeStore,
     activePackages,
+    dishes: dishes.items.map(serializeDishPanelItem),
     members,
     packageTemplates: packageTemplates.items.map(serializePackageTemplatePanelItem),
     storeMembers: storeMembers.items.map(serializeMemberPanelItem),
@@ -93,6 +103,17 @@ async function getDashboardData(selectedStoreId?: string) {
     storeOrders: storeOrders.items.map(serializeOrderPanelItem),
     stores,
     userPackages: userPackages.items.map(serializePackagePanelItem),
+  };
+}
+
+function serializeDishPanelItem(
+  item: Awaited<ReturnType<typeof listDishes>>["items"][number],
+): DishPanelItem {
+  return {
+    ...item,
+    createdAt: item.createdAt.toISOString(),
+    deletedAt: item.deletedAt?.toISOString() ?? null,
+    updatedAt: item.updatedAt.toISOString(),
   };
 }
 
@@ -235,6 +256,18 @@ export default async function DashboardPage({
 
         <PackageTemplateManagementPanel
           initialItems={data.packageTemplates}
+          store={
+            activeStore
+              ? {
+                  id: activeStore.id,
+                  name: activeStore.name,
+                }
+              : null
+          }
+        />
+
+        <DishManagementPanel
+          initialItems={data.dishes}
           store={
             activeStore
               ? {
