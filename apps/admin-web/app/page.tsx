@@ -1,6 +1,11 @@
 import { redirect } from "next/navigation";
 
-import { listStoreOrders, listUserPackages, prisma } from "@hentor/db";
+import {
+  listStoreMembers,
+  listStoreOrders,
+  listUserPackages,
+  prisma,
+} from "@hentor/db";
 
 import { ADMIN_NAV_GROUPS } from "@/app/lib/admin-navigation";
 import { getAdminSession } from "@/app/lib/session";
@@ -11,6 +16,10 @@ import {
   OrderManagementPanel,
   type OrderPanelItem,
 } from "./ui/order-management-panel";
+import {
+  MemberManagementPanel,
+  type MemberPanelItem,
+} from "./ui/member-management-panel";
 import {
   PackageManagementPanel,
   type PackagePanelItem,
@@ -23,7 +32,7 @@ async function getDashboardData() {
   });
   const activeStore = stores[0] ?? null;
 
-  const [members, orders, activePackages, storeOrders, userPackages] =
+  const [members, orders, activePackages, storeOrders, storeMembers, userPackages] =
     await Promise.all([
       prisma.memberStoreBinding.count({ where: { status: "ACTIVE" } }),
       prisma.order.count(),
@@ -41,6 +50,12 @@ async function getDashboardData() {
             },
           }),
       activeStore
+        ? listStoreMembers({ storeId: activeStore.id })
+        : Promise.resolve({
+            items: [],
+            summary: { active: 0, disabled: 0, total: 0 },
+          }),
+      activeStore
         ? listUserPackages({ storeId: activeStore.id })
         : Promise.resolve({
             items: [],
@@ -52,10 +67,21 @@ async function getDashboardData() {
     activeStore,
     activePackages,
     members,
+    storeMembers: storeMembers.items.map(serializeMemberPanelItem),
     orders,
     storeOrders: storeOrders.items.map(serializeOrderPanelItem),
     stores,
     userPackages: userPackages.items.map(serializePackagePanelItem),
+  };
+}
+
+function serializeMemberPanelItem(
+  item: Awaited<ReturnType<typeof listStoreMembers>>["items"][number],
+): MemberPanelItem {
+  return {
+    ...item,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString(),
   };
 }
 
@@ -147,6 +173,18 @@ export default async function DashboardPage() {
 
         <OrderManagementPanel
           initialItems={data.storeOrders}
+          store={
+            activeStore
+              ? {
+                  id: activeStore.id,
+                  name: activeStore.name,
+                }
+              : null
+          }
+        />
+
+        <MemberManagementPanel
+          initialItems={data.storeMembers}
           store={
             activeStore
               ? {
