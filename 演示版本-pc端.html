@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>蔬菜预订 · PC管理端</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+        body { background: #f0f4ea; padding: 2rem; }
+        .admin-container { max-width: 1400px; margin:0 auto; }
+        .card { background: white; border-radius: 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.08); padding: 2rem; margin-bottom: 1.5rem; }
+        h1 { font-size: 1.8rem; color: #2c3e2f; margin-bottom: 1rem; display: flex; align-items: center; gap: 12px; }
+        .admin-badge { font-size:0.8rem; background:#e67e22; color:white; padding:4px 12px; border-radius:20px; }
+        .sub-tabs { display:flex; gap:12px; margin-bottom:20px; border-bottom:1px solid #d0e0c0; padding-bottom:8px; flex-wrap:wrap; }
+        .sub-tab-btn { background:none; border:none; padding:8px 20px; font-size:0.95rem; cursor:pointer; border-radius:30px; color:#5a6e5a; }
+        .sub-tab-btn.active { background:#6fbf4c20; color:#3b7c2a; font-weight:600; }
+        .sub-pane { display:none; }
+        .sub-pane.active { display:block; }
+        .data-table-wrap { overflow-x:auto; border-radius:16px; background:white; }
+        .data-table { width:100%; border-collapse:collapse; font-size:0.85rem; min-width:800px; }
+        .data-table th, .data-table td { padding:10px 8px; text-align:left; border-bottom:1px solid #ecf0f1; }
+        .data-table th { background:#f8f9fa; font-weight:600; }
+        .action-btn { padding:4px 10px; border-radius:30px; font-size:0.75rem; border:none; cursor:pointer; margin:2px; font-weight:500; }
+        .action-btn.edit-btn { background:#3498db; color:white; }
+        .action-btn.delete-btn { background:#e74c3c; color:white; }
+        .btn-primary { background:#6fbf4c; color:white; border:none; padding:8px 16px; border-radius:30px; cursor:pointer; }
+        .btn-sm { padding:5px 12px; font-size:0.8rem; }
+        .modal { display:none; position:fixed; top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4); justify-content:center;align-items:center;z-index:1000; }
+        .modal-content { background:white; max-width:600px; width:90%; border-radius:24px; padding:24px; max-height:80vh; overflow-y:auto; }
+        .modal-buttons { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+        .toast-message { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2c3e2f; color:white; padding:10px 24px; border-radius:40px; z-index:2000; }
+        input,textarea,select { width:100%; padding:8px 12px; border:1px solid #cde0c0; border-radius:20px; margin:4px 0 10px; }
+        .task-dish-list { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 12px; }
+        .task-dish-btn { border:1px solid #cde0c0; background:#f8fff2; border-radius:20px; padding:8px 12px; cursor:pointer; color:#355d2c; display:inline-flex; align-items:center; gap:6px; }
+        .task-dish-btn.selected { background:#6fbf4c; border-color:#6fbf4c; color:white; }
+        .task-dish-btn.disabled { opacity:0.5; cursor:not-allowed; border-color:#e0e0e0; }
+        .dish-icon { font-size:1rem; }
+        .demo-label { background:#fde3a7; color:#7c5e00; padding:2px 8px; border-radius:20px; font-size:0.7rem; }
+        .stats-veg { display: inline-block; background: #e8f5e9; border-radius: 12px; padding: 2px 8px; margin: 2px; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+<div class="admin-container">
+    <div class="card">
+        <h1>🛠️ 后台管理 <span class="admin-badge">PC管理端</span></h1>
+        <div class="sub-tabs" id="adminSubTabs">
+            <button class="sub-tab-btn active" data-sub="bookingRecords">📋 订单管理</button>
+            <button class="sub-tab-btn" data-sub="packageTemplates">🎫 套餐模板</button>
+            <button class="sub-tab-btn" data-sub="userPackages">👥 用户套餐</button>
+            <button class="sub-tab-btn" data-sub="dishMgmt">🥦 菜品管理</button>
+            <button class="sub-tab-btn" data-sub="taskMgmt">🧾 任务管理</button>
+            <button class="sub-tab-btn" data-sub="shareMgmt">🔗 分享管理</button>
+            <button class="sub-tab-btn" data-sub="shipmentStats">📊 发货统计</button>
+        </div>
+
+        <!-- 订单管理 -->
+        <div id="bookingRecordsPanel" class="sub-pane active">
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+                <input type="text" id="searchInput" placeholder="搜索姓名/手机号" style="width:200px;">
+                <button id="refreshRecords" class="btn-primary btn-sm">刷新</button>
+            </div>
+            <div class="data-table-wrap" id="tableContainer"></div>
+        </div>
+
+        <!-- 套餐模板 -->
+        <div id="packageTemplatesPanel" class="sub-pane">
+            <button id="addTemplateBtn" class="btn-primary" style="margin-bottom:8px;">+ 新增模板</button>
+            <div id="templatesContainer"></div>
+        </div>
+
+        <!-- 用户套餐 (新增用户按钮已添加) -->
+        <div id="userPackagesPanel" class="sub-pane">
+            <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">
+                <input type="text" id="searchUserPackageInput" placeholder="手机号" style="width:200px;">
+                <button id="refreshUserPackages" class="btn-primary btn-sm">刷新</button>
+                <button id="addUserPackageBtn" class="btn-primary" style="margin-left:auto;">+ 新增用户</button>
+            </div>
+            <div id="userPackagesContainer"></div>
+        </div>
+
+        <!-- 菜品管理 -->
+        <div id="dishMgmtPanel" class="sub-pane">
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
+                <input type="text" id="dishNameFilter" placeholder="菜品名称" style="width:150px;">
+                <select id="dishCategoryFilter" style="width:120px;">
+                    <option value="">全部类型</option><option value="leafy">叶菜</option><option value="fruity">茄果</option>
+                </select>
+                <select id="dishStatusFilter" style="width:120px;">
+                    <option value="">全部状态</option><option value="on">上架</option><option value="off">下架</option>
+                </select>
+                <button id="openAddDishModalBtn" class="btn-primary">+ 新增菜品</button>
+                <button id="bulkOffBtn" class="btn-sm" style="margin-left:8px;">一键下架</button>
+            </div>
+            <div id="dishListContainer"></div>
+        </div>
+
+        <!-- 任务管理 -->
+        <div id="taskMgmtPanel" class="sub-pane">
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
+                <button id="addTaskBtn" class="btn-primary">+ 新增任务</button>
+            </div>
+            <div id="taskMgmtContainer"></div>
+        </div>
+
+        <!-- 分享管理 -->
+        <div id="shareMgmtPanel" class="sub-pane">
+            <div id="shareRecordsContainer"></div>
+        </div>
+
+        <!-- 发货统计 (演示数据 + 重量汇总) -->
+        <div id="shipmentStatsPanel" class="sub-pane">
+            <div style="display:flex;gap:8px;flex-wrap:nowrap;align-items:center;margin-bottom:12px;overflow-x:auto;">
+                <label style="white-space:nowrap;">日期：</label>
+                <input type="date" id="statsStartDate" style="width:140px;">
+                <span style="white-space:nowrap;">至</span>
+                <input type="date" id="statsEndDate" style="width:140px;">
+                <select id="statsStatusFilter" style="width:120px;">
+                    <option value="all">全部状态</option><option value="待发货">待发货</option>
+                    <option value="已发货">已发货</option><option value="已签收">已签收</option>
+                    <option value="已取消">已取消</option>
+                </select>
+                <button id="applyStatsDateBtn" class="btn-primary btn-sm">筛选</button>
+                <button id="copyStatsBtn" class="btn-primary btn-sm">复制汇总</button>
+            </div>
+            <div id="statsSummary" style="background:#e8f5e9;padding:10px;border-radius:12px;margin-bottom:8px;"></div>
+            <div class="data-table-wrap" id="statsDetailContainer"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 已有的模态框 -->
+<div id="templateModal" class="modal"><div class="modal-content"><h3>套餐模板</h3><form id="templateForm"><label>名称 <span style="color:#666;font-size:0.8rem;">(套餐的名称标识)</span></label><input type="text" id="templateName" placeholder="如：8斤周套餐"><label>总次数 <span style="color:#666;font-size:0.8rem;">(套餐包含的配送次数)</span></label><input type="number" id="templateTotalTimes" placeholder="如：8"><label>可选重量(斤) <span style="color:#666;font-size:0.8rem;">(每次配送可选蔬菜的总重量)</span></label><input type="number" id="templateMaxVeggies" placeholder="如：2" step="0.1"><div class="modal-buttons"><button type="button" id="cancelTemplateBtn">取消</button><button type="submit" class="btn-primary">保存</button></div></form></div></div>
+<div id="editUserPackageModal" class="modal"><div class="modal-content"><h3>编辑用户套餐</h3><form id="userPackageForm"><input type="text" id="upPhone" readonly><input type="text" id="upUserName" placeholder="姓名"><input type="number" id="upUsedTimes"><input type="date" id="upLastShip"><input type="date" id="upNextShip"><div class="modal-buttons"><button type="button" id="cancelUserPackageBtn">取消</button><button type="submit" class="btn-primary">保存</button></div></form></div></div>
+<div id="editLogisticsModal" class="modal"><div class="modal-content"><h3>物流编辑</h3><form id="logisticsForm"><input type="text" id="logisticsStatus" placeholder="状态"><input type="text" id="logisticsNumber" placeholder="运单号"><div class="modal-buttons"><button type="button" id="cancelLogisticsBtn">取消</button><button type="submit" class="btn-primary">保存</button></div></form></div></div>
+<div id="processAsModal" class="modal"><div class="modal-content"><h3>处理售后</h3><form id="processAsForm"><input type="text" id="processOrderId" readonly><input type="text" id="currentAsStatus" readonly><select id="asAction"><option value="approve">通过</option><option value="reject">拒绝</option><option value="complete">完成</option></select><textarea id="asRemark" rows="2"></textarea><div class="modal-buttons"><button type="button" id="cancelProcessBtn">取消</button><button type="submit" class="btn-primary">处理</button></div></form></div></div>
+<div id="addDishModal" class="modal"><div class="modal-content"><h3>新增菜品</h3><label>图片 <span style="color:#666;font-size:0.8rem;">(菜品图片，可选)</span></label><input type="file" id="addDishImage" accept="image/*" style="border:none;padding:0;"><div id="addDishImagePreview" style="margin:8px 0;max-width:200px;display:none;"><img id="addDishPreviewImg" style="max-width:100%;border-radius:8px;" /></div><label>名称 <span style="color:#666;font-size:0.8rem;">(菜品的名称)</span></label><input type="text" id="addDishName" placeholder="如：菠菜"><label>类型 <span style="color:#666;font-size:0.8rem;">(菜品所属分类)</span></label><select id="addDishCategory"><option value="leafy">叶菜</option><option value="fruity">茄果</option></select><label>重量(斤) <span style="color:#666;font-size:0.8rem;">(每份菜品的重量)</span></label><input type="text" id="addDishWeight" placeholder="如：0.5" value="0.5"><label>库存 <span style="color:#666;font-size:0.8rem;">(件)</span></label><input type="number" id="addDishInventory" placeholder="如：100" value="100" min="0"><div class="modal-buttons"><button id="cancelAddDishBtn">取消</button><button id="saveAddDishBtn" class="btn-primary">添加</button></div></div></div>
+<div id="taskModal" class="modal"><div class="modal-content"><h3>新增任务</h3><form id="taskForm"><label>任务名称</label><input type="text" id="taskName" placeholder="如：周末菜品上架" required><label>截止时间</label><input type="datetime-local" id="taskDeadline" step="1" required><label>生效区间</label><div style="display:flex;gap:8px;flex-wrap:wrap;"><input type="datetime-local" id="taskEffectiveStartDate" step="1" style="flex:1" required><input type="datetime-local" id="taskEffectiveEndDate" step="1" style="flex:1" required></div><label>上架菜品</label><div id="taskDishes" class="task-dish-list"></div><p style="color:#7c5e00;font-size:0.85rem;margin-top:-6px;">截止后用户订单不可提交</p><div class="modal-buttons"><button type="button" id="cancelTaskBtn">取消</button><button type="submit" class="btn-primary">保存</button></div></form></div></div>
+<div id="shareDetailModal" class="modal"><div class="modal-content"><h3>分享详情</h3><div id="shareDetailContent"></div><div class="modal-buttons"><button id="closeShareDetailBtn">关闭</button></div></div></div>
+
+<!-- 确认全部下架模态 -->
+<div id="confirmAllOffModal" class="modal"><div class="modal-content"><h3>确认全部下架</h3><p>确认要将所有菜品下架吗？此操作会将所有菜品状态改为下架。</p><div class="modal-buttons"><button id="cancelConfirmAllOffBtn">取消</button><button id="confirmAllOffBtn" class="btn-primary">确认</button></div></div></div>
+
+<!-- 编辑菜品模态框 -->
+<div id="editDishModal" class="modal"><div class="modal-content"><h3>编辑菜品</h3><label>图片 <span style="color:#666;font-size:0.8rem;">(菜品图片，可选)</span></label><input type="file" id="editDishImage" accept="image/*" style="border:none;padding:0;"><div id="editDishImagePreview" style="margin:8px 0;max-width:200px;"><img id="editDishPreviewImg" style="max-width:100%;border-radius:8px;display:none;" /><span id="editDishNoImage" style="color:#999;display:none;">无图片</span><button id="removeDishImageBtn" style="display:none;margin-top:4px;font-size:0.8rem;color:#e74c3c;border:none;background:none;cursor:pointer;">删除图片</button></div><label>名称 <span style="color:#666;font-size:0.8rem;">(菜品的名称)</span></label><input type="text" id="editDishName" placeholder="如：菠菜"><label>类型 <span style="color:#666;font-size:0.8rem;">(菜品所属分类)</span></label><select id="editDishCategory"><option value="leafy">叶菜</option><option value="fruity">茄果</option></select><label>重量(斤) <span style="color:#666;font-size:0.8rem;">(每份菜品的重量)</span></label><input type="text" id="editDishWeight" placeholder="如：0.5"><label>库存 <span style="color:#666;font-size:0.8rem;">(件)</span></label><input type="number" id="editDishInventory" placeholder="如：100" min="0"><div class="modal-buttons"><button id="cancelEditDishBtn">取消</button><button id="saveEditDishBtn" class="btn-primary">保存</button></div></div></div>
+
+<!-- 新增：添加用户套餐模态框 -->
+<div id="addUserPackageModal" class="modal">
+    <div class="modal-content">
+        <h3>新增用户套餐</h3>
+        <form id="addUserPackageForm">
+            <label>手机号</label><input type="tel" id="addUpPhone" required pattern="[0-9]{11}" placeholder="11位手机号">
+            <label>姓名</label><input type="text" id="addUpName" required>
+            <label>套餐模板</label><select id="addUpTemplate" required></select>
+            <label>已用次数</label><input type="number" id="addUpUsedTimes" value="0" min="0">
+            <label>最近发货日期</label><input type="date" id="addUpLastShip">
+            <label>下次预计日期</label><input type="date" id="addUpNextShip">
+            <div class="modal-buttons">
+                <button type="button" id="cancelAddUserPackageBtn" class="btn-sm">取消</button>
+                <button type="submit" class="btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    const STORAGE_BOOKING='veg_booking_v20',STORAGE_ADDRESS='veg_address_v20',STORAGE_TEMPLATES='veg_templates_v20',STORAGE_USER_PACKAGES='veg_user_packages_v20',STORAGE_DISHES='veg_dishes_v20',STORAGE_SHARES='veg_shares_v20',STORAGE_TASKS='veg_tasks_v20';
+    let bookings=[],templates=[],userPackages=[],dishes=[],shares=[],tasks=[];
+
+    function saveAll(){localStorage.setItem(STORAGE_BOOKING,JSON.stringify(bookings));localStorage.setItem(STORAGE_TEMPLATES,JSON.stringify(templates));localStorage.setItem(STORAGE_USER_PACKAGES,JSON.stringify(userPackages));localStorage.setItem(STORAGE_DISHES,JSON.stringify(dishes));localStorage.setItem(STORAGE_SHARES,JSON.stringify(shares));localStorage.setItem(STORAGE_TASKS,JSON.stringify(tasks));}
+    function saveBookings(){localStorage.setItem(STORAGE_BOOKING,JSON.stringify(bookings));}
+    function saveTemplates(){localStorage.setItem(STORAGE_TEMPLATES,JSON.stringify(templates));}
+    function saveUserPackages(){localStorage.setItem(STORAGE_USER_PACKAGES,JSON.stringify(userPackages));}
+    function saveDishes(){
+        // 自动把库存为0的菜品下架
+        dishes.forEach(d=>{ if(typeof d.inventory === 'number' && d.inventory<=0){ d.status='off'; } });
+        localStorage.setItem(STORAGE_DISHES,JSON.stringify(dishes));
+    }
+    function saveShares(){localStorage.setItem(STORAGE_SHARES,JSON.stringify(shares));}
+    function saveTasks(){localStorage.setItem(STORAGE_TASKS,JSON.stringify(tasks));}
+    function escapeHtml(s){return String(s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));}
+    function formatDateTime(iso){if(!iso)return'';let d=new Date(iso);return`${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;}
+    function formatDate(iso){if(!iso)return'';let d=new Date(iso);return`${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;}
+    function showToast(msg){let t=document.querySelector('.toast-message');if(!t){t=document.createElement('div');t.className='toast-message';document.body.appendChild(t);}t.innerText=msg;t.style.opacity='1';clearTimeout(t._timeout);t._timeout=setTimeout(()=>t.style.opacity='0',1800);}
+    function getTemplateById(id){return templates.find(t=>t.id===id);}
+
+    function loadData(){
+        let sb=localStorage.getItem(STORAGE_BOOKING); if(sb) bookings=JSON.parse(sb); else bookings=[
+            {id:"demo1", name:"张演示", phone:"13900000001", address:"演示路1号", vegetables:["菠菜","番茄"], expectedShipDate:"2026-06-16", logisticsStatus:"已发货", logisticsNumber:"SF1234567890", afterSalesStatus:"无售后", timestamp:new Date().toISOString(), packageName:"8斤周套餐"},
+            {id:"demo2", name:"李示例", phone:"13900000002", address:"示例街2号", vegetables:["生菜","黄瓜"], expectedShipDate:"2026-06-17", logisticsStatus:"待发货", logisticsNumber:"", afterSalesStatus:"无售后", timestamp:new Date().toISOString(), packageName:"5斤周套餐"},
+            {id:"demo3", name:"王测试", phone:"13900000003", address:"测试巷3号", vegetables:["菠菜","生菜"], expectedShipDate:"2026-06-18", logisticsStatus:"待发货", logisticsNumber:"", afterSalesStatus:"无售后", timestamp:new Date().toISOString(), packageName:"8斤周套餐"}
+        ];
+        let st=localStorage.getItem(STORAGE_TEMPLATES); if(st) templates=JSON.parse(st); else templates=[{id:"tmpl1",name:"8斤周套餐",totalTimes:8,maxVeggies:2},{id:"tmpl2",name:"5斤周套餐",totalTimes:5,maxVeggies:3}];
+        let sup=localStorage.getItem(STORAGE_USER_PACKAGES); if(sup) userPackages=JSON.parse(sup); else userPackages=[
+            {id:"up1", phone:"13900000001", name:"张演示", templateId:"tmpl1", usedTimes:2, lastShipDate:"2026-06-09", nextShipDate:"2026-06-16"},
+            {id:"up2", phone:"13900000002", name:"李示例", templateId:"tmpl2", usedTimes:1, lastShipDate:"2026-06-10", nextShipDate:"2026-06-17"},
+            {id:"up3", phone:"13900000003", name:"王测试", templateId:"tmpl1", usedTimes:0, lastShipDate:"", nextShipDate:"2026-06-18"}
+        ];
+        let sd=localStorage.getItem(STORAGE_DISHES); if(sd) dishes=JSON.parse(sd); else dishes=[{name:"菠菜",category:"leafy",weight:"0.5斤",status:"on",inventory:120},{name:"生菜",category:"leafy",weight:"0.5斤",status:"on",inventory:80},{name:"番茄",category:"fruity",weight:"1斤",status:"on",inventory:60},{name:"黄瓜",category:"fruity",weight:"1斤",status:"on",inventory:70}];
+        let ssh=localStorage.getItem(STORAGE_SHARES); if(ssh) shares=JSON.parse(ssh); else shares=[{id:"share1",fromPhone:"13900000001",fromWechat:"user001",toPhone:"13900000002",toWechat:"user002",fromPackageName:"8斤周套餐",count:2,timestamp:new Date().toISOString()},{id:"share2",fromPhone:"13900000003",fromWechat:"user003",toPhone:"13900000004",toWechat:"user004",fromPackageName:"5斤周套餐",count:1,timestamp:new Date().toISOString()}];
+        let stasks=localStorage.getItem(STORAGE_TASKS); if(stasks) tasks=JSON.parse(stasks); else tasks=[{id:'task1',name:'周末上架',deadline:'2026-06-20T23:59:59',effectiveStartDate:'2026-06-16T00:00:00',effectiveEndDate:'2026-06-18T23:59:59',dishes:['菠菜','番茄'],status:'已生效'}];
+    }
+
+    // ---------- 订单管理 ----------
+    function renderBookingRecords(){
+        let kw=(document.getElementById('searchInput')?.value||'').toLowerCase();
+        let filtered=bookings.filter(b=>b.name.toLowerCase().includes(kw)||b.phone.includes(kw));
+        let html=`<table class="data-table"><thead><tr><th>ID</th><th>收货人</th><th>电话</th><th>套餐</th><th>地址</th><th>蔬菜</th><th>发货日</th><th>物流</th><th>时间</th><th>操作</th></tr></thead><tbody>`;
+        filtered.forEach(r=>{
+            let vegWithWeight = r.vegetables.map(v => {
+                let weight = getDishWeight(v);
+                return `${v}(${weight}斤)`;
+            }).join(',');
+            html+=`<tr>
+                <td>${r.id.slice(0,6)}</td><td>${escapeHtml(r.name)}</td><td>${r.phone}</td><td>${escapeHtml(r.packageName||'')}</td><td>${escapeHtml(r.address)}</td><td>${vegWithWeight}</td>
+                <td>${r.expectedShipDate||''}</td><td>${r.logisticsStatus} ${r.logisticsNumber||''}</td>
+                <td>${formatDateTime(r.timestamp)}</td>
+                <td><button class="action-btn edit-btn logistics-btn" data-id="${r.id}">物流</button>
+                    <button class="action-btn edit-btn print-waybill-btn" data-id="${r.id}">面单打印</button></td>
+            </tr>`;
+        });
+        html+=`</tbody></table>`;
+        document.getElementById('tableContainer').innerHTML=html;
+        document.querySelectorAll('.logistics-btn').forEach(b=>b.onclick=()=>openLogisticsModal(b.dataset.id));
+        document.querySelectorAll('.print-waybill-btn').forEach(b=>b.onclick=()=>printWaybill(b.dataset.id));
+    }
+
+    let currentLogisticsId=null;
+    function openLogisticsModal(id){let b=bookings.find(x=>x.id===id);if(b){document.getElementById('logisticsStatus').value=b.logisticsStatus;document.getElementById('logisticsNumber').value=b.logisticsNumber;currentLogisticsId=id;document.getElementById('editLogisticsModal').style.display='flex';}}
+    function saveLogistics(){let b=bookings.find(x=>x.id===currentLogisticsId);if(b){b.logisticsStatus=document.getElementById('logisticsStatus').value;b.logisticsNumber=document.getElementById('logisticsNumber').value;saveBookings();renderBookingRecords();}document.getElementById('editLogisticsModal').style.display='none';}
+
+    function printWaybill(id){let b=bookings.find(x=>x.id===id);if(!b){showToast('订单不存在');return;}let content=`\n面单信息\n========\nID: ${b.id}\n收货人: ${b.name}\n电话: ${b.phone}\n地址: ${b.address}\n蔬菜: ${b.vegetables.join(', ')}\n发货日: ${b.expectedShipDate||'未定'}\n物流: ${b.logisticsNumber||'待处理'}\n========\n`;let printWindow=window.open('','print_waybill','width=600,height=800');printWindow.document.write('<pre>'+escapeHtml(content)+'</pre>');printWindow.document.close();setTimeout(()=>printWindow.print(),500);}
+
+    // ---------- 套餐模板 ----------
+    function renderTemplates(){
+        let html=`<table class="data-table"><thead><tr><th>名称</th><th>总次数</th><th>可选重量(斤)</th><th>操作</th></tr></thead><tbody>`;
+        templates.forEach(t=>{html+=`<tr><td>${escapeHtml(t.name)}</td><td>${t.totalTimes}次</td><td>${t.maxVeggies}斤</td><td><button class="action-btn edit-btn" data-tid="${t.id}">编辑</button><button class="action-btn delete-btn" data-tid="${t.id}">删除</button></td></tr>`;});
+        html+=`</tbody></table>`;
+        document.getElementById('templatesContainer').innerHTML=html;
+        document.querySelectorAll('.edit-btn[data-tid]').forEach(b=>b.onclick=()=>openTemplateModal(b.dataset.tid));
+        document.querySelectorAll('.delete-btn[data-tid]').forEach(b=>b.onclick=()=>{if(confirm('删除？')){templates=templates.filter(t=>t.id!==b.dataset.tid);saveTemplates();renderTemplates();}});
+    }
+    let currentTemplateId=null;
+    function openTemplateModal(id=null){currentTemplateId=id;let t=templates.find(t=>t.id===id);document.getElementById('templateName').value=t?t.name:'';document.getElementById('templateTotalTimes').value=t?t.totalTimes:8;document.getElementById('templateMaxVeggies').value=t?t.maxVeggies:2;document.getElementById('templateModal').style.display='flex';}
+    function saveTemplate(){let n=document.getElementById('templateName').value.trim(),total=parseInt(document.getElementById('templateTotalTimes').value),max=parseInt(document.getElementById('templateMaxVeggies').value);if(!n||isNaN(total)||isNaN(max)){alert('填写完整');return;}if(currentTemplateId){let idx=templates.findIndex(t=>t.id===currentTemplateId);if(idx!==-1)templates[idx]={...templates[idx],name:n,totalTimes:total,maxVeggies:max};}else{templates.push({id:'tmpl'+Date.now(),name:n,totalTimes:total,maxVeggies:max});}saveTemplates();renderTemplates();document.getElementById('templateModal').style.display='none';}
+
+    // ---------- 用户套餐 (含新增功能) ----------
+    function renderUserPackages(){
+        let kw=(document.getElementById('searchUserPackageInput')?.value||'').trim();
+        let filtered=userPackages.filter(up=>up.phone.includes(kw));
+        let html=`<table class="data-table"><thead><tr><th>手机号</th><th>姓名</th><th>套餐</th><th>已用/总</th><th>最近</th><th>下次</th><th>操作</th></tr></thead><tbody>`;
+        filtered.forEach(up=>{
+            let t=getTemplateById(up.templateId); if(!t) return;
+            html+=`<tr>
+                <td>${up.phone}</td><td>${escapeHtml(up.name||'')}</td><td>${escapeHtml(t.name)}</td>
+                <td>${up.usedTimes}/${t.totalTimes}</td><td>${up.lastShipDate||'-'}</td><td>${up.nextShipDate||'-'}</td>
+                <td><button class="action-btn edit-btn" data-upid="${up.id}">编辑</button></td>
+            </tr>`;
+        });
+        html+=`</tbody></table>`;
+        document.getElementById('userPackagesContainer').innerHTML=html;
+        document.querySelectorAll('.edit-btn[data-upid]').forEach(b=>b.onclick=()=>openUserPackageModal(b.dataset.upid));
+    }
+
+    let currentUpId=null;
+    function openUserPackageModal(id){let up=userPackages.find(u=>u.id===id);if(up){currentUpId=id;document.getElementById('upPhone').value=up.phone;document.getElementById('upUserName').value=up.name||'';document.getElementById('upUsedTimes').value=up.usedTimes;document.getElementById('upLastShip').value=up.lastShipDate||'';document.getElementById('upNextShip').value=up.nextShipDate||'';document.getElementById('editUserPackageModal').style.display='flex';}}
+    function saveUserPackage(){let up=userPackages.find(u=>u.id===currentUpId);if(up){up.name=document.getElementById('upUserName').value.trim();up.usedTimes=parseInt(document.getElementById('upUsedTimes').value);up.lastShipDate=document.getElementById('upLastShip').value;up.nextShipDate=document.getElementById('upNextShip').value;saveUserPackages();renderUserPackages();}document.getElementById('editUserPackageModal').style.display='none';}
+
+    function openAddUserPackageModal(){
+        let select = document.getElementById('addUpTemplate');
+        select.innerHTML = templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)} (总${t.totalTimes}次)</option>`).join('');
+        document.getElementById('addUpPhone').value = '';
+        document.getElementById('addUpName').value = '';
+        document.getElementById('addUpUsedTimes').value = 0;
+        document.getElementById('addUpLastShip').value = '';
+        document.getElementById('addUpNextShip').value = '';
+        document.getElementById('addUserPackageModal').style.display = 'flex';
+    }
+
+    function saveAddUserPackage(){
+        let phone = document.getElementById('addUpPhone').value.trim();
+        let name = document.getElementById('addUpName').value.trim();
+        let templateId = document.getElementById('addUpTemplate').value;
+        let usedTimes = parseInt(document.getElementById('addUpUsedTimes').value) || 0;
+        let last = document.getElementById('addUpLastShip').value;
+        let next = document.getElementById('addUpNextShip').value;
+
+        if (!/^\d{11}$/.test(phone)) { showToast('手机号格式错误'); return; }
+        if (!name) { showToast('请输入姓名'); return; }
+        if (!templateId) { showToast('请选择套餐'); return; }
+
+        let newUp = {
+            id: 'up' + Date.now(),
+            phone,
+            name,
+            templateId,
+            usedTimes,
+            lastShipDate: last,
+            nextShipDate: next
+        };
+        userPackages.push(newUp);
+        saveUserPackages();
+        renderUserPackages();
+        document.getElementById('addUserPackageModal').style.display = 'none';
+        showToast('用户套餐已添加');
+    }
+
+    // ---------- 菜品管理 ----------
+    function renderDishManagement(){
+        let nameFilter = (document.getElementById('dishNameFilter')?.value || '').toLowerCase();
+        let categoryFilter = document.getElementById('dishCategoryFilter')?.value || '';
+        let statusFilter = document.getElementById('dishStatusFilter')?.value || '';
+        
+        let filtered = dishes.filter(d => {
+            if (nameFilter && !d.name.toLowerCase().includes(nameFilter)) return false;
+            if (categoryFilter && d.category !== categoryFilter) return false;
+            if (statusFilter && d.status !== statusFilter) return false;
+            return true;
+        });
+
+        let html = `<table class="data-table"><thead><tr><th>图片</th><th>名称</th><th>类型</th><th>重量</th><th>库存</th><th>状态</th><th>操作</th></tr></thead><tbody>`;
+        filtered.forEach(d => {
+            let categoryName = d.category === 'leafy' ? '叶菜' : '茄果';
+            let btnLabel = d.status==='on' ? '下架' : '上架';
+            let imgHtml = d.image ? `<img src="${d.image}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;" />` : '<span style="color:#999;">无图片</span>';
+            html += `<tr><td>${imgHtml}</td><td>${d.name}</td><td>${categoryName}</td><td>${d.weight}</td><td>${d.inventory ?? 0}</td><td>${d.status==='on'?'上架':'下架'}</td><td><button class="action-btn toggle-dish-btn" data-name="${d.name}">${btnLabel}</button><button class="action-btn edit-btn" data-name="${d.name}">编辑</button></td></tr>`;
+        });
+        html += `</tbody></table>`;
+        document.getElementById('dishListContainer').innerHTML = html;
+    }
+    
+    function buildDishTable(list){
+        let html=`<table class="data-table"><thead><tr><th>图片</th><th>名称</th><th>重量</th><th>库存</th><th>状态</th><th>操作</th></tr></thead><tbody>`;
+        list.forEach(d=>{
+            let btnLabel = d.status==='on' ? '下架' : '上架'; 
+            let imgHtml = d.image ? `<img src="${d.image}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;" />` : '<span style="color:#999;">无图片</span>';
+            html+=`<tr><td>${imgHtml}</td><td>${d.name}</td><td>${d.weight}</td><td>${d.inventory ?? 0}</td><td>${d.status==='on'?'上架':'下架'}</td><td><button class="action-btn toggle-dish-btn" data-name="${d.name}">${btnLabel}</button><button class="action-btn edit-btn" data-name="${d.name}">编辑</button></td></tr>`;
+        });
+        html+=`</tbody></table>`;
+        return html;
+    }
+
+    // ---------- 分享管理 ----------
+    function getTaskStatus(task){
+        let today = new Date().toISOString().slice(0,10);
+        if(!task.deadline) return task.status || '未生效';
+        if(today > task.deadline) return '已截止，不可提交';
+        if(task.effectiveStartDate && task.effectiveEndDate && today >= task.effectiveStartDate && today <= task.effectiveEndDate) return '已生效';
+        return '未生效';
+    }
+    function renderTaskManagement(){
+        let html=`<table class="data-table"><thead><tr><th>任务名称</th><th>截止时间</th><th>生效区间</th><th>上架菜品</th><th>状态</th><th>操作</th></tr></thead><tbody>`;
+        tasks.forEach(task=>{
+            let dishLabels = task.dishes.join('、');
+            let status = getTaskStatus(task);
+            html += `<tr><td>${escapeHtml(task.name)}</td><td>${task.deadline||'-'}</td><td>${task.effectiveStartDate||'-'} 至 ${task.effectiveEndDate||'-'}</td><td>${escapeHtml(dishLabels)}</td><td>${escapeHtml(status)}</td><td><button class="action-btn edit-btn" data-taskid="${task.id}">编辑</button><button class="action-btn delete-btn" data-taskid="${task.id}">删除</button></td></tr>`;
+        });
+        html += `</tbody></table>`;
+        document.getElementById('taskMgmtContainer').innerHTML = html;
+        document.querySelectorAll('.edit-btn[data-taskid]').forEach(b=>b.onclick=()=>openTaskModal(b.dataset.taskid));
+        document.querySelectorAll('.delete-btn[data-taskid]').forEach(b=>b.onclick=()=>{if(confirm('删除任务？')){tasks=tasks.filter(t=>t.id!==b.dataset.taskid);saveTasks();renderTaskManagement();}});
+    }
+    let currentTaskSelectedDishes = [];
+    function buildTaskDishOptions(selectedDishes){
+        return dishes.map(d => {
+            let icon = d.category === 'leafy' ? '🥬' : '🍅';
+            let selectedClass = selectedDishes.includes(d.name) ? ' selected' : '';
+            let disabledClass = (typeof d.inventory === 'number' && d.inventory <= 0) || d.status==='off' ? ' disabled' : '';
+            return `<button type="button" class="task-dish-btn${selectedClass}${disabledClass}" data-name="${escapeHtml(d.name)}"><span class="dish-icon">${icon}</span>${escapeHtml(d.name)}</button>`;
+        }).join('');
+    }
+    function openTaskModal(id=null){
+        let task = tasks.find(t=>t.id===id);
+        document.getElementById('taskName').value = task ? task.name : '';
+        document.getElementById('taskDeadline').value = task ? task.deadline : '';
+        document.getElementById('taskEffectiveStartDate').value = task ? task.effectiveStartDate : '';
+        document.getElementById('taskEffectiveEndDate').value = task ? task.effectiveEndDate : '';
+        currentTaskSelectedDishes = task ? [...task.dishes] : [];
+        document.getElementById('taskDishes').innerHTML = buildTaskDishOptions(currentTaskSelectedDishes);
+        document.getElementById('taskModal').style.display='flex';
+        document.getElementById('taskForm').dataset.editId = id || '';
+    }
+    function saveTask(){
+        let id = document.getElementById('taskForm').dataset.editId;
+        let name = document.getElementById('taskName').value.trim();
+        let deadline = document.getElementById('taskDeadline').value;
+        let effectiveStart = document.getElementById('taskEffectiveStartDate').value;
+        let effectiveEnd = document.getElementById('taskEffectiveEndDate').value;
+        let dishOptions = currentTaskSelectedDishes.filter(Boolean);
+        if(!name || !deadline || !effectiveStart || !effectiveEnd || dishOptions.length===0){showToast('请填写完整任务信息');return;}
+        if(effectiveEnd < effectiveStart){showToast('生效区间不正确');return;}
+        if(deadline < effectiveEnd){showToast('截止时间应晚于生效结束');return;}
+        let status = getTaskStatus({ deadline, effectiveStartDate: effectiveStart, effectiveEndDate: effectiveEnd });
+        if(id){
+            let idx = tasks.findIndex(t=>t.id===id);
+            if(idx !== -1) tasks[idx] = { ...tasks[idx], name, deadline, effectiveStartDate: effectiveStart, effectiveEndDate: effectiveEnd, dishes: dishOptions, status };
+        } else {
+            tasks.push({ id: 'task' + Date.now(), name, deadline, effectiveStartDate: effectiveStart, effectiveEndDate: effectiveEnd, dishes: dishOptions, status });
+        }
+        saveTasks();
+        renderTaskManagement();
+        document.getElementById('taskModal').style.display='none';
+    }
+
+    // ---------- 分享管理 ----------
+    function renderShareManagement(){
+        let html=`<table class="data-table"><thead><tr><th>分享人</th><th>分享人微信</th><th>接收人</th><th>接收人微信</th><th>套餐</th><th>次数</th><th>时间</th><th>操作</th></tr></thead><tbody>`;
+        shares.forEach(s=>{html+=`<tr><td>${escapeHtml(s.fromPhone)}</td><td>${escapeHtml(s.fromWechat||'-')}</td><td>${escapeHtml(s.toPhone)}</td><td>${escapeHtml(s.toWechat||'-')}</td><td>${escapeHtml(s.fromPackageName)}</td><td>${s.count}</td><td>${formatDateTime(s.timestamp)}</td><td><button class="action-btn edit-btn detail-btn" data-sid="${s.id}">详情</button></td></tr>`;});
+        html+=`</tbody></table>`;
+        document.getElementById('shareRecordsContainer').innerHTML=html;
+        document.querySelectorAll('.detail-btn').forEach(b=>b.onclick=()=>showShareDetail(b.dataset.sid));
+    }
+    function showShareDetail(sid){let s=shares.find(x=>x.id===sid);if(!s)return;document.getElementById('shareDetailContent').innerHTML=`<p>分享人: ${escapeHtml(s.fromPhone)} (${escapeHtml(s.fromWechat||'无微信')})<br>接收人: ${escapeHtml(s.toPhone)} (${escapeHtml(s.toWechat||'无微信')})<br>套餐: ${escapeHtml(s.fromPackageName)}, ${s.count}次<br>时间: ${formatDateTime(s.timestamp)}</p>`;document.getElementById('shareDetailModal').style.display='flex';}
+
+    // ---------- 发货统计 (含演示数据 + 重量汇总) ----------
+    function getDemoBookings() {
+        let today = new Date().toISOString().split('T')[0];
+        return [
+            {
+                id: 'demo1', name: '张演示', phone: '13900000001', address: '演示路1号',
+                vegetables: ['菠菜', '番茄'], expectedShipDate: '2026-06-16',
+                logisticsStatus: '已发货', logisticsNumber: 'SF1234567890',
+                afterSalesStatus: '无售后', timestamp: new Date().toISOString(), cancelled: false,
+                packageName: '8斤周套餐'
+            },
+            {
+                id: 'demo2', name: '李示例', phone: '13900000002', address: '示例街2号',
+                vegetables: ['生菜', '黄瓜'], expectedShipDate: '2026-06-17',
+                logisticsStatus: '待发货', logisticsNumber: '',
+                afterSalesStatus: '无售后', timestamp: new Date().toISOString(), cancelled: false,
+                packageName: '5斤周套餐'
+            }
+        ];
+    }
+
+    // 获取菜品单位重量（斤）
+    function getDishWeight(dishName) {
+        let dish = dishes.find(d => d.name === dishName);
+        if (dish) {
+            let match = dish.weight.match(/(\d+\.?\d*)/);
+            if (match) return parseFloat(match[1]);
+        }
+        return 0;
+    }
+
+    function renderStats(){
+        const startDate = document.getElementById('statsStartDate').value;
+        const endDate = document.getElementById('statsEndDate').value;
+        const statusFilter = document.getElementById('statsStatusFilter').value;
+
+        let source = bookings.length === 0 ? getDemoBookings() : bookings;
+        let filtered = [...source];
+
+        if (startDate) filtered = filtered.filter(b => b.expectedShipDate >= startDate);
+        if (endDate) filtered = filtered.filter(b => b.expectedShipDate <= endDate);
+        if (statusFilter !== 'all') filtered = filtered.filter(b => b.logisticsStatus === statusFilter);
+
+        let total = filtered.length;
+        let vegetablesSet = new Set();
+        let vegCountMap = {}; // 每种蔬菜出现的订单数（份数）
+
+        filtered.forEach(b => {
+            b.vegetables.forEach(v => {
+                vegetablesSet.add(v);
+                vegCountMap[v] = (vegCountMap[v] || 0) + 1;
+            });
+        });
+
+        // 计算重量
+        let totalWeight = 0;
+        let weightDetails = [];
+        for (let veg in vegCountMap) {
+            let unitWeight = getDishWeight(veg);
+            let vegWeight = vegCountMap[veg] * unitWeight;
+            totalWeight += vegWeight;
+            weightDetails.push(`${veg} ${vegWeight}斤 (${vegCountMap[veg]}份×${unitWeight}斤)`);
+        }
+
+        // 汇总展示
+        let summaryHtml = `<strong>📦 共 ${total} 单</strong><br>`;
+        summaryHtml += `🥬 菜品：${[...vegetablesSet].join('、') || '无'}<br>`;
+        if (weightDetails.length > 0) {
+            summaryHtml += `⚖️ 单品重量：${weightDetails.join('；')}<br>`;
+            summaryHtml += `<strong>🧺 总重量：${totalWeight.toFixed(1)}斤</strong>`;
+        } else {
+            summaryHtml += `🧺 无重量数据`;
+        }
+        if (bookings.length === 0) summaryHtml += ' <span class="demo-label">演示数据</span>';
+
+        document.getElementById('statsSummary').innerHTML = summaryHtml;
+
+        let html = `<table class="data-table"><thead><tr><th>ID</th><th>收货人</th><th>电话</th><th>蔬菜</th><th>发货日</th><th>物流状态</th><th>运单号</th></tr></thead><tbody>`;
+        filtered.forEach(r => {
+            html += `<tr>
+                <td>${r.id.slice(0,6)}</td><td>${escapeHtml(r.name)}</td><td>${r.phone}</td><td>${r.vegetables.join(',')}</td>
+                <td>${r.expectedShipDate||''}</td><td>${r.logisticsStatus}</td><td>${r.logisticsNumber||''}</td>
+            </tr>`;
+        });
+        html += `</tbody></table>`;
+        document.getElementById('statsDetailContainer').innerHTML = html;
+    }
+
+    function copyStatsSummary(){
+        const summary = document.getElementById('statsSummary').innerText;
+        navigator.clipboard.writeText(summary).then(() => showToast('已复制汇总')).catch(() => showToast('复制失败'));
+    }
+
+    // ---------- 售后处理 ----------
+    let currentAsId=null;
+    function openProcessAsModal(id){let b=bookings.find(x=>x.id===id);if(b){document.getElementById('processOrderId').value=b.id;document.getElementById('currentAsStatus').value=b.afterSalesStatus;currentAsId=id;document.getElementById('processAsModal').style.display='flex';}}
+    function processAfterSales(){let b=bookings.find(x=>x.id===currentAsId);if(!b)return;let action=document.getElementById('asAction').value;let remark=document.getElementById('asRemark').value;if(action==='approve')b.afterSalesStatus='已通过';else if(action==='reject')b.afterSalesStatus='已拒绝';else if(action==='complete')b.afterSalesStatus='已完成';b.afterSalesRemark=remark;saveBookings();renderBookingRecords();document.getElementById('processAsModal').style.display='none';showToast('已处理');}
+
+    // ---------- 导航 ----------
+    function switchSubTab(sub){
+        document.querySelectorAll('.sub-pane').forEach(p=>p.classList.remove('active'));
+        document.getElementById(sub+'Panel').classList.add('active');
+        document.querySelectorAll('.sub-tab-btn').forEach(b=>b.classList.remove('active'));
+        document.querySelector(`[data-sub="${sub}"]`).classList.add('active');
+        if(sub==='bookingRecords') renderBookingRecords();
+        else if(sub==='packageTemplates') renderTemplates();
+        else if(sub==='userPackages') renderUserPackages();
+        else if(sub==='dishMgmt') renderDishManagement();
+        else if(sub==='taskMgmt') renderTaskManagement();
+        else if(sub==='shareMgmt') renderShareManagement();
+        else if(sub==='shipmentStats') renderStats();
+    }
+
+    // ---------- 事件绑定 ----------
+    document.querySelectorAll('#adminSubTabs .sub-tab-btn').forEach(b=>b.onclick=()=>switchSubTab(b.dataset.sub));
+    document.getElementById('addTemplateBtn').onclick=()=>openTemplateModal();
+    document.getElementById('templateForm').onsubmit=e=>{e.preventDefault();saveTemplate();};
+    document.getElementById('cancelTemplateBtn').onclick=()=>document.getElementById('templateModal').style.display='none';
+    document.getElementById('logisticsForm').onsubmit=e=>{e.preventDefault();saveLogistics();};
+    document.getElementById('cancelLogisticsBtn').onclick=()=>document.getElementById('editLogisticsModal').style.display='none';
+    document.getElementById('userPackageForm').onsubmit=e=>{e.preventDefault();saveUserPackage();};
+    document.getElementById('cancelUserPackageBtn').onclick=()=>document.getElementById('editUserPackageModal').style.display='none';
+    document.getElementById('processAsForm').onsubmit=e=>{e.preventDefault();processAfterSales();};
+    document.getElementById('cancelProcessBtn').onclick=()=>document.getElementById('processAsModal').style.display='none';
+
+    document.getElementById('addUserPackageBtn').onclick = openAddUserPackageModal;
+    document.getElementById('cancelAddUserPackageBtn').onclick = () => document.getElementById('addUserPackageModal').style.display='none';
+    document.getElementById('addUserPackageForm').onsubmit = e => { e.preventDefault(); saveAddUserPackage(); };
+
+    document.getElementById('openAddDishModalBtn').onclick=()=>{
+        document.getElementById('addDishImage').value = '';
+        document.getElementById('addDishImagePreview').style.display = 'none';
+        document.getElementById('addDishModal').style.display='flex';
+    };
+    document.getElementById('bulkOffBtn').onclick = showConfirmAllOff;
+    document.getElementById('cancelAddDishBtn').onclick=()=>document.getElementById('addDishModal').style.display='none';
+    
+    document.getElementById('addDishImage').onchange = function(e) {
+        let file = e.target.files[0];
+        if(file) {
+            let reader = new FileReader();
+            reader.onload = function(event) {
+                document.getElementById('addDishPreviewImg').src = event.target.result;
+                document.getElementById('addDishImagePreview').style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+    
+    document.getElementById('saveAddDishBtn').onclick=()=>{
+        let name=document.getElementById('addDishName').value.trim();
+        let cat=document.getElementById('addDishCategory').value;
+        let weight=document.getElementById('addDishWeight').value.trim();
+        let inventory=parseInt(document.getElementById('addDishInventory').value,10);
+        if(!name) return;
+        if(!weight) weight='0.5';
+        if(!weight.includes('斤')) weight+='斤';
+        if(isNaN(inventory) || inventory < 0) inventory = 0;
+        let status = inventory>0 ? 'on' : 'off';
+        let image = document.getElementById('addDishPreviewImg').src || '';
+        if(image && !image.startsWith('data:')) image = '';
+        dishes.unshift({name,category:cat,weight,status,inventory,image});
+        saveDishes(); renderDishManagement(); document.getElementById('addDishModal').style.display='none'; showToast('菜品已添加');
+    };
+
+    let currentEditDishName = null;
+    let currentEditDishOriginalImage = '';
+    function openEditDishModal(dishName){
+        currentEditDishName = dishName;
+        let d = dishes.find(d => d.name === dishName);
+        if(d){
+            currentEditDishOriginalImage = d.image || '';
+            document.getElementById('editDishName').value = d.name;
+            document.getElementById('editDishCategory').value = d.category;
+            let weightValue = d.weight.replace('斤', '');
+            document.getElementById('editDishWeight').value = weightValue;
+            document.getElementById('editDishInventory').value = d.inventory ?? 0;
+            
+            if(d.image){
+                document.getElementById('editDishPreviewImg').src = d.image;
+                document.getElementById('editDishPreviewImg').style.display = 'block';
+                document.getElementById('editDishNoImage').style.display = 'none';
+                document.getElementById('removeDishImageBtn').style.display = 'block';
+            } else {
+                document.getElementById('editDishPreviewImg').style.display = 'none';
+                document.getElementById('editDishNoImage').style.display = 'block';
+                document.getElementById('removeDishImageBtn').style.display = 'none';
+            }
+            document.getElementById('editDishImage').value = '';
+            document.getElementById('editDishModal').style.display = 'flex';
+        }
+    }
+    
+    document.getElementById('editDishImage').onchange = function(e) {
+        let file = e.target.files[0];
+        if(file) {
+            let reader = new FileReader();
+            reader.onload = function(event) {
+                document.getElementById('editDishPreviewImg').src = event.target.result;
+                document.getElementById('editDishPreviewImg').style.display = 'block';
+                document.getElementById('editDishNoImage').style.display = 'none';
+                document.getElementById('removeDishImageBtn').style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+    
+    document.getElementById('removeDishImageBtn').onclick = function() {
+        document.getElementById('editDishPreviewImg').src = '';
+        document.getElementById('editDishPreviewImg').style.display = 'none';
+        document.getElementById('editDishNoImage').style.display = 'block';
+        document.getElementById('removeDishImageBtn').style.display = 'none';
+        document.getElementById('editDishImage').value = '';
+    };
+    
+    document.getElementById('cancelEditDishBtn').onclick = () => document.getElementById('editDishModal').style.display = 'none';
+    document.getElementById('saveEditDishBtn').onclick = () => {
+        let d = dishes.find(d => d.name === currentEditDishName);
+        if(d){
+            let name = document.getElementById('editDishName').value.trim();
+            let cat = document.getElementById('editDishCategory').value;
+            let weight = document.getElementById('editDishWeight').value.trim();
+            let inventory = parseInt(document.getElementById('editDishInventory').value, 10);
+            if(!name) { showToast('请输入菜品名称'); return; }
+            if(!weight) weight = '0.5';
+            if(!weight.includes('斤')) weight += '斤';
+            if(isNaN(inventory) || inventory < 0) inventory = 0;
+            d.name = name;
+            d.category = cat;
+            d.weight = weight;
+            d.inventory = inventory;
+            if(document.getElementById('editDishPreviewImg').style.display === 'none'){
+                d.image = '';
+            } else {
+                let imgSrc = document.getElementById('editDishPreviewImg').src;
+                if(imgSrc.startsWith('data:')){
+                    d.image = imgSrc;
+                } else {
+                    d.image = currentEditDishOriginalImage;
+                }
+            }
+            if(inventory <= 0) {
+                d.status = 'off';
+            }
+            saveDishes();
+            renderDishManagement();
+            document.getElementById('editDishModal').style.display = 'none';
+            showToast('菜品已修改');
+        }
+    };
+    // 一键下架确认按钮在新增菜品弹窗右侧
+    function showConfirmAllOff(){
+        document.getElementById('confirmAllOffModal').style.display='flex';
+    }
+    function confirmAllOff(){
+        dishes.forEach(d=>{d.status='off';});
+        saveDishes(); renderDishManagement(); document.getElementById('confirmAllOffModal').style.display='none';
+        showToast('所有菜品已下架');
+    }
+    document.getElementById('addTaskBtn').onclick=()=>openTaskModal();
+    document.getElementById('cancelTaskBtn').onclick=()=>document.getElementById('taskModal').style.display='none';
+    document.getElementById('taskForm').onsubmit=e=>{e.preventDefault();saveTask();};
+    document.getElementById('closeShareDetailBtn').onclick=()=>document.getElementById('shareDetailModal').style.display='none';
+    document.getElementById('searchInput').oninput=renderBookingRecords;
+    document.getElementById('refreshRecords').onclick=renderBookingRecords;
+    document.getElementById('searchUserPackageInput').oninput=renderUserPackages;
+    document.getElementById('refreshUserPackages').onclick=renderUserPackages;
+    document.getElementById('dishNameFilter').oninput = renderDishManagement;
+    document.getElementById('dishCategoryFilter').onchange = renderDishManagement;
+    document.getElementById('dishStatusFilter').onchange = renderDishManagement;
+    document.getElementById('cancelConfirmAllOffBtn').onclick = ()=>document.getElementById('confirmAllOffModal').style.display='none';
+    document.getElementById('confirmAllOffBtn').onclick = confirmAllOff;
+    document.getElementById('applyStatsDateBtn').onclick = renderStats;
+    document.getElementById('copyStatsBtn').onclick = copyStatsSummary;
+
+    document.addEventListener('click',function(e){
+        const taskButton = e.target.closest('.task-dish-btn');
+        if(taskButton){
+            if(taskButton.classList.contains('disabled')) return; // 禁用项不可选中
+            let dishName = taskButton.dataset.name;
+            if(dishName){
+                let idx = currentTaskSelectedDishes.indexOf(dishName);
+                if(idx === -1){
+                    currentTaskSelectedDishes.push(dishName);
+                    taskButton.classList.add('selected');
+                } else {
+                    currentTaskSelectedDishes.splice(idx,1);
+                    taskButton.classList.remove('selected');
+                }
+            }
+            return;
+        }
+        if(e.target.classList.contains('toggle-dish-btn')){
+            let d=dishes.find(d=>d.name===e.target.dataset.name);
+            if(d){
+                // 如果库存为0，禁止上架
+                if(d.inventory <= 0 && d.status === 'off') { showToast('库存为0，无法上架'); return; }
+                d.status=d.status==='on'?'off':'on';saveDishes();renderDishManagement();
+            }
+        }
+        if(e.target.classList.contains('edit-btn')&&e.target.dataset.name){
+            openEditDishModal(e.target.dataset.name);
+        }
+        if(e.target.classList.contains('delete-btn')&&e.target.dataset.name){
+            if(confirm('删除菜品？')){dishes=dishes.filter(d=>d.name!==e.target.dataset.name);saveDishes();renderDishManagement();}
+        }
+    });
+
+    // 初始化
+    loadData();
+    switchSubTab('bookingRecords');
+</script>
+</body>
+</html>

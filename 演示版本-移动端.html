@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>蔬菜预订 · 用户端</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+        }
+        body {
+            background: linear-gradient(145deg, #eef5e6 0%, #d9e6cf 100%);
+            min-height: 100vh;
+            padding: 1rem 0.8rem 90px 0.8rem;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .main-tabs {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(10px);
+            padding: 10px 12px;
+            display: flex;
+            justify-content: space-around;
+            gap: 6px;
+            box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
+            z-index: 100;
+            border-top: 1px solid #e2f0df;
+        }
+        .main-tab-btn {
+            background: #f0f4ea;
+            border: none;
+            padding: 0.6rem 0.8rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border-radius: 40px;
+            cursor: pointer;
+            transition: 0.2s;
+            color: #3b5a2f;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            white-space: nowrap;
+            flex: 1;
+            text-align: center;
+        }
+        .main-tab-btn.active {
+            background: #6fbf4c;
+            color: white;
+            box-shadow: 0 6px 16px rgba(111,191,76,0.3);
+        }
+        .main-pane {
+            display: none;
+            animation: fadeIn 0.25s ease;
+        }
+        .main-pane.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .card {
+            background: rgba(255,255,255,0.97);
+            border-radius: 24px;
+            box-shadow: 0 16px 32px -12px rgba(0,0,0,0.1);
+            padding: 1.4rem;
+            margin-bottom: 10px;
+        }
+        h1 {
+            font-size: 1.5rem;
+            color: #2c3e2f;
+            margin-bottom: 0.4rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .subtitle {
+            color: #5a6e5a;
+            margin-bottom: 1rem;
+            border-left: 4px solid #6fbf4c;
+            padding-left: 10px;
+            font-size: 0.9rem;
+        }
+        .package-card {
+            background: linear-gradient(135deg, #f9fef7, #f0f7ea);
+            border-radius: 20px;
+            padding: 1rem;
+            margin-bottom: 1.2rem;
+            border: 1px solid #cde0c0;
+        }
+        .package-stats {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .package-stats .stat {
+            background: white;
+            border-radius: 20px;
+            padding: 8px 16px;
+            text-align: center;
+            flex: 1;
+            min-width: 80px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+        .package-stats .stat .num {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #6fbf4c;
+        }
+        .veg-section-title {
+            font-weight: 600;
+            margin: 12px 0 6px;
+            font-size: 0.95rem;
+            color: #2d3e2d;
+        }
+        .veg-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 6px 0;
+        }
+        .veg-card {
+            background: #fefef7;
+            border-radius: 20px;
+            padding: 10px 8px;
+            width: 100px;
+            text-align: center;
+            cursor: pointer;
+            border: 2px solid #e2efde;
+            position: relative;
+            transition: 0.2s;
+            user-select: none;
+            flex-shrink: 0;
+        }
+        .veg-card.selected {
+            border-color: #6fbf4c;
+            background: #eef6ea;
+            box-shadow: 0 3px 12px rgba(111,191,76,0.2);
+        }
+        .veg-card.disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+            background: #f5f5f5;
+            pointer-events: none;
+        }
+        .veg-card.disabled::after {
+            content: "已下架";
+            position: absolute;
+            top: 3px;
+            right: 3px;
+            background: #e74c3c;
+            color: white;
+            font-size: 0.55rem;
+            padding: 2px 6px;
+            border-radius: 20px;
+        }
+        .veg-emoji { font-size: 1.8rem; }
+        .veg-weight { font-size: 0.7rem; color: #e67e22; margin-top: 2px; font-weight: 500; }
+        .qty-display { font-size: 0.8rem; font-weight: 500; }
+        .veg-counter { margin: 8px 0; font-size: 0.85rem; color: #5a6e5a; font-weight: 500; }
+        .form-group { margin-bottom: 0.9rem; }
+        .form-group label { display: block; font-weight: 500; margin-bottom: 4px; color: #2d3e2d; font-size: 0.85rem; }
+        input, textarea, select {
+            width: 100%;
+            padding: 9px 14px;
+            border: 1px solid #cde0c0;
+            border-radius: 22px;
+            font-size: 0.9rem;
+            background: white;
+            transition: 0.2s;
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        input:focus, textarea:focus, select:focus {
+            border-color: #6fbf4c;
+            box-shadow: 0 0 0 3px rgba(111,191,76,0.1);
+        }
+        .btn-primary {
+            background: #6fbf4c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 40px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            text-align: center;
+        }
+        .btn-block { width: 100%; }
+        .btn-sm {
+            font-size: 0.75rem;
+            padding: 5px 12px;
+            border-radius: 30px;
+            cursor: pointer;
+            border: none;
+            font-weight: 500;
+            transition: 0.2s;
+            white-space: nowrap;
+        }
+        .new-address-panel {
+            background: #fff;
+            border: 1px solid #cde0c0;
+            border-radius: 18px;
+            padding: 12px 14px;
+            margin-top: 10px;
+        }
+        .new-address-panel .form-group { margin-bottom: 0.8rem; }
+        .btn-outline { background: #fff; border: 1px solid #6fbf4c; color: #3b5a2f; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn-warning { background: #f39c12; color: white; }
+        .address-box {
+            background: #f4faf2;
+            border-radius: 16px;
+            padding: 10px 12px;
+            margin: 8px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .address-box .addr-text { flex: 1; font-size: 0.9rem; min-width: 0; }
+        .address-box .addr-text strong { display: block; }
+        .address-box .addr-text small { color: #666; font-size: 0.75rem; }
+        .last-addr-clickable {
+            background: #fff8e1;
+            border: 1px dashed #e67e22;
+            border-radius: 12px;
+            padding: 8px 10px;
+            margin: 6px 0;
+            cursor: pointer;
+            font-size: 0.8rem;
+            color: #e67e22;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .sub-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 14px;
+            border-bottom: 1px solid #d0e0c0;
+            padding-bottom: 6px;
+            flex-wrap: wrap;
+        }
+        .sub-tab-btn {
+            background: none;
+            border: none;
+            padding: 5px 14px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border-radius: 30px;
+            white-space: nowrap;
+            color: #5a6e5a;
+        }
+        .sub-tab-btn.active { background: #6fbf4c20; color: #3b7c2a; font-weight: 600; }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            backdrop-filter: blur(2px);
+        }
+        .modal-content {
+            background: white;
+            max-width: 500px;
+            width: 92%;
+            border-radius: 24px;
+            padding: 20px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+        }
+        .modal-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+        .toast-message {
+            position: fixed;
+            bottom: 90px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #2c3e2f;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 40px;
+            font-size: 0.85rem;
+            z-index: 2000;
+            opacity: 0.95;
+            pointer-events: none;
+        }
+        .order-detail-item {
+            background: #f9fef7;
+            border-radius: 16px;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #e2f0df;
+            font-size: 0.85rem;
+        }
+        .action-btn { padding: 4px 10px; border-radius: 30px; font-size: 0.7rem; border: none; cursor: pointer; margin: 2px; font-weight: 500; }
+        .action-btn.cancel-btn { background: #e67e22; color: white; }
+        .package-list-item {
+            background: white;
+            border-radius: 16px;
+            padding: 10px;
+            margin-bottom: 8px;
+            border: 1px solid #e2f0df;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .address-item {
+            background: white;
+            border-radius: 16px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #e2f0df;
+            flex-wrap: nowrap;
+            gap: 6px;
+        }
+        .address-item .addr-info { flex: 1; min-width: 0; overflow: hidden; }
+        .address-item .addr-info strong { font-size: 0.9rem; }
+        .address-item .addr-info small { display: block; color: #666; font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .address-item .addr-actions { display: flex; gap: 4px; flex-shrink: 0; }
+        .default-badge { background: #6fbf4c; color: white; font-size: 0.6rem; padding: 2px 8px; border-radius: 20px; margin-left: 4px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="main-tabs">
+        <button class="main-tab-btn active" data-main="booking">🥬 预订</button>
+        <button class="main-tab-btn" data-main="profile">👤 我的</button>
+    </div>
+
+    <div id="bookingPanel" class="main-pane active">
+        <div class="card">
+            <div class="package-card">
+                <div class="phone-row"><span class="phone-tag">📞 <span id="currentPhoneDisplay">13812345678</span></span></div>
+                <div id="packageInfoArea"></div>
+            </div>
+            <h1>🥗 选菜下单</h1>
+            <div class="subtitle">可选择 <span id="maxWeightDisplay">8</span> 斤菜品</div>
+            <div id="deadlineDisplay" style="background:#fff8e1;border-radius:12px;padding:10px 14px;margin-bottom:12px;color:#e67e22;font-weight:500;">⏰ 今日下单截止：<span id="deadlineTime">23:00</span></div>
+            <div class="veg-grid" id="leafyGrid"></div>
+            <div class="veg-grid" id="fruitGrid"></div>
+            <div class="veg-counter" style="display:flex;justify-content:space-between;align-items:center;font-size:1.2rem;font-weight:600;">
+                <div>已选择 <span id="vegWeight">0</span> 斤</div>
+                <div>可剩余选择 <span id="maxWeightCounter">8</span> 斤</div>
+            </div>
+            <div id="vegErrorMsg" class="error-msg"></div>
+            <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
+                <span style="font-weight:600;">📍 收货地址</span>
+                <button id="openAddrListBtn" class="btn-sm btn-outline">地址簿</button>
+                <button id="newAddrBtn" class="btn-sm btn-primary" style="width:auto;">新增地址</button>
+                <div style="flex:1"></div>
+            </div>
+            <div class="address-box" id="currentAddrBox" style="margin-top:8px;">
+                <div class="addr-text"><strong id="currentAddrName"></strong><small id="currentAddrDetail"></small></div>
+            </div>
+            <div class="last-addr-clickable" id="lastAddrClickable" style="display:none;"><span>📌 上次地址：</span><span id="lastAddrTextShort"></span></div>
+            <input type="hidden" id="selectedAddrData" value="">
+            <button id="submitBookingBtn" class="btn-primary btn-block">✅ 提交预订</button>
+            <div id="formMessage" style="margin-top:8px;"></div>
+        </div>
+    </div>
+
+    <div id="profilePanel" class="main-pane">
+        <div class="card">
+            <h1>👤 我的</h1>
+            <div class="sub-tabs" id="profileSubTabs">
+                <button class="sub-tab-btn active" data-profile-sub="myOrders">📋 订单</button>
+                <button class="sub-tab-btn" data-profile-sub="addressMgmt">🏠 地址</button>
+                <button class="sub-tab-btn" data-profile-sub="myPackage">🎁 套餐</button>
+                <button class="sub-tab-btn" data-profile-sub="profileInfo">👩‍💻 信息</button>
+            </div>
+            <div id="myOrdersPanel" class="profile-sub-pane active"></div>
+            <div id="addressMgmtPanel" class="profile-sub-pane" style="display:none;"></div>
+            <div id="myPackagePanel" class="profile-sub-pane" style="display:none;"></div>
+            <div id="profileInfoPanel" class="profile-sub-pane" style="display:none;"></div>
+        </div>
+    </div>
+</div>
+
+<div id="editAddressModal" class="modal">
+    <div class="modal-content"><h3>修改收货地址</h3><div class="form-group"><label>收货人</label><input type="text" id="editAddrName"></div><div class="form-group"><label>电话</label><input type="tel" id="editAddrPhone"></div><div class="form-group"><label>地址</label><textarea rows="2" id="editAddrAddress"></textarea></div><div class="modal-buttons"><button id="cancelEditAddrBtn" class="btn-sm btn-outline">取消</button><button id="saveEditAddrBtn" class="btn-sm btn-primary">保存</button></div></div>
+</div>
+<div id="addrListModal" class="modal">
+    <div class="modal-content">
+        <h3 style="display:flex;align-items:center;gap:8px;">
+            <span>地址簿</span>
+        </h3>
+        <div id="addrListContent"></div>
+        <div class="modal-buttons"><button id="closeAddrListBtn" class="btn-sm btn-outline">关闭</button></div>
+    </div>
+</div>
+<div id="newAddrModal" class="modal">
+    <div class="modal-content">
+        <h3>新增收货地址</h3>
+        <div class="form-group"><label>收货人</label><input type="text" id="newAddrName" placeholder="请输入姓名"></div>
+        <div class="form-group"><label>电话</label><input type="tel" id="newAddrPhone" placeholder="请输入手机号"></div>
+        <div class="form-group" id="provinceGroup"><label>省</label><select id="newAddrProvince"><option value="">请选择省</option></select></div>
+        <div class="form-group"><label>市</label><select id="newAddrCity"><option value="">请选择市</option></select></div>
+        <div class="form-group"><label>县/区</label><select id="newAddrDistrict"><option value="">请选择县/区</option></select></div>
+        <div class="form-group"><label>详细地址</label><input type="text" id="newAddrDetail" placeholder="街道、门牌号等"></div>
+        <div class="modal-buttons">
+            <button id="cancelNewAddrBtn" class="btn-sm btn-outline">取消</button>
+            <button id="saveNewAddrBtn" class="btn-sm btn-primary">保存</button>
+        </div>
+    </div>
+</div>
+<div id="afterSalesModal" class="modal">
+    <div class="modal-content"><h3>申请售后</h3><p>客服：2134123 小申</p><form id="afterSalesForm"><input type="text" id="asOrderId" readonly><select id="asType"><option value="退款">退款</option><option value="退货">退货</option><option value="补偿">补偿</option></select><textarea id="asReason" rows="3" required placeholder="原因"></textarea><div class="modal-buttons"><button type="button" id="cancelAsBtn" class="btn-sm btn-outline">取消</button><button type="submit" class="btn-sm btn-primary">提交</button></div></form></div>
+</div>
+<div id="giftModal" class="modal">
+    <div class="modal-content"><h3>赠送套餐次数</h3><p>套餐：<span id="giftPackageName"></span>，剩余 <span id="giftRemainCount">0</span> 次</p><div class="form-group"><label>接收人手机号</label><input type="tel" id="giftToPhone"></div><div class="form-group"><label>赠送次数</label><input type="number" id="giftCount" min="1" value="1"></div><div class="modal-buttons"><button id="cancelGiftBtn" class="btn-sm btn-outline">取消</button><button id="confirmGiftBtn" class="btn-sm btn-primary">确认赠送</button></div></div>
+</div>
+
+<script>
+    const STORAGE_BOOKING = 'veg_booking_v20';
+    const STORAGE_ADDRESS = 'veg_address_v20';
+    const STORAGE_TEMPLATES = 'veg_templates_v20';
+    const STORAGE_USER_PACKAGES = 'veg_user_packages_v20';
+    const STORAGE_DISHES = 'veg_dishes_v20';
+    const STORAGE_SHARES = 'veg_shares_v20';
+    const STORAGE_CURRENT_PHONE = 'veg_current_phone_v20';
+
+    let bookings=[],addressHistory=[],templates=[],userPackages=[],dishes=[],shares=[];
+    let currentPhone=localStorage.getItem(STORAGE_CURRENT_PHONE)||'13812345678';
+    let currentSelectedVeg={},currentSelectedAddress=null,currentMaxWeight=8;
+    const AS_STATUS={NONE:'无售后',APPLYING:'申请中',APPROVED:'已通过',REJECTED:'已拒绝',COMPLETED:'已完成'};
+
+    function saveAll(){localStorage.setItem(STORAGE_BOOKING,JSON.stringify(bookings));localStorage.setItem(STORAGE_ADDRESS,JSON.stringify(addressHistory));localStorage.setItem(STORAGE_TEMPLATES,JSON.stringify(templates));localStorage.setItem(STORAGE_USER_PACKAGES,JSON.stringify(userPackages));localStorage.setItem(STORAGE_DISHES,JSON.stringify(dishes));localStorage.setItem(STORAGE_SHARES,JSON.stringify(shares));localStorage.setItem(STORAGE_CURRENT_PHONE,currentPhone);}
+    function saveBookings(){localStorage.setItem(STORAGE_BOOKING,JSON.stringify(bookings));}
+    function saveAddressHistory(){localStorage.setItem(STORAGE_ADDRESS,JSON.stringify(addressHistory));}
+    function saveUserPackages(){localStorage.setItem(STORAGE_USER_PACKAGES,JSON.stringify(userPackages));}
+    function saveDishes(){localStorage.setItem(STORAGE_DISHES,JSON.stringify(dishes));}
+    function saveShares(){localStorage.setItem(STORAGE_SHARES,JSON.stringify(shares));}
+    function escapeHtml(s){return String(s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));}
+    function formatDateTime(iso){if(!iso)return'';let d=new Date(iso);return`${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;}
+    function formatDate(iso){if(!iso)return'';let d=new Date(iso);return`${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;}
+    function showToast(msg){let t=document.querySelector('.toast-message');if(!t){t=document.createElement('div');t.className='toast-message';document.body.appendChild(t);}t.innerText=msg;t.style.opacity='1';clearTimeout(t._timeout);t._timeout=setTimeout(()=>{t.style.opacity='0';},1800);}
+    function getTemplateById(id){return templates.find(t=>t.id===id);}
+    function getUserPackagesByPhone(p){return userPackages.filter(up=>up.phone===p);}
+    function isDishAvailable(n){let d=dishes.find(x=>x.name===n);return d?d.status==='on':false;}
+    function getEmoji(n){const m={"菠菜":"🥬","生菜":"🥗","小白菜":"🥬","空心菜":"🌿","番茄":"🍅","茄子":"🍆","青椒":"🫑","黄瓜":"🥒"};return m[n]||"🥦";}
+    function initDishes(){let s=localStorage.getItem(STORAGE_DISHES);if(s){dishes=JSON.parse(s);}else{dishes=[{name:"菠菜",category:"leafy",weight:"0.5斤",status:"on"},{name:"生菜",category:"leafy",weight:"0.5斤",status:"on"},{name:"小白菜",category:"leafy",weight:"0.5斤",status:"on"},{name:"空心菜",category:"leafy",weight:"0.5斤",status:"on"},{name:"番茄",category:"fruity",weight:"1斤",status:"on"},{name:"茄子",category:"fruity",weight:"1斤",status:"on"},{name:"青椒",category:"fruity",weight:"1斤",status:"on"},{name:"黄瓜",category:"fruity",weight:"1斤",status:"on"}];saveDishes();}}
+    function loadData(){
+        let sb=localStorage.getItem(STORAGE_BOOKING); if(sb) bookings=JSON.parse(sb); else{const today=formatDate(new Date());bookings=[{id:'order1',name:"张建国",phone:"13812345678",address:"北京市朝阳区望京街道10号院",vegetables:["菠菜","番茄"],timestamp:new Date(Date.now()-86400000).toISOString(),logisticsStatus:"已发货",logisticsNumber:"SF1234567890",afterSalesStatus:AS_STATUS.NONE,afterSalesReason:"",afterSalesRemark:"",expectedShipDate:today,packageId:null,cancelled:false},{id:'order2',name:"张建国",phone:"13812345678",address:"北京市朝阳区望京街道10号院",vegetables:["生菜","黄瓜"],timestamp:new Date().toISOString(),logisticsStatus:"待发货",logisticsNumber:"",afterSalesStatus:AS_STATUS.NONE,afterSalesReason:"",afterSalesRemark:"",expectedShipDate:today,packageId:null,cancelled:false}];saveBookings();}
+        bookings.forEach(b=>{if(!b.logisticsStatus)b.logisticsStatus="待发货";if(!b.afterSalesStatus)b.afterSalesStatus=AS_STATUS.NONE;if(!b.expectedShipDate)b.expectedShipDate=formatDate(new Date());});
+        let sa=localStorage.getItem(STORAGE_ADDRESS); if(sa) addressHistory=JSON.parse(sa); else{addressHistory=[{id:"addr1",name:"张建国",phone:"13812345678",address:"北京市朝阳区望京街道10号院",isDefault:true},{id:"addr2",name:"张建国",phone:"13812345678",address:"北京市朝阳区望京SOHO T3-2005",isDefault:false}];saveAddressHistory();}
+        let st=localStorage.getItem(STORAGE_TEMPLATES); if(st) templates=JSON.parse(st); else{templates=[{id:"tmpl1",name:"8斤周套餐",totalTimes:8,maxVeggies:2},{id:"tmpl2",name:"5斤周套餐",totalTimes:5,maxVeggies:3}];}
+        let sup=localStorage.getItem(STORAGE_USER_PACKAGES); if(sup) userPackages=JSON.parse(sup); else{userPackages=[{id:"up1",phone:"13812345678",name:"张建国",templateId:"tmpl1",usedTimes:1,lastShipDate:"2025-05-17",nextShipDate:"2025-05-24"},{id:"up2",phone:"13812345678",name:"张建国",templateId:"tmpl2",usedTimes:0,lastShipDate:"",nextShipDate:""}];saveUserPackages();}
+        let ssh=localStorage.getItem(STORAGE_SHARES); if(ssh) shares=JSON.parse(ssh); else{shares=[];}
+        initDishes();
+    }
+
+    function getActivePackage(phone){let pkgs=getUserPackagesByPhone(phone);return pkgs.length>0?pkgs[0]:null;}
+    function updatePackageDisplay(phone){
+        let c=document.getElementById('packageInfoArea'); if(!phone){c.innerHTML='<div>请绑定手机号</div>';return;}
+        let pkgs=getUserPackagesByPhone(phone); if(pkgs.length===0){c.innerHTML='<div style="color:#e67e22;">⚠️ 暂无套餐</div>';return;}
+        let active=pkgs[0]; let t=getTemplateById(active.templateId); if(!t){c.innerHTML='<div>模板异常</div>';return;}
+        // 套餐可能为按斤限制，优先使用模板内的 maxWeight 字段，否则默认 8 斤
+        currentMaxWeight = t.maxWeight||8; document.getElementById('maxWeightDisplay').innerText=currentMaxWeight; document.getElementById('maxWeightCounter').innerText=currentMaxWeight;
+        let used=active.usedTimes, remain=t.totalTimes-used;
+        c.innerHTML=`<div style="font-weight:600;">${escapeHtml(t.name)} · 最多 ${currentMaxWeight} 斤</div><div class="package-stats"><div class="stat"><div class="num">${used} 次</div><div class="lbl">已使用</div></div><div class="stat"><div class="num">${remain} 次</div><div class="lbl">剩余</div></div></div>`;
+    }
+    function renderVegCards(){
+        let lc=document.getElementById('leafyGrid'),fc=document.getElementById('fruitGrid'); lc.innerHTML='';fc.innerHTML='';
+        dishes.filter(d=>d.category==='leafy').forEach(d=>{let c=createVegCard(d);lc.appendChild(c);});
+        dishes.filter(d=>d.category==='fruity').forEach(d=>{let c=createVegCard(d);fc.appendChild(c);});
+        updateVegCounter();
+    }
+    function createVegCard(dish){
+        let card=document.createElement('div'); card.className='veg-card'; if(dish.status!=='on')card.classList.add('disabled');
+        let unit = (dish.category==='leafy')?0.5:1; // 单位斤
+        let qty = currentSelectedVeg[dish.name]||0;
+        if(qty>0 && dish.status==='on') card.classList.add('selected');
+        card.innerHTML=`<div class="veg-emoji">${getEmoji(dish.name)}</div><div>${dish.name}</div><div style="margin-top:8px;display:flex;justify-content:center;align-items:center;gap:6px;"><button class="btn-sm btn-outline qty-minus" style="padding:4px 8px;">-</button><div class="qty-display" style="min-width:36px;text-align:center;">${qty}斤</div><button class="btn-sm btn-primary qty-plus" style="padding:4px 8px;">+</button></div>`;
+        let minus=card.querySelector('.qty-minus'), plus=card.querySelector('.qty-plus'), qd=card.querySelector('.qty-display');
+        minus.onclick=(e)=>{e.stopPropagation(); if(dish.status!=='on')return; let cur=currentSelectedVeg[dish.name]||0; if(cur<=0) return; cur = Math.max(0, Math.round((cur - unit)*10)/10); if(unit===1) cur = Math.max(0, Math.floor(cur)); if(cur===0) delete currentSelectedVeg[dish.name]; else currentSelectedVeg[dish.name]=cur; qd.innerText=cur+'斤'; if(cur===0) card.classList.remove('selected'); updateVegCounter(); };
+        plus.onclick=(e)=>{e.stopPropagation(); if(dish.status!=='on')return; let cur=currentSelectedVeg[dish.name]||0; let inc=unit; let total = computeTotalWeight(); if(Math.round((total+inc)*10)/10 > currentMaxWeight){document.getElementById('vegErrorMsg').innerText=`最多选择 ${currentMaxWeight} 斤`; return;} cur = Math.round((cur + inc)*10)/10; if(unit===1) cur = Math.floor(cur); currentSelectedVeg[dish.name]=cur; qd.innerText=cur+'斤'; card.classList.add('selected'); updateVegCounter(); };
+        return card;
+    }
+    function computeTotalWeight(){let total=0; Object.keys(currentSelectedVeg).forEach(k=>{let qty=currentSelectedVeg[k]||0; let d=dishes.find(x=>x.name===k); if(!d) return; let unit=(d.category==='leafy')?0.5:1; total+=qty;}); return Math.round(total*10)/10;}
+    function updateVegCounter(){
+        let w=computeTotalWeight(); 
+        document.getElementById('vegWeight').innerText=w; 
+        let remaining=Math.round((currentMaxWeight - w)*10)/10;
+        document.getElementById('maxWeightCounter').innerText=remaining;
+        document.getElementById('vegErrorMsg').innerText='';
+    }
+    function getLastUsedAddress(phone){let my=bookings.filter(b=>b.phone===phone&&!b.cancelled).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));if(my.length>0)return{name:my[0].name,phone:my[0].phone,address:my[0].address};return null;}
+    function refreshAddressUI(){
+        if(!currentPhone)return; let def=addressHistory.filter(a=>a.phone===currentPhone).find(a=>a.isDefault); if(!def){let addrs=addressHistory.filter(a=>a.phone===currentPhone);if(addrs.length>0)def=addrs[0];} if(def)selectAddressSilent(def);
+        let last=getLastUsedAddress(currentPhone); let div=document.getElementById('lastAddrClickable'); if(last&&(!def||last.address!==def.address)){div.style.display='flex';document.getElementById('lastAddrTextShort').innerText=`${last.name} · ${last.phone.slice(0,3)}**** · ${last.address}`;div.onclick=()=>selectAddress(last);}else{div.style.display='none';}
+    }
+    function selectAddressSilent(addr){currentSelectedAddress=addr;document.getElementById('currentAddrName').innerText=addr.name;document.getElementById('currentAddrDetail').innerText=`${addr.phone.slice(0,3)}**** · ${addr.address}`;document.getElementById('selectedAddrData').value=JSON.stringify(addr);}
+    function selectAddress(addr){selectAddressSilent(addr);refreshAddressUI();}
+    function openEditAddressModal(){if(!currentSelectedAddress)return;document.getElementById('editAddrName').value=currentSelectedAddress.name;document.getElementById('editAddrPhone').value=currentSelectedAddress.phone;document.getElementById('editAddrAddress').value=currentSelectedAddress.address;document.getElementById('editAddressModal').style.display='flex';}
+    function saveEditAddress(){
+        let n=document.getElementById('editAddrName').value.trim(),p=document.getElementById('editAddrPhone').value.trim(),a=document.getElementById('editAddrAddress').value.trim();
+        if(!n||!p||!a){showToast('请填写完整');return;} if(!/^\d{11}$/.test(p)){showToast('手机号格式不对');return;}
+        if(currentSelectedAddress){let exist=addressHistory.find(x=>x.phone===currentSelectedAddress.phone&&x.address===currentSelectedAddress.address);if(exist){exist.name=n;exist.phone=p;exist.address=a;}else{addressHistory.push({id:'addr'+Date.now(),name:n,phone:p,address:a,isDefault:false});}saveAddressHistory();selectAddress({name:n,phone:p,address:a});document.getElementById('editAddressModal').style.display='none';showToast('已更新');}
+    }
+    
+
+    function openAddrListModal(){
+        document.getElementById('addrListModal').style.display='flex'; renderAddrListModal();
+    }
+    function renderAddrListModal(){
+        let c=document.getElementById('addrListContent'); if(!c) return; let my=addressHistory.filter(a=>a.phone===currentPhone);
+        if(my.length===0){c.innerHTML='<div>暂无历史地址</div>'; return;} let html=''; my.forEach(a=>{html+=`<div class="address-item" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><div class="addr-info"><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml(a.address)}</small></div><div style="display:flex;gap:6px;"><button class="btn-sm use-addr-modal-btn" data-aid="${a.id}">选择</button></div></div>`;}); c.innerHTML=html; c.querySelectorAll('.use-addr-modal-btn').forEach(b=>b.onclick=()=>{let a=addressHistory.find(x=>x.id===b.dataset.aid); if(a){selectAddress(a); document.getElementById('addrListModal').style.display='none';}});
+    }
+    function openNewAddrForm(){
+        document.getElementById('newAddrModal').style.display='flex';
+        document.getElementById('newAddrName').focus();
+    }
+    const provinceData = {
+        '北京市': { type: 'municipality', districts: ['东城区', '西城区', '朝阳区', '海淀区', '丰台区', '石景山区', '通州区', '顺义区', '昌平区'] },
+        '上海市': { type: 'municipality', districts: ['黄浦区', '徐汇区', '长宁区', '静安区', '普陀区', '虹口区', '杨浦区', '闵行区', '宝山区', '浦东新区'] },
+        '天津市': { type: 'municipality', districts: ['和平区', '河东区', '河西区', '南开区', '河北区', '红桥区'] },
+        '重庆市': { type: 'municipality', districts: ['万州区', '涪陵区', '渝中区', '大渡口区', '江北区', '沙坪坝区'] },
+        '广东省': {
+            '广州市': ['天河区', '越秀区', '海珠区', '荔湾区', '白云区', '番禺区'],
+            '深圳市': ['福田区', '罗湖区', '南山区', '宝安区', '龙岗区', '盐田区'],
+            '珠海市': ['香洲区', '斗门区', '金湾区'],
+            '佛山市': ['禅城区', '南海区', '顺德区', '三水区', '高明区'],
+            '东莞市': ['莞城区', '南城区', '东城区', '万江区'],
+            '中山市': ['东区', '南区', '西区', '石岐区']
+        },
+        '江苏省': {
+            '南京市': ['玄武区', '秦淮区', '建邺区', '鼓楼区', '浦口区', '栖霞区'],
+            '苏州市': ['姑苏区', '虎丘区', '吴中区', '相城区', '吴江区'],
+            '无锡市': ['梁溪区', '锡山区', '惠山区', '滨湖区', '新吴区'],
+            '常州市': ['天宁区', '钟楼区', '新北区', '武进区'],
+            '南通市': ['崇川区', '港闸区', '通州区'],
+            '扬州市': ['广陵区', '邗江区', '江都区']
+        },
+        '浙江省': {
+            '杭州市': ['上城区', '下城区', '江干区', '拱墅区', '西湖区', '滨江区'],
+            '宁波市': ['海曙区', '江北区', '北仑区', '镇海区', '鄞州区'],
+            '温州市': ['鹿城区', '龙湾区', '瓯海区'],
+            '嘉兴市': ['南湖区', '秀洲区'],
+            '湖州市': ['吴兴区', '南浔区'],
+            '绍兴市': ['越城区', '柯桥区', '上虞区']
+        },
+        '山东省': {
+            '济南市': ['历下区', '市中区', '槐荫区', '天桥区', '历城区'],
+            '青岛市': ['市南区', '市北区', '黄岛区', '崂山区', '李沧区'],
+            '淄博市': ['张店区', '淄川区', '博山区', '周村区'],
+            '枣庄市': ['市中区', '薛城区', '峄城区', '台儿庄区'],
+            '东营市': ['东营区', '河口区'],
+            '烟台市': ['芝罘区', '福山区', '牟平区', '莱山区']
+        },
+        '四川省': {
+            '成都市': ['锦江区', '青羊区', '金牛区', '武侯区', '成华区'],
+            '绵阳市': ['涪城区', '游仙区'],
+            '德阳市': ['旌阳区', '罗江区'],
+            '南充市': ['顺庆区', '高坪区', '嘉陵区'],
+            '宜宾市': ['翠屏区', '南溪区'],
+            '泸州市': ['江阳区', '纳溪区', '龙马潭区']
+        },
+        '湖北省': {
+            '武汉市': ['江岸区', '江汉区', '硚口区', '汉阳区', '武昌区'],
+            '黄石市': ['黄石港区', '西塞山区', '下陆区'],
+            '十堰市': ['茅箭区', '张湾区'],
+            '宜昌市': ['西陵区', '伍家岗区', '点军区', '猇亭区'],
+            '襄阳市': ['襄城区', '樊城区'],
+            '鄂州市': ['梁子湖区', '华容区']
+        },
+        '湖南省': {
+            '长沙市': ['芙蓉区', '天心区', '岳麓区', '开福区', '雨花区'],
+            '株洲市': ['荷塘区', '芦淞区', '石峰区', '天元区'],
+            '湘潭市': ['雨湖区', '岳塘区'],
+            '衡阳市': ['雁峰区', '石鼓区', '珠晖区', '蒸湘区'],
+            '邵阳市': ['双清区', '大祥区', '北塔区'],
+            '岳阳市': ['岳阳楼区', '云溪区', '君山区']
+        },
+        '河南省': {
+            '郑州市': ['中原区', '二七区', '管城回族区', '金水区'],
+            '开封市': ['龙亭区', '顺河回族区', '鼓楼区', '禹王台区'],
+            '洛阳市': ['老城区', '西工区', '瀍河回族区', '涧西区'],
+            '平顶山市': ['新华区', '卫东区', '石龙区'],
+            '安阳市': ['文峰区', '北关区', '殷都区'],
+            '鹤壁市': ['鹤山区', '山城区', '淇滨区']
+        },
+        '河北省': {
+            '石家庄市': ['长安区', '桥西区', '新华区', '井陉矿区'],
+            '唐山市': ['路南区', '路北区', '古冶区', '开平区'],
+            '秦皇岛市': ['海港区', '山海关区', '北戴河区'],
+            '邯郸市': ['邯山区', '丛台区', '复兴区'],
+            '邢台市': ['桥东区', '桥西区'],
+            '保定市': ['竞秀区', '莲池区']
+        },
+        '安徽省': {
+            '合肥市': ['瑶海区', '庐阳区', '蜀山区', '包河区'],
+            '芜湖市': ['镜湖区', '弋江区', '鸠江区'],
+            '蚌埠市': ['龙子湖区', '蚌山区', '禹会区'],
+            '淮南市': ['大通区', '田家庵区', '谢家集区'],
+            '马鞍山市': ['花山区', '雨山区'],
+            '淮北市': ['杜集区', '相山区', '烈山区']
+        },
+        '福建省': {
+            '福州市': ['鼓楼区', '台江区', '仓山区', '马尾区'],
+            '厦门市': ['思明区', '海沧区', '湖里区', '集美区'],
+            '莆田市': ['城厢区', '涵江区', '荔城区'],
+            '三明市': ['梅列区', '三元区'],
+            '泉州市': ['鲤城区', '丰泽区', '洛江区'],
+            '漳州市': ['芗城区', '龙文区']
+        },
+        '江西省': {
+            '南昌市': ['东湖区', '西湖区', '青云谱区', '湾里区'],
+            '景德镇市': ['珠山区', '昌江区'],
+            '萍乡市': ['安源区', '湘东区'],
+            '九江市': ['浔阳区', '濂溪区'],
+            '新余市': ['渝水区'],
+            '鹰潭市': ['月湖区', '余江区']
+        },
+        '山西省': {
+            '太原市': ['小店区', '迎泽区', '杏花岭区', '尖草坪区'],
+            '大同市': ['平城区', '云冈区', '新荣区'],
+            '阳泉市': ['城区', '矿区', '郊区'],
+            '长治市': ['潞州区', '上党区'],
+            '晋城市': ['城区', '泽州县'],
+            '朔州市': ['朔城区', '平鲁区']
+        },
+        '陕西省': {
+            '西安市': ['新城区', '碑林区', '莲湖区', '灞桥区'],
+            '铜川市': ['王益区', '印台区'],
+            '宝鸡市': ['渭滨区', '金台区'],
+            '咸阳市': ['秦都区', '渭城区'],
+            '渭南市': ['临渭区', '华州区'],
+            '延安市': ['宝塔区']
+        },
+        '辽宁省': {
+            '沈阳市': ['和平区', '沈河区', '大东区', '皇姑区'],
+            '大连市': ['中山区', '西岗区', '沙河口区', '甘井子区'],
+            '鞍山市': ['铁东区', '铁西区', '立山区'],
+            '抚顺市': ['新抚区', '东洲区', '望花区'],
+            '本溪市': ['平山区', '溪湖区', '明山区'],
+            '丹东市': ['元宝区', '振兴区', '振安区']
+        },
+        '吉林省': {
+            '长春市': ['南关区', '宽城区', '朝阳区', '二道区'],
+            '吉林市': ['昌邑区', '龙潭区', '船营区'],
+            '四平市': ['铁西区', '铁东区'],
+            '辽源市': ['龙山区', '西安区'],
+            '通化市': ['东昌区', '二道江区'],
+            '白山市': ['浑江区', '江源区']
+        },
+        '黑龙江省': {
+            '哈尔滨市': ['道里区', '南岗区', '道外区', '平房区'],
+            '齐齐哈尔市': ['龙沙区', '建华区', '铁锋区'],
+            '鸡西市': ['鸡冠区', '恒山区'],
+            '鹤岗市': ['向阳区', '工农区'],
+            '双鸭山市': ['尖山区', '岭东区'],
+            '大庆市': ['萨尔图区', '龙凤区', '让胡路区']
+        },
+        '广西壮族自治区': {
+            '南宁市': ['兴宁区', '青秀区', '江南区', '西乡塘区'],
+            '柳州市': ['城中区', '鱼峰区', '柳南区'],
+            '桂林市': ['秀峰区', '叠彩区', '象山区'],
+            '梧州市': ['万秀区', '长洲区'],
+            '北海市': ['海城区', '银海区'],
+            '防城港市': ['港口区', '防城区']
+        },
+        '海南省': {
+            '海口市': ['秀英区', '龙华区', '琼山区', '美兰区'],
+            '三亚市': ['海棠区', '吉阳区', '天涯区'],
+            '三沙市': ['西沙区', '南沙区'],
+            '儋州市': ['那大镇']
+        },
+        '云南省': {
+            '昆明市': ['五华区', '盘龙区', '官渡区', '西山区'],
+            '曲靖市': ['麒麟区', '沾益区'],
+            '玉溪市': ['红塔区', '江川区'],
+            '保山市': ['隆阳区'],
+            '昭通市': ['昭阳区'],
+            '丽江市': ['古城区']
+        },
+        '贵州省': {
+            '贵阳市': ['南明区', '云岩区', '花溪区'],
+            '六盘水市': ['钟山区', '水城区'],
+            '遵义市': ['红花岗区', '汇川区'],
+            '安顺市': ['西秀区', '平坝区'],
+            '毕节市': ['七星关区'],
+            '铜仁市': ['碧江区']
+        },
+        '甘肃省': {
+            '兰州市': ['城关区', '七里河区', '西固区'],
+            '嘉峪关市': ['雄关区'],
+            '金昌市': ['金川区'],
+            '白银市': ['白银区', '平川区'],
+            '天水市': ['秦州区', '麦积区'],
+            '武威市': ['凉州区']
+        },
+        '内蒙古自治区': {
+            '呼和浩特市': ['新城区', '回民区', '玉泉区'],
+            '包头市': ['东河区', '昆都仑区', '青山区'],
+            '乌海市': ['海勃湾区', '海南区'],
+            '赤峰市': ['红山区', '元宝山区'],
+            '通辽市': ['科尔沁区'],
+            '鄂尔多斯市': ['东胜区']
+        },
+        '新疆维吾尔自治区': {
+            '乌鲁木齐市': ['天山区', '沙依巴克区', '新市区'],
+            '克拉玛依市': ['独山子区', '克拉玛依区'],
+            '吐鲁番市': ['高昌区'],
+            '哈密市': ['伊州区']
+        },
+        '西藏自治区': {
+            '拉萨市': ['城关区', '堆龙德庆区']
+        },
+        '宁夏回族自治区': {
+            '银川市': ['兴庆区', '金凤区', '西夏区'],
+            '石嘴山市': ['大武口区', '惠农区'],
+            '吴忠市': ['利通区'],
+            '固原市': ['原州区']
+        },
+        '青海省': {
+            '西宁市': ['城中区', '城东区', '城西区'],
+            '海东市': ['乐都区', '平安区']
+        },
+        '香港特别行政区': { type: 'special', districts: ['香港岛', '九龙', '新界'] },
+        '澳门特别行政区': { type: 'special', districts: ['澳门半岛', '氹仔岛', '路环岛'] }
+    };
+
+    function initProvinceSelect(){
+        let provinceSel=document.getElementById('newAddrProvince');
+        provinceSel.innerHTML='<option value="">请选择省</option>';
+        Object.keys(provinceData).forEach(p=>{
+            let opt=document.createElement('option');
+            opt.value=p;
+            opt.innerText=p;
+            provinceSel.appendChild(opt);
+        });
+    }
+
+    function openNewAddrForm(){
+        document.getElementById('newAddrModal').style.display='flex';
+        document.getElementById('newAddrProvince').value='';
+        document.getElementById('newAddrCity').innerHTML='<option value="">请选择市</option>';
+        document.getElementById('newAddrDistrict').innerHTML='<option value="">请选择县/区</option>';
+        document.getElementById('provinceGroup').style.display='block';
+        document.getElementById('newAddrName').focus();
+    }
+    function hideNewAddrForm(){
+        document.getElementById('newAddrModal').style.display='none';
+        document.getElementById('newAddrName').value='';
+        document.getElementById('newAddrPhone').value='';
+        document.getElementById('newAddrProvince').value='';
+        document.getElementById('newAddrCity').innerHTML='<option value="">请选择市</option>';
+        document.getElementById('newAddrDistrict').innerHTML='<option value="">请选择县/区</option>';
+        document.getElementById('newAddrDetail').value='';
+        document.getElementById('provinceGroup').style.display='block';
+    }
+    function saveNewAddrFromModal(){
+        let n=document.getElementById('newAddrName').value.trim();
+        let p=document.getElementById('newAddrPhone').value.trim();
+        let province=document.getElementById('newAddrProvince').value;
+        let city=document.getElementById('newAddrCity').value;
+        let district=document.getElementById('newAddrDistrict').value;
+        let detail=document.getElementById('newAddrDetail').value.trim();
+        if(!n||!p||!province||!city||!district||!detail){showToast('请填写完整');return;}
+        if(!/^\d{11}$/.test(p)){showToast('手机号格式不对');return;}
+        let fullAddress=`${province}/${city}/${district}，${detail}`;
+        let newAddr={id:'addr'+Date.now(),name:n,phone:p,address:fullAddress,isDefault:false};
+        addressHistory.push(newAddr);
+        saveAddressHistory();
+        hideNewAddrForm();
+        selectAddress(newAddr);
+        if(document.getElementById('profilePanel').classList.contains('active')) renderAddressMgmt();
+        showToast('已添加并选中');
+    }
+    function isPastDeadline(){
+        let now=new Date();
+        let hour=now.getHours();
+        let minute=now.getMinutes();
+        return hour>23 || (hour===23 && minute>0);
+    }
+    function checkDeadlineAndUpdateBtn(){
+        let btn=document.getElementById('submitBookingBtn');
+        let deadlineDiv=document.getElementById('deadlineDisplay');
+        if(isPastDeadline()){
+            btn.disabled=true;
+            btn.style.opacity='0.5';
+            btn.style.cursor='not-allowed';
+            deadlineDiv.innerHTML='⏰ 今日下单已截止，请明日再来';
+            deadlineDiv.style.background='#ffebee';
+            deadlineDiv.style.color='#c62828';
+        }else{
+            btn.disabled=false;
+            btn.style.opacity='1';
+            btn.style.cursor='pointer';
+            deadlineDiv.innerHTML='⏰ 今日下单截止：<span id="deadlineTime">23:00</span>';
+            deadlineDiv.style.background='#fff8e1';
+            deadlineDiv.style.color='#e67e22';
+        }
+    }
+    function submitBooking(){
+        if(isPastDeadline()){showToast('今日下单已截止');return;}
+        if(!currentSelectedAddress){showToast('请选择地址');return;} let vegObjs=Object.keys(currentSelectedVeg).map(k=>({name:k,qty:currentSelectedVeg[k]})).filter(v=>v.qty>0 && isDishAvailable(v.name)); if(vegObjs.length===0){showToast('请选蔬菜');return;}
+        let total=computeTotalWeight(); if(total>currentMaxWeight){showToast('超出可选重量');return;}
+        let phone=currentSelectedAddress.phone; let pkg=getActivePackage(phone); if(!pkg){showToast('无套餐');return;} let t=getTemplateById(pkg.templateId); if(pkg.usedTimes>=t.totalTimes){showToast('次数用完');return;}
+        let order={id:Date.now()+'-'+Math.random().toString(36).substr(2,4),name:currentSelectedAddress.name,phone,address:currentSelectedAddress.address,vegetables:vegObjs,timestamp:new Date().toISOString(),logisticsStatus:'待发货',logisticsNumber:'',afterSalesStatus:AS_STATUS.NONE,packageId:pkg.id,cancelled:false};
+        bookings.unshift(order); saveBookings(); pkg.usedTimes++; let today=new Date();pkg.lastShipDate=today.toISOString().split('T')[0];pkg.nextShipDate=new Date(today.getTime()+7*86400000).toISOString().split('T')[0]; saveUserPackages();
+        document.getElementById('formMessage').innerHTML='<div class="success-msg">✅ 预订成功！</div>'; updatePackageDisplay(phone); setTimeout(()=>document.getElementById('formMessage').innerHTML='',3000);
+    }
+        function deleteOrder(oid){
+            if(!confirm('确定删除该订单？该操作不可恢复。')) return;
+            bookings = bookings.filter(b=>b.id!==oid);
+            saveBookings();
+            if(document.getElementById('profilePanel').classList.contains('active')) renderMyOrders();
+            showToast('订单已删除');
+        }
+    function cancelOrder(oid){
+        if(!confirm('取消订单？将返还次数。'))return; let o=bookings.find(b=>b.id===oid); if(!o||o.cancelled||o.logisticsStatus!=='待发货'){showToast('无法取消');return;}
+        o.cancelled=true; o.logisticsStatus='已取消'; if(o.packageId){let p=userPackages.find(u=>u.id===o.packageId);if(p){p.usedTimes=Math.max(0,p.usedTimes-1);saveUserPackages();}} saveBookings(); if(document.getElementById('profilePanel').classList.contains('active'))renderMyOrders(); updatePackageDisplay(currentPhone); showToast('已取消，次数返还');
+    }
+    function renderMyOrders(){
+        let c=document.getElementById('myOrdersPanel'); if(!currentPhone){c.innerHTML='<div>请绑定手机号</div>';return;}
+        let my=bookings.filter(b=>b.phone===currentPhone).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
+        if(my.length===0){c.innerHTML='<div>暂无订单</div>';return;} let html='';
+        my.forEach(o=>{let canCancel=!o.cancelled&&o.logisticsStatus==='待发货';
+            let vegText=''; if(Array.isArray(o.vegetables)) vegText=o.vegetables.map(v=>typeof v==='string'?v:(v.name+(v.qty?` x${v.qty}斤`:''))).join('、');
+            html+=`<div class="order-detail-item"><div><strong>${formatDateTime(o.timestamp)}</strong></div><div>🥬 ${vegText}</div><div>📍 ${escapeHtml(o.address)}</div><div>物流：${o.logisticsStatus}</div>${canCancel?`<button class="btn-sm btn-danger cancel-order-btn" data-oid="${o.id}">取消预订</button>`:''}${o.cancelled?`<button class="btn-sm btn-outline delete-order-btn" data-oid="${o.id}">删除订单</button>`:''}</div>`;});
+        c.innerHTML=html; c.querySelectorAll('.cancel-order-btn').forEach(b=>b.onclick=()=>cancelOrder(b.dataset.oid)); c.querySelectorAll('.delete-order-btn').forEach(b=>b.onclick=()=>deleteOrder(b.dataset.oid));
+    }
+    function renderAddressMgmt(){
+        let c=document.getElementById('addressMgmtPanel'); if(!currentPhone){c.innerHTML='<div>请绑定手机号</div>';return;}
+        let my=addressHistory.filter(a=>a.phone===currentPhone); my.sort((a,b)=>(b.isDefault?1:0)-(a.isDefault?1:0));
+        let html=`<button id="profileAddAddrBtn" class="btn-sm btn-primary" style="width:auto;margin-bottom:8px;">+ 新增地址</button>`;
+        my.forEach(a=>{html+=`<div class="address-item"><div class="addr-info"><strong>${escapeHtml(a.name)}</strong>${a.isDefault?'<span class="default-badge">默认</span>':''}<small>${escapeHtml(a.address)}</small></div><div class="addr-actions"><button class="btn-sm btn-outline set-default-btn" data-aid="${a.id}">${a.isDefault?'取消默认':'设默认'}</button><button class="btn-sm btn-danger delete-addr-btn" data-aid="${a.id}">删除</button></div></div>`;});
+        c.innerHTML=html; document.getElementById('profileAddAddrBtn').onclick=openNewAddrForm;
+        c.querySelectorAll('.set-default-btn').forEach(b=>b.onclick=()=>{let a=my.find(x=>x.id===b.dataset.aid);if(a){a.isDefault=!a.isDefault;if(a.isDefault)my.forEach(x=>{if(x.id!==a.id)x.isDefault=false;});saveAddressHistory();renderAddressMgmt();refreshAddressUI();}});
+        c.querySelectorAll('.delete-addr-btn').forEach(b=>b.onclick=()=>{if(confirm('删除？')){addressHistory=addressHistory.filter(x=>x.id!==b.dataset.aid);saveAddressHistory();renderAddressMgmt();refreshAddressUI();}});
+    }
+    function renderMyPackage(){
+        let c=document.getElementById('myPackagePanel'); if(!currentPhone){c.innerHTML='<div>请绑定手机号</div>';return;}
+        let pkgs=getUserPackagesByPhone(currentPhone); if(pkgs.length===0){c.innerHTML='<div>暂无套餐</div>';return;}
+        let html=''; pkgs.forEach(up=>{let t=getTemplateById(up.templateId);if(!t)return;let remain=(up.totalTimes||t.totalTimes)-up.usedTimes;html+=`<div class="package-list-item"><div><strong>${escapeHtml(t.name)}</strong><br><small>剩余 ${remain} 次</small></div></div>`;});
+        c.innerHTML=html;
+    }
+    function renderProfileInfo(){
+        let c=document.getElementById('profileInfoPanel'); if(!currentPhone){c.innerHTML='<div>请绑定手机号</div>';return;}
+        let up=userPackages.find(u=>u.phone===currentPhone); c.innerHTML=`<div class="form-group"><label>手机号</label><input value="${currentPhone}" disabled></div><div class="form-group"><label>姓名</label><input id="profileNameInput" value="${escapeHtml(up?.name||'')}"></div><button id="saveProfileNameBtn" class="btn-primary">保存</button>`;
+        document.getElementById('saveProfileNameBtn').onclick=()=>{let pkgs=getUserPackagesByPhone(currentPhone);pkgs.forEach(p=>p.name=document.getElementById('profileNameInput').value.trim());saveUserPackages();showToast('已保存');};
+    }
+    let currentAsId=null;
+    function openAfterSalesModal(oid){let o=bookings.find(b=>b.id===oid);if(o){document.getElementById('asOrderId').value=o.id;document.getElementById('afterSalesModal').style.display='flex';currentAsId=oid;}}
+    function submitAfterSales(){let r=document.getElementById('asReason').value.trim();if(!r){alert('请填写原因');return;}let o=bookings.find(b=>b.id===currentAsId);if(o){o.afterSalesStatus=AS_STATUS.APPLYING;o.afterSalesReason=r;saveBookings();document.getElementById('afterSalesModal').style.display='none';showToast('已提交');if(document.getElementById('profilePanel').classList.contains('active'))renderMyOrders();}}
+    function openGiftModal(pkg){giftTargetPkg=pkg;let t=getTemplateById(pkg.templateId);document.getElementById('giftPackageName').innerText=t.name;document.getElementById('giftRemainCount').innerText=t.totalTimes-pkg.usedTimes;document.getElementById('giftToPhone').value='';document.getElementById('giftCount').value=1;document.getElementById('giftModal').style.display='flex';}
+    let giftTargetPkg=null;
+    function confirmGift(){if(!giftTargetPkg)return;let to=document.getElementById('giftToPhone').value.trim();let count=parseInt(document.getElementById('giftCount').value);if(!/^\d{11}$/.test(to)){showToast('手机号格式不对');return;}if(to===giftTargetPkg.phone){showToast('不能赠送自己');return;}let t=getTemplateById(giftTargetPkg.templateId);if(count<1||count>t.totalTimes-giftTargetPkg.usedTimes){showToast('超出剩余');return;}giftTargetPkg.usedTimes+=count;let recv=userPackages.find(up=>up.phone===to&&up.templateId===giftTargetPkg.templateId);if(!recv){recv={id:'up'+Date.now(),phone:to,name:'',templateId:giftTargetPkg.templateId,usedTimes:0,lastShipDate:'',nextShipDate:''};userPackages.push(recv);}recv.totalTimes=(recv.totalTimes||t.totalTimes)+count;shares.push({id:'share'+Date.now(),fromPhone:giftTargetPkg.phone,toPhone:to,fromPackageId:giftTargetPkg.id,toPackageId:recv.id,count,timestamp:new Date().toISOString(),fromPackageName:t.name});saveUserPackages();saveShares();showToast(`已赠送${count}次给${to}`);document.getElementById('giftModal').style.display='none';if(document.getElementById('profilePanel').classList.contains('active'))renderMyPackage();}
+    function switchMainTab(tab){
+        document.querySelectorAll('.main-pane').forEach(p=>p.classList.remove('active')); document.getElementById(tab+'Panel').classList.add('active');
+        document.querySelectorAll('.main-tab-btn').forEach(b=>b.classList.remove('active')); document.querySelector(`.main-tab-btn[data-main="${tab}"]`).classList.add('active');
+        if(tab==='booking'){renderVegCards();refreshAddressUI();updatePackageDisplay(currentPhone);}else if(tab==='profile')switchProfileSubTab('myOrders');
+    }
+    function switchProfileSubTab(sub){
+        document.querySelectorAll('.profile-sub-pane').forEach(p=>p.style.display='none'); document.getElementById(sub+'Panel').style.display='block';
+        document.querySelectorAll('[data-profile-sub]').forEach(b=>b.classList.remove('active')); document.querySelector(`[data-profile-sub="${sub}"]`).classList.add('active');
+        if(sub==='myOrders')renderMyOrders(); else if(sub==='addressMgmt')renderAddressMgmt(); else if(sub==='myPackage')renderMyPackage(); else if(sub==='profileInfo')renderProfileInfo();
+    }
+    document.getElementById('openAddrListBtn').onclick=openAddrListModal;
+    document.getElementById('closeAddrListBtn').onclick=()=>document.getElementById('addrListModal').style.display='none';
+    // new address modal handlers
+    document.getElementById('newAddrBtn').onclick=openNewAddrForm;
+    document.getElementById('cancelNewAddrBtn').onclick=hideNewAddrForm;
+    document.getElementById('saveNewAddrBtn').onclick=saveNewAddrFromModal;
+    // province/city/district cascade
+    document.getElementById('newAddrProvince').onchange=function(){
+        let citySel=document.getElementById('newAddrCity');
+        let districtSel=document.getElementById('newAddrDistrict');
+        let provinceGroup=document.getElementById('provinceGroup');
+        
+        citySel.innerHTML='<option value="">请选择市</option>';
+        districtSel.innerHTML='<option value="">请选择县/区</option>';
+        
+        let provinceDataItem = provinceData[this.value];
+        if(!provinceDataItem) {
+            provinceGroup.style.display='block';
+            return;
+        }
+        
+        // 判断是否是直辖市或特别行政区
+        if(provinceDataItem.type === 'municipality' || provinceDataItem.type === 'special') {
+            // 直辖市：市名与省名相同，隐藏省字段
+            provinceGroup.style.display='none';
+            let opt=document.createElement('option');
+            opt.value=this.value;
+            opt.innerText=this.value;
+            citySel.appendChild(opt);
+            citySel.value=this.value;
+            // 自动触发市选择事件，加载区县
+            citySel.onchange();
+        } else {
+            // 普通省份：显示省字段，遍历城市列表
+            provinceGroup.style.display='block';
+            Object.keys(provinceDataItem).forEach(city=>{
+                let opt=document.createElement('option');
+                opt.value=city;
+                opt.innerText=city;
+                citySel.appendChild(opt);
+            });
+        }
+    };
+    document.getElementById('newAddrCity').onchange=function(){
+        let districtSel=document.getElementById('newAddrDistrict');
+        districtSel.innerHTML='<option value="">请选择县/区</option>';
+        
+        let province=document.getElementById('newAddrProvince').value;
+        let provinceDataItem = provinceData[province];
+        if(!provinceDataItem) return;
+        
+        // 判断是否是直辖市或特别行政区
+        if(provinceDataItem.type === 'municipality' || provinceDataItem.type === 'special') {
+            // 直辖市：区县直接从districts获取
+            let districts = provinceDataItem.districts;
+            if(districts){
+                districts.forEach(district=>{
+                    let opt=document.createElement('option');
+                    opt.value=district;
+                    opt.innerText=district;
+                    districtSel.appendChild(opt);
+                });
+            }
+        } else {
+            // 普通省份：根据选中的市获取对应的区县
+            let districts = provinceDataItem[this.value];
+            if(districts){
+                districts.forEach(district=>{
+                    let opt=document.createElement('option');
+                    opt.value=district;
+                    opt.innerText=district;
+                    districtSel.appendChild(opt);
+                });
+            }
+        }
+    };
+    document.getElementById('cancelEditAddrBtn').onclick=()=>document.getElementById('editAddressModal').style.display='none';
+    document.getElementById('saveEditAddrBtn').onclick=saveEditAddress;
+    document.getElementById('submitBookingBtn').onclick=submitBooking;
+    document.getElementById('afterSalesForm').onsubmit=e=>{e.preventDefault();submitAfterSales();};
+    document.getElementById('cancelAsBtn').onclick=()=>document.getElementById('afterSalesModal').style.display='none';
+    document.getElementById('confirmGiftBtn').onclick=confirmGift;
+    document.getElementById('cancelGiftBtn').onclick=()=>document.getElementById('giftModal').style.display='none';
+    document.querySelectorAll('.main-tab-btn').forEach(b=>b.onclick=()=>switchMainTab(b.dataset.main));
+    document.querySelectorAll('[data-profile-sub]').forEach(b=>b.onclick=()=>switchProfileSubTab(b.dataset.profileSub));
+
+    loadData(); currentPhone=localStorage.getItem(STORAGE_CURRENT_PHONE)||'13812345678'; document.getElementById('currentPhoneDisplay').innerText=currentPhone;
+    updatePackageDisplay(currentPhone); refreshAddressUI(); renderVegCards(); switchMainTab('booking');
+    checkDeadlineAndUpdateBtn();
+    setInterval(checkDeadlineAndUpdateBtn, 60000);
+    initProvinceSelect();
+</script>
+</body>
+</html>

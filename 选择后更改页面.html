@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>确认订单</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+            background: #f5f7fa;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding: 20px 16px 40px;
+        }
+
+        .card {
+            max-width: 420px;
+            width: 100%;
+            background: #ffffff;
+            border-radius: 24px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            padding: 24px 20px 28px;
+            animation: fadeUp 0.4s ease-out;
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ===== 套餐信息模块 ===== */
+        .plan-module {
+            background: #f8faff;
+            border-radius: 16px;
+            padding: 16px 18px;
+            border: 1px solid #eef3fc;
+            margin-bottom: 20px;
+        }
+
+        .plan-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .plan-phone {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1f2a3a;
+            letter-spacing: 0.3px;
+        }
+
+        .plan-name {
+            font-size: 15px;
+            font-weight: 500;
+            color: #ffffff;
+            background: #4CAF50;
+            padding: 2px 12px;
+            border-radius: 20px;
+            line-height: 26px;
+        }
+
+        .plan-stats {
+            display: flex;
+            justify-content: space-around;
+            gap: 16px;
+        }
+
+        .stat-block {
+            flex: 1;
+            background: #e8f5e9;
+            border-radius: 16px;
+            padding: 12px 8px;
+            text-align: center;
+            border: 1px solid #c8e6c9;
+        }
+
+        .stat-number {
+            font-size: 28px;
+            font-weight: 700;
+            color: #2e7d32;
+            line-height: 1.2;
+            display: block;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: #4a6a4a;
+            font-weight: 500;
+            margin-top: 2px;
+            display: block;
+        }
+
+        /* ===== 标题 ===== */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .section-title {
+            font-size: 17px;
+            font-weight: 600;
+            color: #1f2a3a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title .badge {
+            background: #eef2f7;
+            color: #5a6b7c;
+            font-size: 12px;
+            font-weight: 500;
+            padding: 0 10px;
+            border-radius: 12px;
+            line-height: 22px;
+        }
+
+        /* ===== 蔬菜网格 ===== */
+        .veg-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .veg-item {
+            background: #f8faff;
+            border-radius: 16px;
+            padding: 16px 8px 12px;
+            text-align: center;
+            border: 1px solid #f0f4fa;
+            transition: all 0.2s;
+        }
+
+        .veg-img {
+            font-size: 36px;
+            line-height: 1.2;
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        .veg-name {
+            font-size: 15px;
+            font-weight: 500;
+            color: #1f2a3a;
+            margin-bottom: 2px;
+        }
+
+        .veg-weight {
+            font-size: 14px;
+            font-weight: 600;
+            color: #ffffff;
+            background: #4CAF50;
+            display: inline-block;
+            padding: 0 12px;
+            border-radius: 20px;
+            line-height: 24px;
+            margin-top: 2px;
+        }
+
+        .veg-weight .unit {
+            font-size: 11px;
+            font-weight: 400;
+            color: #e8f5e9;
+            margin-left: 1px;
+        }
+
+        /* ===== 合计 ===== */
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 2px dashed #e6ecf3;
+        }
+
+        .total-label {
+            font-size: 16px;
+            font-weight: 500;
+            color: #1f2a3a;
+        }
+
+        .total-weight {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2a3a;
+        }
+
+        .total-weight .unit {
+            font-size: 14px;
+            font-weight: 400;
+            color: #7a8a9e;
+            margin-left: 2px;
+        }
+
+        /* ===== 分割线 ===== */
+        .divider {
+            height: 1px;
+            background: #eef2f7;
+            margin: 20px 0;
+        }
+
+        /* ===== 收货地址 ===== */
+        .address-card {
+            background: #f8faff;
+            border-radius: 16px;
+            padding: 16px 18px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            border: 1px solid #eef3fc;
+        }
+
+        .address-icon {
+            flex-shrink: 0;
+            width: 36px;
+            height: 36px;
+            background: #e8f5e9;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #4CAF50;
+            font-size: 18px;
+            margin-top: 2px;
+        }
+
+        .address-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .address-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1f2a3a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .address-name .phone {
+            font-size: 14px;
+            font-weight: 400;
+            color: #7a8a9e;
+        }
+
+        .address-detail {
+            font-size: 15px;
+            color: #3a4a5e;
+            margin-top: 4px;
+            line-height: 1.5;
+            word-break: break-all;
+        }
+
+        /* ===== 修改按钮 ===== */
+        .btn-modify-wrapper {
+            margin-top: 20px;
+        }
+
+        .btn-modify {
+            display: block;
+            width: 100%;
+            background: #4CAF50;
+            color: #ffffff;
+            font-size: 18px;
+            font-weight: 600;
+            border: none;
+            border-radius: 40px;
+            padding: 16px 0;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn-modify:active {
+            background: #388e3c;
+            transform: scale(0.98);
+            box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);
+        }
+
+        .btn-modify .icon {
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        /* ===== Toast ===== */
+        .custom-toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%) translateY(12px);
+            background-color: rgba(30, 40, 55, 0.92);
+            color: #fff;
+            padding: 12px 28px;
+            border-radius: 40px;
+            font-size: 15px;
+            font-weight: 500;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(4px);
+            z-index: 9999;
+            max-width: calc(100% - 40px);
+            text-align: center;
+            letter-spacing: 0.3px;
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none;
+        }
+
+        .custom-toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* ===== 响应式 ===== */
+        @media (max-width: 400px) {
+            .card {
+                padding: 18px 14px 22px;
+            }
+            .veg-grid {
+                gap: 8px;
+            }
+            .veg-item {
+                padding: 12px 4px 10px;
+            }
+            .veg-img {
+                font-size: 30px;
+            }
+            .veg-name {
+                font-size: 14px;
+            }
+            .veg-weight {
+                font-size: 13px;
+                padding: 0 10px;
+                line-height: 22px;
+            }
+            .btn-modify {
+                font-size: 17px;
+                padding: 14px 0;
+            }
+            .plan-top {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 6px;
+            }
+            .plan-name {
+                font-size: 14px;
+            }
+            .stat-number {
+                font-size: 24px;
+            }
+            .stat-label {
+                font-size: 13px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+
+        <!-- ===== 套餐信息模块 ===== -->
+        <div class="plan-module">
+            <div class="plan-top">
+                <span class="plan-phone">📞 13812345678</span>
+                <span class="plan-name">8斤周套餐 · 最多 8 斤</span>
+            </div>
+            <div class="plan-stats">
+                <div class="stat-block">
+                    <span class="stat-number">3次</span>
+                    <span class="stat-label">已使用</span>
+                </div>
+                <div class="stat-block">
+                    <span class="stat-number">5次</span>
+                    <span class="stat-label">剩余</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 蔬菜区域 ===== -->
+        <div class="section-header">
+            <span class="section-title">
+                🥬 已选菜品
+                <span class="badge">共 8 斤</span>
+            </span>
+        </div>
+
+        <!-- 蔬菜网格 -->
+        <div class="veg-grid" id="vegGrid">
+            <!-- 由 JavaScript 动态渲染 -->
+        </div>
+
+        <!-- 合计 -->
+        <div class="total-row">
+            <span class="total-label">合计</span>
+            <span class="total-weight">8 <span class="unit">斤</span></span>
+        </div>
+
+        <!-- ===== 分割线 ===== -->
+        <div class="divider"></div>
+
+        <!-- ===== 收货地址 ===== -->
+        <div class="address-section">
+            <div class="section-header" style="margin-bottom: 12px;">
+                <span class="section-title" style="font-size: 16px;">
+                    📍 收货地址
+                </span>
+            </div>
+
+            <div class="address-card">
+                <div class="address-icon">🏠</div>
+                <div class="address-info">
+                    <div class="address-name">
+                        张建国
+                        <span class="phone">138****</span>
+                    </div>
+                    <div class="address-detail">
+                        北京市朝阳区望京街道10号院
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 修改按钮 ===== -->
+        <div class="btn-modify-wrapper">
+            <button class="btn-modify" id="modifyOrderBtn">
+                <span class="icon">✎</span> 修改订单
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        (function() {
+            // 模拟蔬菜数据
+            const vegData = [
+                { name: '菠菜', weight: 1, icon: '🥬' },
+                { name: '生菜', weight: 4.5, icon: '🥗' },
+                { name: '小白菜', weight: 0.5, icon: '🥬' },
+                { name: '空心菜', weight: 2, icon: '🥬' }
+            ];
+
+            function renderVeggies() {
+                const container = document.getElementById('vegGrid');
+                if (!container) return;
+                if (!vegData || vegData.length === 0) {
+                    container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; color: #aab8c8; padding: 20px 0;">暂无已选蔬菜</div>`;
+                    return;
+                }
+                let html = '';
+                vegData.forEach(item => {
+                    const weightStr = Number.isInteger(item.weight) ? item.weight.toString() : item.weight.toFixed(1);
+                    html += `
+                                <div class="veg-item">
+                                    <span class="veg-img">${item.icon}</span>
+                                    <div class="veg-name">${item.name}</div>
+                                    <div class="veg-weight">${weightStr}<span class="unit">斤</span></div>
+                                </div>
+                            `;
+                });
+                container.innerHTML = html;
+            }
+
+            function setupModifyButton() {
+                const modifyBtn = document.getElementById('modifyOrderBtn');
+                if (modifyBtn) {
+                    modifyBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        showToast('✎ 跳转至编辑页面，可修改菜品和地址');
+                    });
+                }
+            }
+
+            function showToast(msg) {
+                const oldToast = document.querySelector('.custom-toast');
+                if (oldToast) oldToast.remove();
+                const toast = document.createElement('div');
+                toast.className = 'custom-toast';
+                toast.textContent = msg;
+                document.body.appendChild(toast);
+                requestAnimationFrame(() => {
+                    toast.classList.add('show');
+                });
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                    setTimeout(() => {
+                        if (toast.parentNode) toast.remove();
+                    }, 350);
+                }, 2500);
+            }
+
+            function init() {
+                renderVeggies();
+                setupModifyButton();
+                console.log('✅ 订单预览已加载，数字后增加“次”');
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', init);
+            } else {
+                init();
+            }
+        })();
+    </script>
+
+</body>
+</html>
