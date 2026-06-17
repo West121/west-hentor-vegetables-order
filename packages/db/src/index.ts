@@ -7,5 +7,6 @@ export * from "./orders";
 export * from "./package-templates";
 export * from "./packages";
 export * from "./reservations";
+export * from "./store-management";
 export * from "./system-management";
 export * from "./tasks";

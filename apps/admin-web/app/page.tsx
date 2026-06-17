@@ -5,7 +5,9 @@ import {
   listAdminOperationLogs,
   listAdminUsers,
   listDishes,
+  listFranchisees,
   listPackageTemplates,
+  listStores,
   listStoreMembers,
   listStoreOrders,
   listTasks,
@@ -36,6 +38,11 @@ import {
   type PackageTemplatePanelItem,
 } from "./ui/package-template-management-panel";
 import { StoreSwitcher } from "./ui/store-switcher";
+import {
+  StoreManagementPanel,
+  type FranchiseePanelItem,
+  type StorePanelItem,
+} from "./ui/store-management-panel";
 import {
   SystemManagementPanel,
   type AdminUserPanelItem,
@@ -77,6 +84,8 @@ async function getDashboardData(adminUserId: string, selectedStoreId?: string) {
     tasks,
     userPackages,
     operationLogs,
+    managedStores,
+    franchisees,
   ] = await Promise.all([
       prisma.memberStoreBinding.count({
         where: { status: "ACTIVE", storeId: { in: accessibleStoreIds } },
@@ -144,6 +153,15 @@ async function getDashboardData(adminUserId: string, selectedStoreId?: string) {
               take: 10,
             })
           : Promise.resolve({ items: [], summary: { total: 0 } }),
+      listStores(
+        storeAccess.scope === "ALL" ? {} : { storeIds: accessibleStoreIds },
+      ),
+      storeAccess.scope === "ALL"
+        ? listFranchisees()
+        : Promise.resolve({
+            items: [],
+            summary: { active: 0, expired: 0, suspended: 0, total: 0 },
+          }),
     ]);
 
   return {
@@ -154,6 +172,10 @@ async function getDashboardData(adminUserId: string, selectedStoreId?: string) {
     dishOptions: dishes.items.map(serializeTaskDishOption),
     operationLogs: operationLogs.items.map(serializeOperationLogPanelItem),
     members,
+    franchisees: franchisees.items.map(serializeFranchiseePanelItem),
+    franchiseeSummary: franchisees.summary,
+    managedStores: managedStores.items.map(serializeStorePanelItem),
+    managedStoreSummary: managedStores.summary,
     packageTemplates: packageTemplates.items.map(serializePackageTemplatePanelItem),
     roles: adminRoles.map((role) => ({
       id: role.id,
@@ -172,6 +194,28 @@ async function getDashboardData(adminUserId: string, selectedStoreId?: string) {
         "后台用户",
     },
     userPackages: userPackages.items.map(serializePackagePanelItem),
+  };
+}
+
+function serializeStorePanelItem(
+  item: Awaited<ReturnType<typeof listStores>>["items"][number],
+): StorePanelItem {
+  return {
+    ...item,
+    createdAt: item.createdAt.toISOString(),
+    franchiseEndsAt: item.franchiseEndsAt?.toISOString() ?? null,
+    updatedAt: item.updatedAt.toISOString(),
+  };
+}
+
+function serializeFranchiseePanelItem(
+  item: Awaited<ReturnType<typeof listFranchisees>>["items"][number],
+): FranchiseePanelItem {
+  return {
+    ...item,
+    contractEndsAt: item.contractEndsAt?.toISOString() ?? null,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString(),
   };
 }
 
@@ -342,7 +386,11 @@ export default async function DashboardPage({
       <main className="space-y-6 p-7">
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {[
-            ["加盟门店", data.stores.length, "总部可看全部，门店按授权过滤"],
+            [
+              "加盟门店",
+              data.managedStoreSummary.franchise,
+              "总部可看全部，门店按授权过滤",
+            ],
             ["活跃会员", data.members, "会员与门店绑定，不混同后台用户"],
             ["有效套餐", data.activePackages, "支持冻结、延期、次数调整"],
             ["累计订单", data.orders, "详情/编辑/新建统一弹窗打开"],
@@ -357,6 +405,14 @@ export default async function DashboardPage({
             </div>
           ))}
         </section>
+
+        <StoreManagementPanel
+          canManageAllStores={data.storeAccessScope === "ALL"}
+          initialFranchisees={data.franchisees}
+          initialFranchiseeSummary={data.franchiseeSummary}
+          initialStores={data.managedStores}
+          initialStoreSummary={data.managedStoreSummary}
+        />
 
         <OrderManagementPanel
           initialItems={data.storeOrders}
@@ -442,39 +498,11 @@ export default async function DashboardPage({
           }))}
         />
 
-        <section className="grid gap-5 xl:grid-cols-[1fr_360px]">
-          <aside className="space-y-5">
-            <div className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold">门店加盟模型</h2>
-              <div className="mt-4 space-y-4">
-                {data.stores.map((store) => (
-                  <div className="rounded-xl border border-[#edf2ed] p-4" key={store.id}>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate font-semibold">{store.name}</div>
-                        <div className="mt-1 truncate text-xs text-[#66756d]">
-                          {store.franchisee?.name ?? "总部直营"}
-                        </div>
-                      </div>
-                      <span className="rounded-full bg-[#f3f7f1] px-2.5 py-1 text-xs">
-                        {store.type === "FRANCHISE" ? "加盟" : "直营"}
-                      </span>
-                    </div>
-                    <div className="mt-3 text-sm text-[#66756d]">
-                      截单 {store.cutoffTime} · {store.contactName}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-[#dbe6dc] bg-[#f9fff9] p-5 shadow-sm">
-              <h2 className="text-lg font-semibold">支付预留</h2>
-              <p className="mt-3 text-sm leading-6 text-[#66756d]">
-                套餐购买已预留 purchase order、payment order 和微信支付字段，当前状态为未启用支付。
-              </p>
-            </div>
-          </aside>
+        <section className="rounded-2xl border border-[#dbe6dc] bg-[#f9fff9] p-5 shadow-sm">
+          <h2 className="text-lg font-semibold">支付预留</h2>
+          <p className="mt-3 text-sm leading-6 text-[#66756d]">
+            套餐购买已预留 purchase order、payment order 和微信支付字段，当前状态为未启用支付。
+          </p>
         </section>
       </main>
     </AdminShell>
