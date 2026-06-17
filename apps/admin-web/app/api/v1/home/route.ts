@@ -1,6 +1,7 @@
 import {
   findAvailableMiniappStore,
   getActiveTaskForStore,
+  getMiniappCurrentPackage,
   getMiniappEditableOrder,
   prisma,
   Prisma,
@@ -42,42 +43,44 @@ export async function GET(request: Request) {
     return fail("STORE_NOT_FOUND", "门店不存在或已停用", 404);
   }
 
-  const [userPackage, activeTask, fallbackDishes, order] = await Promise.all([
-    prisma.userPackage.findFirst({
-      where: {
+  const [userPackage, activeTask, fallbackDishes, order, member, defaultAddress] =
+    await Promise.all([
+      getMiniappCurrentPackage({
+        storeId: store.id,
         userId: auth.session.userId,
-        storeId: store.id,
-        status: "ACTIVE",
-      },
-      orderBy: { createdAt: "desc" },
-      include: { user: true },
-    }),
-    getActiveTaskForStore({ storeId: store.id }),
-    prisma.dish.findMany({
-      where: {
-        storeId: store.id,
-        status: "ON_SALE",
-        deletedAt: null,
-      },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-    }),
-    getMiniappEditableOrder({
-      orderId,
-      storeId: store.id,
-      userId: auth.session.userId,
-    }),
-  ]);
-  const dishes = activeTask?.dishes ?? fallbackDishes;
-  const defaultAddress = userPackage
-    ? await prisma.address.findFirst({
+      }),
+      getActiveTaskForStore({ storeId: store.id }),
+      prisma.dish.findMany({
         where: {
-          userId: userPackage.userId,
+          storeId: store.id,
+          status: "ON_SALE",
+          deletedAt: null,
+        },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      }),
+      getMiniappEditableOrder({
+        orderId,
+        storeId: store.id,
+        userId: auth.session.userId,
+      }),
+      prisma.user.findUnique({
+        where: { id: auth.session.userId },
+        select: {
+          id: true,
+          nickname: true,
+          phone: true,
+        },
+      }),
+      prisma.address.findFirst({
+        where: {
+          userId: auth.session.userId,
           storeId: store.id,
           isDefault: true,
         },
         orderBy: { createdAt: "desc" },
-      })
-    : null;
+      }),
+    ]);
+  const dishes = activeTask?.dishes ?? fallbackDishes;
 
   const selectedItems = order?.items ?? [];
   const summary = calculateReservationSummary(
@@ -115,15 +118,17 @@ export async function GET(request: Request) {
             userPackage.totalTimes - userPackage.usedTimes,
             0,
           ),
+          status: userPackage.status,
+          frozenReason: userPackage.frozenReason,
           weightLimitJin: toNumber(userPackage.weightLimitJin),
           expiresAt: userPackage.expiresAt.toISOString(),
         }
       : null,
-    member: userPackage
+    member: member
       ? {
-          id: userPackage.user.id,
-          nickname: userPackage.user.nickname,
-          phone: userPackage.user.phone,
+          id: member.id,
+          nickname: member.nickname,
+          phone: member.phone,
         }
       : null,
     defaultAddress: defaultAddress

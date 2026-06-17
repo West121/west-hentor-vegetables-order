@@ -525,6 +525,43 @@ describe("mini app customer portal", () => {
     expect(otherStoreOrders.items).toHaveLength(0);
   });
 
+  it("returns a frozen current package for home state when no active package is available", async () => {
+    const fixture = await createFixture();
+    await prisma.userPackage.update({
+      where: { id: fixture.userPackage.id },
+      data: {
+        frozenReason: "后台冻结测试",
+        status: "FROZEN",
+      },
+    });
+
+    const currentPackage = await (
+      miniapp as typeof miniapp & {
+        getMiniappCurrentPackage: (input: {
+          now: Date;
+          storeId: string;
+          userId: string;
+        }) => Promise<{
+          frozenReason: string | null;
+          id: string;
+          remainingTimes: number;
+          status: string;
+        } | null>;
+      }
+    ).getMiniappCurrentPackage({
+      now: new Date("2026-06-18T00:00:00.000Z"),
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(currentPackage).toMatchObject({
+      frozenReason: "后台冻结测试",
+      id: fixture.userPackage.id,
+      remainingTimes: 6,
+      status: "FROZEN",
+    });
+  });
+
   it("loads a specific pending reservation for editing from the home page", async () => {
     const fixture = await createFixture();
     const laterPendingOrder = await prisma.order.create({

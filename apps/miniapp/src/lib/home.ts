@@ -29,6 +29,16 @@ export type EditingOrderResolutionInput = {
   };
 };
 
+export type ReservationPackageLike = {
+  frozenReason?: string | null;
+  remainingTimes: number;
+  status?: string;
+};
+
+export type ReservationGateInput = {
+  packageInfo: null | ReservationPackageLike | undefined;
+};
+
 function normalizeWeight(value: number) {
   return Number(value.toFixed(2));
 }
@@ -88,5 +98,52 @@ export function getEditingOrderResolution(
   return {
     shouldClearEditingOrder: true,
     toastTitle: "该订单已不可修改",
+  };
+}
+
+export function getReservationGate({ packageInfo }: ReservationGateInput) {
+  if (!packageInfo) {
+    return {
+      canReserve: false,
+      emptyMessage:
+        "当前没有可用套餐，暂不能下单。请在“我的-套餐”购买后再预订。",
+      packageMeta: null,
+      submitDisabled: true,
+    };
+  }
+
+  if (packageInfo.status === "FROZEN") {
+    const reason = packageInfo.frozenReason?.trim();
+    return {
+      canReserve: false,
+      emptyMessage: null,
+      packageMeta: reason ? `套餐已冻结：${reason}` : "套餐已冻结，暂不能预订",
+      submitDisabled: true,
+    };
+  }
+
+  if (packageInfo.status && packageInfo.status !== "ACTIVE") {
+    return {
+      canReserve: false,
+      emptyMessage: null,
+      packageMeta: "套餐当前不可用",
+      submitDisabled: true,
+    };
+  }
+
+  if (packageInfo.remainingTimes <= 0) {
+    return {
+      canReserve: false,
+      emptyMessage: null,
+      packageMeta: "套餐次数已用完",
+      submitDisabled: true,
+    };
+  }
+
+  return {
+    canReserve: true,
+    emptyMessage: null,
+    packageMeta: null,
+    submitDisabled: false,
   };
 }

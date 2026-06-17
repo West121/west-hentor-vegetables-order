@@ -9,6 +9,7 @@ import {
   buildSelectedItems,
   changeDishSelection,
   getEditingOrderResolution,
+  getReservationGate,
 } from "../../lib/home";
 import "./index.scss";
 
@@ -63,9 +64,11 @@ type HomeData = {
     id: string;
   };
   package: null | {
+    frozenReason: string | null;
     id: string;
     name: string;
     remainingTimes: number;
+    status: string;
     storeId: string;
     userId: string;
     weightLimitJin: number;
@@ -163,6 +166,7 @@ export default function HomePage() {
   const packageInfo = homeData?.package;
   const dishes = homeData?.dishes ?? [];
   const hasPackage = Boolean(packageInfo);
+  const reservationGate = getReservationGate({ packageInfo });
 
   const selectedItems = useMemo(
     () => buildSelectedItems(dishes, selected),
@@ -172,10 +176,17 @@ export default function HomePage() {
     selectedItems,
     packageInfo?.weightLimitJin ?? 0,
   );
+  const submitDisabled = summary.isOverLimit || reservationGate.submitDisabled;
 
   function changeDish(id: string, delta: number, step: number) {
-    if (!hasPackage) {
-      Taro.showToast({ title: "暂无可用套餐", icon: "none" });
+    if (!reservationGate.canReserve) {
+      Taro.showToast({
+        title:
+          reservationGate.packageMeta ??
+          reservationGate.emptyMessage ??
+          "暂无可用套餐",
+        icon: "none",
+      });
       return;
     }
 
@@ -189,8 +200,14 @@ export default function HomePage() {
   }
 
   async function submitOrder() {
-    if (!hasPackage) {
-      Taro.showToast({ title: "请先购买套餐", icon: "none" });
+    if (!reservationGate.canReserve) {
+      Taro.showToast({
+        title:
+          reservationGate.packageMeta ??
+          reservationGate.emptyMessage ??
+          "请先购买套餐",
+        icon: "none",
+      });
       return;
     }
 
@@ -264,21 +281,26 @@ export default function HomePage() {
       {loading && !homeData ? (
         <View className="empty-package">正在加载今日可预订内容...</View>
       ) : hasPackage && packageInfo ? (
-        <View className="package-card">
+        <View
+          className={
+            reservationGate.canReserve
+              ? "package-card"
+              : "package-card package-card--disabled"
+          }
+        >
           <View className="package-card__name">{packageInfo.name}</View>
           <View className="package-card__main">
             已选 {summary.totalWeightJin} / {packageInfo.weightLimitJin}斤
           </View>
           <View className="package-card__meta">
-            {homeData?.currentOrder
-              ? `正在修改 ${homeData.currentOrder.orderNo}`
-              : `本周剩余 ${packageInfo.remainingTimes} 次，可在截单前修改`}
+            {reservationGate.packageMeta ??
+              (homeData?.currentOrder
+                ? `正在修改 ${homeData.currentOrder.orderNo}`
+                : `本周剩余 ${packageInfo.remainingTimes} 次，可在截单前修改`)}
           </View>
         </View>
       ) : (
-        <View className="empty-package">
-          当前没有可用套餐，暂不能下单。请在“我的-套餐”购买后再预订。
-        </View>
+        <View className="empty-package">{reservationGate.emptyMessage}</View>
       )}
 
       <View
@@ -356,12 +378,13 @@ export default function HomePage() {
           <View className="summary__meta">
             {summary.isOverLimit
               ? "超过套餐额度，请减少菜品"
-              : `可修改已预订内容，剩余 ${summary.remainingWeightJin}斤`}
+              : reservationGate.packageMeta ??
+                `可修改已预订内容，剩余 ${summary.remainingWeightJin}斤`}
           </View>
         </View>
         <Text
           className={
-            summary.isOverLimit || !hasPackage
+            submitDisabled
               ? "summary__submit summary__submit--disabled"
               : "summary__submit"
           }

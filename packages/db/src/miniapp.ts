@@ -31,6 +31,10 @@ export type MiniappWechatPrepayInput = MiniappStoreUserInput & {
   purchaseOrderId: string;
 };
 
+export type MiniappCurrentPackageInput = MiniappStoreUserInput & {
+  now?: Date;
+};
+
 export type MiniappOrderActionInput = MiniappStoreUserInput & {
   orderId: string;
 };
@@ -115,8 +119,10 @@ function packageView(item: {
   nextOrderDate: Date | null;
   startsAt: Date;
   status: PackageStatus;
+  storeId: string;
   totalTimes: number;
   usedTimes: number;
+  userId: string;
   weightLimitJin: Prisma.Decimal;
 }) {
   return {
@@ -130,8 +136,10 @@ function packageView(item: {
     remainingTimes: Math.max(item.totalTimes - item.usedTimes, 0),
     startsAt: item.startsAt,
     status: item.status,
+    storeId: item.storeId,
     totalTimes: item.totalTimes,
     usedTimes: item.usedTimes,
+    userId: item.userId,
     weightLimitJin: toNumber(item.weightLimitJin),
   };
 }
@@ -320,6 +328,22 @@ export async function listMiniappPackages(input: MiniappStoreUserInput) {
       })),
     },
   };
+}
+
+export async function getMiniappCurrentPackage(input: MiniappCurrentPackageInput) {
+  const now = input.now ?? new Date();
+  const items = await prisma.userPackage.findMany({
+    where: {
+      expiresAt: { gte: now },
+      status: { in: ["ACTIVE", "FROZEN"] },
+      storeId: input.storeId,
+      userId: input.userId,
+    },
+    orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+  });
+  const current = items.find((item) => item.status === "ACTIVE") ?? items[0] ?? null;
+
+  return current ? packageView(current) : null;
 }
 
 export async function createMiniappPackagePurchase(

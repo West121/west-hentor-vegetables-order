@@ -5,6 +5,7 @@ import {
   buildSelectedItems,
   changeDishSelection,
   getEditingOrderResolution,
+  getReservationGate,
 } from "./home";
 
 const dishes = [
@@ -101,5 +102,22 @@ describe("miniapp home helpers", () => {
         currentOrder: null,
       }),
     ).toEqual({ shouldClearEditingOrder: false });
+  });
+
+  it("shows frozen packages as unavailable instead of treating them as missing", () => {
+    expect(
+      getReservationGate({
+        packageInfo: {
+          frozenReason: "后台冻结测试",
+          remainingTimes: 6,
+          status: "FROZEN",
+        },
+      }),
+    ).toEqual({
+      canReserve: false,
+      emptyMessage: null,
+      packageMeta: "套餐已冻结：后台冻结测试",
+      submitDisabled: true,
+    });
   });
 });
