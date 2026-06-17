@@ -2,6 +2,7 @@ import { prisma, Prisma } from "@hentor/db";
 import { calculateReservationSummary, storeCodeSchema } from "@hentor/shared";
 
 import { fail, ok } from "@/app/lib/api";
+import { requireMiniSession } from "@/app/lib/mini-auth";
 
 function toNumber(value: Prisma.Decimal | number | null | undefined) {
   if (value == null) {
@@ -12,6 +13,11 @@ function toNumber(value: Prisma.Decimal | number | null | undefined) {
 }
 
 export async function GET(request: Request) {
+  const auth = requireMiniSession(request);
+  if (!auth.session) {
+    return auth.response;
+  }
+
   const { searchParams } = new URL(request.url);
   const storeCode = searchParams.get("storeCode") ?? "lotus-garden";
   const parsedStoreCode = storeCodeSchema.safeParse(storeCode);
@@ -20,8 +26,11 @@ export async function GET(request: Request) {
     return fail("INVALID_STORE_CODE", "门店编码不正确");
   }
 
-  const store = await prisma.store.findUnique({
-    where: { code: parsedStoreCode.data },
+  const store = await prisma.store.findFirst({
+    where: {
+      code: parsedStoreCode.data,
+      id: auth.session.storeId,
+    },
   });
 
   if (!store || store.status !== "ACTIVE") {
@@ -31,6 +40,7 @@ export async function GET(request: Request) {
   const [userPackage, dishes, order] = await Promise.all([
     prisma.userPackage.findFirst({
       where: {
+        userId: auth.session.userId,
         storeId: store.id,
         status: "ACTIVE",
       },
@@ -48,6 +58,7 @@ export async function GET(request: Request) {
     prisma.order.findFirst({
       where: {
         storeId: store.id,
+        userId: auth.session.userId,
         status: "PENDING_SHIPMENT",
         deletedByUserAt: null,
       },

@@ -8,6 +8,7 @@ import {
 import { storeCodeSchema } from "@hentor/shared";
 
 import { fail, ok } from "@/app/lib/api";
+import { requireMiniSession } from "@/app/lib/mini-auth";
 
 const reservationItemSchema = z.object({
   dishId: z.string().min(1),
@@ -19,8 +20,6 @@ const submitReservationSchema = z.object({
   items: z.array(reservationItemSchema).min(1),
   orderId: z.string().optional(),
   storeCode: storeCodeSchema.optional(),
-  storeId: z.string().optional(),
-  userId: z.string().min(1),
   userPackageId: z.string().min(1),
   userVisibleRemark: z.string().max(200).optional(),
 });
@@ -38,6 +37,11 @@ function statusForReservationError(code: string) {
 }
 
 export async function POST(request: Request) {
+  const auth = requireMiniSession(request);
+  if (!auth.session) {
+    return auth.response;
+  }
+
   const parsed = submitReservationSchema.safeParse(
     await request.json().catch(() => null),
   );
@@ -46,17 +50,19 @@ export async function POST(request: Request) {
     return fail("INVALID_PARAMS", "预订参数不完整");
   }
 
-  const storeId =
-    parsed.data.storeId ??
-    (
-      await prisma.store.findFirst({
-        where: parsed.data.storeCode
-          ? { code: parsed.data.storeCode, status: "ACTIVE" }
-          : { status: "ACTIVE" },
-        orderBy: { createdAt: "asc" },
-        select: { id: true },
-      })
-    )?.id;
+  const storeId = (
+    await prisma.store.findFirst({
+      where: parsed.data.storeCode
+        ? {
+            code: parsed.data.storeCode,
+            id: auth.session.storeId,
+            status: "ACTIVE",
+          }
+        : { id: auth.session.storeId, status: "ACTIVE" },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    })
+  )?.id;
 
   if (!storeId) {
     return fail("STORE_NOT_FOUND", "当前门店不可用", 404);
@@ -68,7 +74,7 @@ export async function POST(request: Request) {
       items: parsed.data.items,
       orderId: parsed.data.orderId,
       storeId,
-      userId: parsed.data.userId,
+      userId: auth.session.userId,
       userPackageId: parsed.data.userPackageId,
       userVisibleRemark: parsed.data.userVisibleRemark,
     });

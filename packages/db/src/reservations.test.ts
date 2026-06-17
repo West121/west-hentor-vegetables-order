@@ -11,6 +11,7 @@ import {
   type UserPackage,
 } from "./index";
 import { shipOrder } from "./orders";
+import { freezeUserPackage, unfreezeUserPackage } from "./packages";
 import { ReservationServiceError, submitReservation } from "./reservations";
 
 type Fixture = {
@@ -328,6 +329,50 @@ describe("shipOrder", () => {
           action: "ORDER_SHIPPED",
           operatorId: fixture.admin.id,
           resourceId: order.id,
+        },
+      }),
+    ).resolves.toBe(1);
+  });
+});
+
+describe("user package operations", () => {
+  it("freezes and unfreezes a user package with operation logs", async () => {
+    const fixture = await createFixture();
+
+    const frozen = await freezeUserPackage({
+      operatorId: fixture.admin.id,
+      reason: "用户暂停配送",
+      storeId: fixture.store.id,
+      userPackageId: fixture.userPackage.id,
+    });
+
+    expect(frozen.status).toBe("FROZEN");
+    expect(frozen.frozenReason).toBe("用户暂停配送");
+    await expect(
+      prisma.packageOperationLog.count({
+        where: {
+          operatorId: fixture.admin.id,
+          reason: "用户暂停配送",
+          userPackageId: fixture.userPackage.id,
+        },
+      }),
+    ).resolves.toBe(1);
+
+    const active = await unfreezeUserPackage({
+      operatorId: fixture.admin.id,
+      reason: "用户恢复配送",
+      storeId: fixture.store.id,
+      userPackageId: fixture.userPackage.id,
+    });
+
+    expect(active.status).toBe("ACTIVE");
+    expect(active.frozenReason).toBeNull();
+    await expect(
+      prisma.packageOperationLog.count({
+        where: {
+          operatorId: fixture.admin.id,
+          reason: "用户恢复配送",
+          userPackageId: fixture.userPackage.id,
         },
       }),
     ).resolves.toBe(1);

@@ -81,13 +81,27 @@ export default function HomePage() {
     }
 
     try {
+      const token = Taro.getStorageSync("mini_session_token");
+      if (!token) {
+        Taro.navigateTo({ url: "/pages/login/index" });
+        return;
+      }
+
       const response = await Taro.request<ApiResponse<HomeData>>({
         url: `${API_BASE_URL}/api/v1/home?storeCode=${STORE_CODE}`,
         method: "GET",
+        header: {
+          authorization: `Bearer ${token}`,
+        },
       });
       const payload = response.data;
 
       if (!payload.success || !payload.data) {
+        if (payload.error?.code === "UNAUTHORIZED") {
+          Taro.navigateTo({ url: "/pages/login/index" });
+          return;
+        }
+
         throw new Error(payload.error?.message ?? "首页数据加载失败");
       }
 
@@ -180,6 +194,9 @@ export default function HomePage() {
       const response = await Taro.request<ApiResponse<unknown>>({
         url: `${API_BASE_URL}/api/v1/reservations`,
         method: "POST",
+        header: {
+          authorization: `Bearer ${Taro.getStorageSync("mini_session_token")}`,
+        },
         data: {
           addressId,
           items: selectedItems.map((item) => ({
@@ -187,8 +204,6 @@ export default function HomePage() {
             weightJin: item.weightJin,
           })),
           orderId: homeData.currentOrder?.id,
-          storeId: homeData.store.id,
-          userId: packageInfo.userId,
           userPackageId: packageInfo.id,
         },
       });

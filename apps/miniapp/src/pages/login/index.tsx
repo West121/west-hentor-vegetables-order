@@ -26,7 +26,10 @@ export default function LoginPage() {
         storeCode: "lotus-garden",
       },
       success(response) {
-        if (response.statusCode >= 200 && response.statusCode < 300) {
+        const token = (response.data as { data?: { token?: string } })?.data?.token;
+
+        if (response.statusCode >= 200 && response.statusCode < 300 && token) {
+          Taro.setStorageSync("mini_session_token", token);
           Taro.switchTab({ url: "/pages/home/index" });
           return;
         }

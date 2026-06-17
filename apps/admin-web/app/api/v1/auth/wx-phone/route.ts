@@ -4,6 +4,7 @@ import { prisma } from "@hentor/db";
 import { storeCodeSchema } from "@hentor/shared";
 
 import { fail, ok } from "@/app/lib/api";
+import { createMiniToken } from "@/app/lib/mini-auth";
 import {
   exchangeWechatLoginCode,
   exchangeWechatPhoneCode,
@@ -77,6 +78,12 @@ export async function POST(request: Request) {
     });
 
     return ok({
+      token: createMiniToken({
+        issuedAt: Date.now(),
+        openid: user.openid,
+        storeId: store.id,
+        userId: user.id,
+      }),
       user: {
         id: user.id,
         phone: user.phone,
