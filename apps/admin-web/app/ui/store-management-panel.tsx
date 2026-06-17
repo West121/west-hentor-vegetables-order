@@ -577,8 +577,8 @@ export function StoreManagementPanel({
           <div
             className={
               fullscreen
-                ? "absolute inset-5 flex flex-col rounded-2xl bg-white shadow-2xl"
-                : "absolute left-1/2 top-20 flex w-[min(760px,calc(100vw-48px))] -translate-x-1/2 flex-col rounded-2xl bg-white shadow-2xl"
+                ? "absolute inset-5 flex flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+                : "absolute left-1/2 top-20 flex h-[74vh] w-[min(820px,calc(100vw-48px))] -translate-x-1/2 resize flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
             }
             style={
               fullscreen
@@ -603,7 +603,7 @@ export function StoreManagementPanel({
                         : "编辑加盟商"}
                 </h3>
                 <p className="mt-1 text-sm text-[#66756d]">
-                  标题栏可拖动，右上角支持全屏。
+                  标题栏可拖动，右下角可伸缩，右上角支持全屏。
                 </p>
               </div>
               <div className="flex items-center gap-2">
