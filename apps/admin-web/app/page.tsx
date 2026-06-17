@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import {
+  listPackageTemplates,
   listStoreMembers,
   listStoreOrders,
   listUserPackages,
@@ -24,16 +25,29 @@ import {
   PackageManagementPanel,
   type PackagePanelItem,
 } from "./ui/package-management-panel";
+import {
+  PackageTemplateManagementPanel,
+  type PackageTemplatePanelItem,
+} from "./ui/package-template-management-panel";
+import { StoreSwitcher } from "./ui/store-switcher";
 
-async function getDashboardData() {
+async function getDashboardData(selectedStoreId?: string) {
   const stores = await prisma.store.findMany({
     orderBy: { createdAt: "asc" },
     include: { franchisee: true },
   });
-  const activeStore = stores[0] ?? null;
+  const activeStore =
+    stores.find((store) => store.id === selectedStoreId) ?? stores[0] ?? null;
 
-  const [members, orders, activePackages, storeOrders, storeMembers, userPackages] =
-    await Promise.all([
+  const [
+    members,
+    orders,
+    activePackages,
+    storeOrders,
+    storeMembers,
+    packageTemplates,
+    userPackages,
+  ] = await Promise.all([
       prisma.memberStoreBinding.count({ where: { status: "ACTIVE" } }),
       prisma.order.count(),
       prisma.userPackage.count({ where: { status: "ACTIVE" } }),
@@ -56,6 +70,12 @@ async function getDashboardData() {
             summary: { active: 0, disabled: 0, total: 0 },
           }),
       activeStore
+        ? listPackageTemplates({ storeId: activeStore.id })
+        : Promise.resolve({
+            items: [],
+            summary: { active: 0, disabled: 0, total: 0 },
+          }),
+      activeStore
         ? listUserPackages({ storeId: activeStore.id })
         : Promise.resolve({
             items: [],
@@ -67,11 +87,22 @@ async function getDashboardData() {
     activeStore,
     activePackages,
     members,
+    packageTemplates: packageTemplates.items.map(serializePackageTemplatePanelItem),
     storeMembers: storeMembers.items.map(serializeMemberPanelItem),
     orders,
     storeOrders: storeOrders.items.map(serializeOrderPanelItem),
     stores,
     userPackages: userPackages.items.map(serializePackagePanelItem),
+  };
+}
+
+function serializePackageTemplatePanelItem(
+  item: Awaited<ReturnType<typeof listPackageTemplates>>["items"][number],
+): PackageTemplatePanelItem {
+  return {
+    ...item,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString(),
   };
 }
 
@@ -114,14 +145,19 @@ function serializePackagePanelItem(
   };
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ storeId?: string }>;
+}) {
   const session = await getAdminSession();
 
   if (!session) {
     redirect("/login");
   }
 
-  const data = await getDashboardData();
+  const params = await searchParams;
+  const data = await getDashboardData(params?.storeId);
   const activeStore = data.activeStore;
 
   return (
@@ -134,11 +170,13 @@ export default async function DashboardPage() {
           </h1>
         </div>
         <div className="flex items-center gap-3">
-          <select className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-4 text-sm font-medium outline-none">
-            {data.stores.map((store) => (
-              <option key={store.id}>{store.name}</option>
-            ))}
-          </select>
+          <StoreSwitcher
+            activeStoreId={activeStore?.id ?? null}
+            stores={data.stores.map((store) => ({
+              id: store.id,
+              name: store.name,
+            }))}
+          />
           <div className="flex items-center gap-3 rounded-2xl border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-2">
             <div className="grid h-10 w-10 place-items-center rounded-full bg-[#1f8f4f] text-sm font-semibold text-white">
               {session.name.slice(0, 1).toUpperCase()}
@@ -185,6 +223,18 @@ export default async function DashboardPage() {
 
         <MemberManagementPanel
           initialItems={data.storeMembers}
+          store={
+            activeStore
+              ? {
+                  id: activeStore.id,
+                  name: activeStore.name,
+                }
+              : null
+          }
+        />
+
+        <PackageTemplateManagementPanel
+          initialItems={data.packageTemplates}
           store={
             activeStore
               ? {
