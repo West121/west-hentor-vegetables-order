@@ -1,47 +1,59 @@
 "use client";
 
 import { useState, type ComponentType, type ReactNode } from "react";
-import type { LucideProps } from "lucide-react";
+import {
+  Boxes,
+  Building2,
+  ChevronDown,
+  ClipboardList,
+  FileClock,
+  LayoutDashboard,
+  Package,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+  ShieldCheck,
+  Store,
+  Truck,
+  UserRound,
+  UsersRound,
+  type LucideProps,
+} from "lucide-react";
 
+import type { AdminNavGroup, AdminNavIcon } from "@/app/lib/admin-navigation";
 import { cn } from "@/app/lib/cn";
 
-type NavItem = {
-  icon: ComponentType<LucideProps>;
-  label: string;
-  active?: boolean;
-};
-
-type NavGroup = {
-  label: string;
-  collapsible?: boolean;
-  items: NavItem[];
+const iconMap: Record<AdminNavIcon, ComponentType<LucideProps>> = {
+  boxes: Boxes,
+  building: Building2,
+  clipboard: ClipboardList,
+  dashboard: LayoutDashboard,
+  "file-clock": FileClock,
+  package: Package,
+  settings: Settings,
+  shield: ShieldCheck,
+  store: Store,
+  truck: Truck,
+  user: UserRound,
+  users: UsersRound,
 };
 
 type AdminShellProps = {
   brand: string;
-  groups: NavGroup[];
-  renderCollapseIcons: {
-    expanded: ComponentType<LucideProps>;
-    collapsed: ComponentType<LucideProps>;
-    group: ComponentType<LucideProps>;
-  };
+  groups: AdminNavGroup[];
   children: ReactNode;
 };
 
 export function AdminShell({
   brand,
   groups,
-  renderCollapseIcons,
   children,
 }: AdminShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     系统管理: true,
   });
-  const CollapseIcon = collapsed
-    ? renderCollapseIcons.collapsed
-    : renderCollapseIcons.expanded;
-  const GroupIcon = renderCollapseIcons.group;
+  const CollapseIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
 
   return (
     <div className="min-h-screen bg-[#f5f8f3]">
@@ -92,7 +104,7 @@ export function AdminShell({
                     <>
                       <span className="flex-1">{group.label}</span>
                       {group.collapsible ? (
-                        <GroupIcon
+                        <ChevronDown
                           className={cn("transition", !groupOpen && "-rotate-90")}
                           size={15}
                         />
@@ -103,7 +115,7 @@ export function AdminShell({
                 {groupOpen ? (
                   <div className="space-y-1">
                     {group.items.map((item) => {
-                      const Icon = item.icon;
+                      const ItemIcon = iconMap[item.icon];
                       return (
                         <button
                           className={cn(
@@ -115,7 +127,7 @@ export function AdminShell({
                           title={item.label}
                           type="button"
                         >
-                          <Icon size={18} />
+                          <ItemIcon size={18} />
                           <span className={cn("truncate", collapsed && "hidden")}>
                             {item.label}
                           </span>

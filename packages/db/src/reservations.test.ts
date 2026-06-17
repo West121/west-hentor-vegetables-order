@@ -11,7 +11,7 @@ import {
   type UserPackage,
 } from "./index";
 import { shipOrder } from "./orders";
-import { freezeUserPackage, unfreezeUserPackage } from "./packages";
+import * as packageOperations from "./packages";
 import { ReservationServiceError, submitReservation } from "./reservations";
 
 type Fixture = {
@@ -339,7 +339,7 @@ describe("user package operations", () => {
   it("freezes and unfreezes a user package with operation logs", async () => {
     const fixture = await createFixture();
 
-    const frozen = await freezeUserPackage({
+    const frozen = await packageOperations.freezeUserPackage({
       operatorId: fixture.admin.id,
       reason: "用户暂停配送",
       storeId: fixture.store.id,
@@ -358,7 +358,7 @@ describe("user package operations", () => {
       }),
     ).resolves.toBe(1);
 
-    const active = await unfreezeUserPackage({
+    const active = await packageOperations.unfreezeUserPackage({
       operatorId: fixture.admin.id,
       reason: "用户恢复配送",
       storeId: fixture.store.id,
@@ -376,5 +376,103 @@ describe("user package operations", () => {
         },
       }),
     ).resolves.toBe(1);
+  });
+
+  it("lists user packages for one store with member and usage summary", async () => {
+    const fixture = await createFixture();
+    const otherStoreFixture = await createFixture();
+    await prisma.userPackage.update({
+      where: { id: fixture.userPackage.id },
+      data: { usedTimes: 2 },
+    });
+
+    const result = await (
+      packageOperations as typeof packageOperations & {
+        listUserPackages: (input: { storeId: string }) => Promise<{
+          items: Array<{
+            id: string;
+            remainingTimes: number;
+            store: { id: string; name: string };
+            user: { id: string; nickname: string | null; phone: string | null };
+          }>;
+          summary: { active: number; expired: number; frozen: number; total: number };
+        }>;
+      }
+    ).listUserPackages({ storeId: fixture.store.id });
+
+    expect(result.summary).toEqual({
+      active: 1,
+      expired: 0,
+      frozen: 0,
+      total: 1,
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: fixture.userPackage.id,
+      remainingTimes: 6,
+      store: { id: fixture.store.id, name: "测试加盟店" },
+      user: {
+        id: fixture.user.id,
+        nickname: "测试会员",
+        phone: "13800001111",
+      },
+    });
+    expect(result.items[0]?.id).not.toBe(otherStoreFixture.userPackage.id);
+  });
+
+  it("adjusts a user package and records the before and after values", async () => {
+    const fixture = await createFixture();
+    const expiresAt = new Date("2100-01-31T15:59:59.000Z");
+    const nextOrderDate = new Date("2099-01-02T00:00:00.000Z");
+
+    const updated = await (
+      packageOperations as typeof packageOperations & {
+        adjustUserPackage: (input: {
+          expiresAt: Date;
+          nextOrderDate: Date | null;
+          operatorId: string;
+          reason: string;
+          storeId: string;
+          totalTimes: number;
+          usedTimes: number;
+          userPackageId: string;
+          weightLimitJin: number;
+        }) => Promise<UserPackage>;
+      }
+    ).adjustUserPackage({
+      expiresAt,
+      nextOrderDate,
+      operatorId: fixture.admin.id,
+      reason: "后台补偿调整",
+      storeId: fixture.store.id,
+      totalTimes: 10,
+      usedTimes: 2,
+      userPackageId: fixture.userPackage.id,
+      weightLimitJin: 6.5,
+    });
+
+    expect(updated.totalTimes).toBe(10);
+    expect(updated.usedTimes).toBe(2);
+    expect(Number(updated.weightLimitJin)).toBe(6.5);
+    expect(updated.expiresAt).toEqual(expiresAt);
+    expect(updated.nextOrderDate).toEqual(nextOrderDate);
+
+    const log = await prisma.packageOperationLog.findFirstOrThrow({
+      where: {
+        operatorId: fixture.admin.id,
+        reason: "后台补偿调整",
+        userPackageId: fixture.userPackage.id,
+      },
+    });
+    expect(log.beforeValue).toMatchObject({
+      totalTimes: 8,
+      usedTimes: 0,
+      weightLimitJin: "8",
+    });
+    expect(log.afterValue).toMatchObject({
+      totalTimes: 10,
+      usedTimes: 2,
+      weightLimitJin: "6.5",
+    });
   });
 });

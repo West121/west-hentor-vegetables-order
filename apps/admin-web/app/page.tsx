@@ -1,51 +1,70 @@
 import { redirect } from "next/navigation";
-import {
-  Boxes,
-  Building2,
-  ChevronDown,
-  ClipboardList,
-  FileClock,
-  LayoutDashboard,
-  Package,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Settings,
-  ShieldCheck,
-  Store,
-  Truck,
-  UserRound,
-  UsersRound,
-} from "lucide-react";
 
-import { prisma } from "@hentor/db";
+import { listUserPackages, prisma } from "@hentor/db";
 
+import { ADMIN_NAV_GROUPS } from "@/app/lib/admin-navigation";
 import { getAdminSession } from "@/app/lib/session";
 
 import { AdminShell } from "./ui/admin-shell";
 import { LogoutButton } from "./ui/logout-button";
 import { OrderModalPreview } from "./ui/order-modal-preview";
+import {
+  PackageManagementPanel,
+  type PackagePanelItem,
+} from "./ui/package-management-panel";
 
 async function getDashboardData() {
-  const [stores, members, orders, packages, latestOrders] = await Promise.all([
-    prisma.store.findMany({
-      orderBy: { createdAt: "asc" },
-      include: { franchisee: true },
-    }),
-    prisma.memberStoreBinding.count({ where: { status: "ACTIVE" } }),
-    prisma.order.count(),
-    prisma.userPackage.count({ where: { status: "ACTIVE" } }),
-    prisma.order.findMany({
-      take: 6,
-      orderBy: { createdAt: "desc" },
-      include: {
-        store: true,
-        user: true,
-        items: true,
-      },
-    }),
-  ]);
+  const stores = await prisma.store.findMany({
+    orderBy: { createdAt: "asc" },
+    include: { franchisee: true },
+  });
+  const activeStore = stores[0] ?? null;
 
-  return { stores, members, orders, packages, latestOrders };
+  const [members, orders, activePackages, latestOrders, userPackages] =
+    await Promise.all([
+      prisma.memberStoreBinding.count({ where: { status: "ACTIVE" } }),
+      prisma.order.count(),
+      prisma.userPackage.count({ where: { status: "ACTIVE" } }),
+      prisma.order.findMany({
+        take: 6,
+        orderBy: { createdAt: "desc" },
+        include: {
+          store: true,
+          user: true,
+          items: true,
+        },
+      }),
+      activeStore
+        ? listUserPackages({ storeId: activeStore.id })
+        : Promise.resolve({
+            items: [],
+            summary: { active: 0, expired: 0, frozen: 0, total: 0 },
+          }),
+    ]);
+
+  return {
+    activeStore,
+    activePackages,
+    latestOrders,
+    members,
+    orders,
+    stores,
+    userPackages: userPackages.items.map(serializePackagePanelItem),
+  };
+}
+
+function serializePackagePanelItem(
+  item: Awaited<ReturnType<typeof listUserPackages>>["items"][number],
+): PackagePanelItem {
+  return {
+    ...item,
+    createdAt: item.createdAt.toISOString(),
+    expiresAt: item.expiresAt.toISOString(),
+    lastUsedAt: item.lastUsedAt?.toISOString() ?? null,
+    nextOrderDate: item.nextOrderDate?.toISOString() ?? null,
+    startsAt: item.startsAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString(),
+  };
 }
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
@@ -64,66 +83,10 @@ export default async function DashboardPage() {
   }
 
   const data = await getDashboardData();
-  const activeStore = data.stores[0];
-
-  const groups = [
-    {
-      label: "工作台",
-      items: [{ icon: LayoutDashboard, label: "运营总览", active: true }],
-    },
-    {
-      label: "订单管理",
-      items: [
-        { icon: ClipboardList, label: "订单列表", active: true },
-        { icon: Truck, label: "发货统计" },
-      ],
-    },
-    {
-      label: "会员管理",
-      items: [
-        { icon: UsersRound, label: "会员用户" },
-        { icon: ShieldCheck, label: "用户套餐" },
-      ],
-    },
-    {
-      label: "套餐管理",
-      items: [
-        { icon: Package, label: "套餐模板" },
-        { icon: Boxes, label: "菜品管理" },
-      ],
-    },
-    {
-      label: "门店管理",
-      items: [
-        { icon: Store, label: "加盟门店" },
-        { icon: Building2, label: "加盟商" },
-      ],
-    },
-    {
-      label: "任务管理",
-      items: [{ icon: FileClock, label: "任务配置" }],
-    },
-    {
-      label: "系统管理",
-      collapsible: true,
-      items: [
-        { icon: UserRound, label: "后台用户" },
-        { icon: FileClock, label: "操作日志" },
-        { icon: Settings, label: "系统设置" },
-      ],
-    },
-  ];
+  const activeStore = data.activeStore;
 
   return (
-    <AdminShell
-      brand="Hentor Fresh"
-      groups={groups}
-      renderCollapseIcons={{
-        expanded: PanelLeftClose,
-        collapsed: PanelLeftOpen,
-        group: ChevronDown,
-      }}
-    >
+    <AdminShell brand="Hentor Fresh" groups={ADMIN_NAV_GROUPS}>
       <header className="flex min-h-20 items-center justify-between border-b border-[#dbe6dc] bg-white px-7">
         <div>
           <div className="text-sm font-medium text-[#66756d]">运营工作台</div>
@@ -155,7 +118,7 @@ export default async function DashboardPage() {
           {[
             ["加盟门店", data.stores.length, "总部可看全部，门店按授权过滤"],
             ["活跃会员", data.members, "会员与门店绑定，不混同后台用户"],
-            ["有效套餐", data.packages, "支持冻结、延期、次数调整"],
+            ["有效套餐", data.activePackages, "支持冻结、延期、次数调整"],
             ["累计订单", data.orders, "详情/编辑/新建统一弹窗打开"],
           ].map(([label, value, desc]) => (
             <div
@@ -168,6 +131,18 @@ export default async function DashboardPage() {
             </div>
           ))}
         </section>
+
+        <PackageManagementPanel
+          initialItems={data.userPackages}
+          store={
+            activeStore
+              ? {
+                  id: activeStore.id,
+                  name: activeStore.name,
+                }
+              : null
+          }
+        />
 
         <section className="grid gap-5 xl:grid-cols-[1fr_360px]">
           <div className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
