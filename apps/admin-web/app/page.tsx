@@ -415,7 +415,21 @@ export default async function DashboardPage({
         />
 
         <OrderManagementPanel
+          dishOptions={data.dishes.map((dish) => ({
+            id: dish.id,
+            name: dish.name,
+            status: dish.status,
+            stepJin: dish.stepJin,
+            stockJin: dish.stockJin,
+          }))}
           initialItems={data.storeOrders}
+          memberOptions={data.storeMembers.map((member) => ({
+            defaultAddress: member.defaultAddress,
+            id: member.id,
+            latestActivePackage: member.latestActivePackage,
+            nickname: member.nickname,
+            phone: member.phone,
+          }))}
           store={
             activeStore
               ? {

@@ -17,6 +17,33 @@ type StoreOption = {
   name: string;
 };
 
+type OrderMemberOption = {
+  defaultAddress: {
+    detail: string;
+    id: string;
+    receiverName: string;
+    receiverPhone: string;
+  } | null;
+  id: string;
+  latestActivePackage: {
+    id: string;
+    remainingTimes: number;
+    totalTimes: number;
+    usedTimes: number;
+    weightLimitJin: number;
+  } | null;
+  nickname: string | null;
+  phone: string | null;
+};
+
+type OrderDishOption = {
+  id: string;
+  name: string;
+  status: string;
+  stepJin: number;
+  stockJin: number;
+};
+
 type OrderStatus =
   | "CANCELED"
   | "PENDING_SHIPMENT"
@@ -64,7 +91,9 @@ export type OrderPanelItem = {
 };
 
 type OrderManagementPanelProps = {
+  dishOptions: OrderDishOption[];
   initialItems: OrderPanelItem[];
+  memberOptions: OrderMemberOption[];
   store: StoreOption | null;
 };
 
@@ -76,8 +105,11 @@ type ModalState = {
 };
 
 type FormState = {
+  createItems: Record<string, string>;
+  createUserId: string;
   internalRemark: string;
   logisticsNo: string;
+  userVisibleRemark: string;
 };
 
 const STATUS_LABELS: Record<OrderStatus, string> = {
@@ -129,20 +161,28 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
-function buildFormState(item: OrderPanelItem | null): FormState {
+function buildFormState(
+  item: OrderPanelItem | null,
+  memberOptions: OrderMemberOption[] = [],
+): FormState {
   return {
+    createItems: {},
+    createUserId: memberOptions[0]?.id ?? "",
     internalRemark: item?.internalRemark ?? "",
     logisticsNo: item?.logisticsNo ?? "",
+    userVisibleRemark: item?.userVisibleRemark ?? "",
   };
 }
 
 export function OrderManagementPanel({
+  dishOptions,
   initialItems,
+  memberOptions,
   store,
 }: OrderManagementPanelProps) {
   const [items, setItems] = useState(initialItems);
   const [modal, setModal] = useState<ModalState | null>(null);
-  const [form, setForm] = useState<FormState>(buildFormState(null));
+  const [form, setForm] = useState<FormState>(buildFormState(null, memberOptions));
   const [fullscreen, setFullscreen] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [saving, setSaving] = useState(false);
@@ -178,7 +218,7 @@ export function OrderManagementPanel({
 
   function openModal(item: OrderPanelItem | null, mode: ModalMode) {
     setModal({ item, mode });
-    setForm(buildFormState(item));
+    setForm(buildFormState(item, memberOptions));
     setFullscreen(false);
     setOffset({ x: 0, y: 0 });
     setError(null);
@@ -255,6 +295,50 @@ export function OrderManagementPanel({
     }
   }
 
+  const selectedCreateMember = memberOptions.find(
+    (member) => member.id === form.createUserId,
+  );
+  const createOrderItems = dishOptions
+    .map((dish) => ({
+      dishId: dish.id,
+      name: dish.name,
+      weightJin: Number(form.createItems[dish.id] || 0),
+    }))
+    .filter((item) => item.weightJin > 0);
+  const createTotalWeightJin = createOrderItems.reduce(
+    (sum, item) => sum + item.weightJin,
+    0,
+  );
+  const createPackage = selectedCreateMember?.latestActivePackage ?? null;
+  const createAddress = selectedCreateMember?.defaultAddress ?? null;
+  const createDisabled =
+    saving ||
+    !store ||
+    !selectedCreateMember ||
+    !createPackage ||
+    !createAddress ||
+    createOrderItems.length === 0 ||
+    createTotalWeightJin > (createPackage?.weightLimitJin ?? 0);
+
+  function changeCreateDish(dish: OrderDishOption, delta: number) {
+    setForm((value) => {
+      const current = Number(value.createItems[dish.id] || 0);
+      const next = Math.max(current + delta, 0);
+      const stepped =
+        dish.stepJin > 0
+          ? Math.round(next / dish.stepJin) * dish.stepJin
+          : next;
+
+      return {
+        ...value,
+        createItems: {
+          ...value.createItems,
+          [dish.id]: Number(stepped.toFixed(2)).toString(),
+        },
+      };
+    });
+  }
+
   async function saveRemark() {
     if (!modal?.item || !store) {
       return;
@@ -320,6 +404,61 @@ export function OrderManagementPanel({
       patchCurrentOrder(result.data?.order ?? {});
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "发货失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createOrder() {
+    if (!store || !selectedCreateMember || !createPackage || !createAddress) {
+      setError("请选择具备有效套餐和默认地址的会员");
+      return;
+    }
+
+    if (createOrderItems.length === 0) {
+      setError("请选择菜品");
+      return;
+    }
+
+    if (createTotalWeightJin > createPackage.weightLimitJin) {
+      setError("已超过套餐本次可预订重量");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/admin/orders", {
+        body: JSON.stringify({
+          addressId: createAddress.id,
+          internalRemark: form.internalRemark,
+          items: createOrderItems.map((item) => ({
+            dishId: item.dishId,
+            weightJin: item.weightJin,
+          })),
+          storeId: store.id,
+          userId: selectedCreateMember.id,
+          userPackageId: createPackage.id,
+          userVisibleRemark: form.userVisibleRemark,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        data?: { order: OrderPanelItem };
+        error?: { message: string };
+        success: boolean;
+      };
+
+      if (!response.ok || !result.success || !result.data?.order) {
+        throw new Error(result.error?.message ?? "新建订单失败");
+      }
+
+      setItems((value) => [result.data!.order, ...value]);
+      setModal(null);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "新建订单失败");
     } finally {
       setSaving(false);
     }
@@ -642,14 +781,136 @@ export function OrderManagementPanel({
                   </aside>
                 </>
               ) : (
-                <div className="lg:col-span-2">
-                  <div className="rounded-xl border border-dashed border-[#b8d8bf] bg-[#f8fff8] p-6">
-                    <h3 className="font-semibold">新建订单</h3>
-                    <p className="mt-3 text-sm leading-6 text-[#66756d]">
-                      后台新建需要选择会员、有效套餐、配送地址和菜品清单；当前先由小程序提交预订，后台负责处理和调整。
-                    </p>
+                <>
+                  <div className="flex flex-col gap-5">
+                    <section className="rounded-xl border border-[#dbe6dc] p-4">
+                      <h3 className="font-semibold">会员与套餐</h3>
+                      <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
+                        会员
+                        <select
+                          className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                          onChange={(event) =>
+                            setForm((value) => ({
+                              ...value,
+                              createItems: {},
+                              createUserId: event.target.value,
+                            }))
+                          }
+                          value={form.createUserId}
+                        >
+                          {memberOptions.map((member) => (
+                            <option key={member.id} value={member.id}>
+                              {member.nickname ?? "未命名会员"} ·{" "}
+                              {maskPhone(member.phone)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
+                        <div className="rounded-xl bg-[#f8fbf7] p-3">
+                          <div className="text-[#66756d]">有效套餐</div>
+                          <div className="mt-1 font-semibold">
+                            {createPackage
+                              ? `${createPackage.remainingTimes}/${createPackage.totalTimes} 次 · ${createPackage.weightLimitJin}斤`
+                              : "该会员暂无可用套餐"}
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-[#f8fbf7] p-3">
+                          <div className="text-[#66756d]">默认地址</div>
+                          <div className="mt-1 font-semibold">
+                            {createAddress
+                              ? `${createAddress.receiverName} · ${createAddress.detail}`
+                              : "该会员暂无默认地址"}
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="rounded-xl border border-[#dbe6dc] p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-semibold">选择菜品</h3>
+                        <div className="text-sm text-[#66756d]">
+                          已选 {createTotalWeightJin.toFixed(1)} /{" "}
+                          {createPackage?.weightLimitJin ?? 0}斤
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-col gap-2">
+                        {dishOptions
+                          .filter((dish) => dish.status === "ON_SALE")
+                          .map((dish) => {
+                            const weight = Number(form.createItems[dish.id] || 0);
+                            return (
+                              <div
+                                className="flex items-center justify-between gap-3 rounded-lg bg-[#f8fbf7] px-3 py-2 text-sm"
+                                key={dish.id}
+                              >
+                                <div className="min-w-0">
+                                  <div className="truncate font-semibold">
+                                    {dish.name}
+                                  </div>
+                                  <div className="text-xs text-[#66756d]">
+                                    库存 {dish.stockJin}斤 · 步进 {dish.stepJin}斤
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    className="grid h-8 w-8 place-items-center rounded-full bg-[#eef5eb] font-semibold text-[#1f8f4f]"
+                                    onClick={() => changeCreateDish(dish, -dish.stepJin)}
+                                    type="button"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="w-10 text-center font-semibold">
+                                    {weight}
+                                  </span>
+                                  <button
+                                    className="grid h-8 w-8 place-items-center rounded-full bg-[#1f8f4f] font-semibold text-white"
+                                    onClick={() => changeCreateDish(dish, dish.stepJin)}
+                                    type="button"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </section>
                   </div>
-                </div>
+
+                  <aside className="flex flex-col gap-4">
+                    <div className="rounded-xl border border-[#cfe3d3] bg-[#f8fff8] p-4">
+                      <h3 className="font-semibold">备注</h3>
+                      <label className="mt-3 flex flex-col gap-2 text-sm font-medium">
+                        会员可见备注
+                        <textarea
+                          className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
+                          onChange={(event) =>
+                            setForm((value) => ({
+                              ...value,
+                              userVisibleRemark: event.target.value,
+                            }))
+                          }
+                          placeholder="如：不要香菜，配送前电话确认"
+                          value={form.userVisibleRemark}
+                        />
+                      </label>
+                      <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
+                        内部备注
+                        <textarea
+                          className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
+                          onChange={(event) =>
+                            setForm((value) => ({
+                              ...value,
+                              internalRemark: event.target.value,
+                            }))
+                          }
+                          value={form.internalRemark}
+                        />
+                      </label>
+                    </div>
+                  </aside>
+                </>
               )}
 
               {error ? (
@@ -668,6 +929,16 @@ export function OrderManagementPanel({
               >
                 关闭
               </button>
+              {modal.mode === "create" ? (
+                <button
+                  className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
+                  disabled={createDisabled}
+                  onClick={createOrder}
+                  type="button"
+                >
+                  {saving ? "提交中" : "提交订单"}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

@@ -370,6 +370,91 @@ describe("shipOrder", () => {
     ).resolves.toBe(1);
   });
 
+  it("creates an order from backend operations and records an admin log", async () => {
+    const fixture = await createFixture();
+
+    const created = await (
+      orderOperations as typeof orderOperations & {
+        createStoreOrder: (input: {
+          addressId: string;
+          internalRemark?: string;
+          items: Array<{ dishId: string; weightJin: number }>;
+          operatorId: string;
+          storeId: string;
+          userId: string;
+          userPackageId: string;
+          userVisibleRemark?: string;
+        }) => Promise<{
+          id: string;
+          internalRemark: string | null;
+          items: Array<{ dishId: string; weightJin: number }>;
+          status: string;
+          totalWeightJin: number;
+        }>;
+      }
+    ).createStoreOrder({
+      addressId: fixture.address.id,
+      internalRemark: "后台代客下单",
+      items: [{ dishId: fixture.dishes.spinach.id, weightJin: 1.5 }],
+      operatorId: fixture.admin.id,
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+      userPackageId: fixture.userPackage.id,
+      userVisibleRemark: "客户电话确认",
+    });
+
+    expect(created).toMatchObject({
+      internalRemark: "后台代客下单",
+      items: [{ dishId: fixture.dishes.spinach.id, weightJin: 1.5 }],
+      status: "PENDING_SHIPMENT",
+      totalWeightJin: 1.5,
+    });
+    await expect(
+      prisma.userPackage.findUniqueOrThrow({
+        where: { id: fixture.userPackage.id },
+      }),
+    ).resolves.toMatchObject({ usedTimes: 1 });
+    await expect(
+      prisma.adminOperationLog.count({
+        where: {
+          action: "ORDER_CREATED",
+          operatorId: fixture.admin.id,
+          resourceId: created.id,
+        },
+      }),
+    ).resolves.toBe(1);
+  });
+
+  it("normalizes backend create order validation failures as order service errors", async () => {
+    const fixture = await createFixture();
+
+    await expect(
+      (
+        orderOperations as typeof orderOperations & {
+          createStoreOrder: (input: {
+            addressId: string;
+            items: Array<{ dishId: string; weightJin: number }>;
+            operatorId: string;
+            storeId: string;
+            userId: string;
+            userPackageId: string;
+          }) => Promise<unknown>;
+        }
+      ).createStoreOrder({
+        addressId: fixture.address.id,
+        items: [{ dishId: fixture.dishes.spinach.id, weightJin: 9 }],
+        operatorId: fixture.admin.id,
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+        userPackageId: fixture.userPackage.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "WEIGHT_LIMIT_EXCEEDED",
+      message: "已超过套餐本次可预订重量",
+      name: "OrderServiceError",
+    });
+  });
+
   it("lists store orders with member, address, item details and status summary", async () => {
     const fixture = await createFixture();
     const otherStoreFixture = await createFixture();

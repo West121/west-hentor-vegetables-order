@@ -1,11 +1,26 @@
 import { prisma } from "./client";
 import { Prisma, type OrderStatus } from "./generated/prisma/client";
+import { ReservationServiceError, submitReservation } from "./reservations";
 
 export type ShipOrderInput = {
   logisticsNo: string;
   operatorId: string;
   orderId: string;
   storeId: string;
+};
+
+export type CreateStoreOrderInput = {
+  addressId: string;
+  internalRemark?: string;
+  items: Array<{
+    dishId: string;
+    weightJin: number;
+  }>;
+  operatorId: string;
+  storeId: string;
+  userId: string;
+  userPackageId: string;
+  userVisibleRemark?: string;
 };
 
 export type ListStoreOrdersInput = {
@@ -68,6 +83,72 @@ function summarizeStatus(
   );
 }
 
+const storeOrderInclude = {
+  items: {
+    orderBy: { id: "asc" },
+    select: {
+      dishId: true,
+      dishNameSnapshot: true,
+      id: true,
+      weightJin: true,
+    },
+  },
+  store: {
+    select: {
+      code: true,
+      id: true,
+      name: true,
+    },
+  },
+  user: {
+    select: {
+      id: true,
+      nickname: true,
+      phone: true,
+      status: true,
+    },
+  },
+  userPackage: {
+    select: {
+      id: true,
+      nameSnapshot: true,
+    },
+  },
+} satisfies Prisma.OrderInclude;
+
+type StoreOrderWithRelations = Prisma.OrderGetPayload<{
+  include: typeof storeOrderInclude;
+}>;
+
+function orderView(order: StoreOrderWithRelations) {
+  return {
+    addressSnapshot: normalizeAddressSnapshot(order.addressSnapshot),
+    canceledAt: order.canceledAt,
+    cancelReason: order.cancelReason,
+    createdAt: order.createdAt,
+    id: order.id,
+    internalRemark: order.internalRemark,
+    items: order.items.map((item) => ({
+      dishId: item.dishId,
+      dishNameSnapshot: item.dishNameSnapshot,
+      id: item.id,
+      weightJin: toNumber(item.weightJin),
+    })),
+    logisticsNo: order.logisticsNo,
+    modifiedAt: order.modifiedAt,
+    orderNo: order.orderNo,
+    shippedAt: order.shippedAt,
+    signedAt: order.signedAt,
+    status: order.status,
+    store: order.store,
+    totalWeightJin: toNumber(order.totalWeightJin),
+    updatedAt: order.updatedAt,
+    user: order.user,
+    userPackage: order.userPackage,
+    userVisibleRemark: order.userVisibleRemark,
+  };
+}
+
 async function getActiveOperator(operatorId: string) {
   const operator = await prisma.adminUser.findFirst({
     where: {
@@ -105,38 +186,7 @@ export async function listStoreOrders(input: ListStoreOrdersInput) {
       take: input.take ?? 20,
       where,
       orderBy: { createdAt: "desc" },
-      include: {
-        items: {
-          orderBy: { id: "asc" },
-          select: {
-            dishId: true,
-            dishNameSnapshot: true,
-            id: true,
-            weightJin: true,
-          },
-        },
-        store: {
-          select: {
-            code: true,
-            id: true,
-            name: true,
-          },
-        },
-        user: {
-          select: {
-            id: true,
-            nickname: true,
-            phone: true,
-            status: true,
-          },
-        },
-        userPackage: {
-          select: {
-            id: true,
-            nameSnapshot: true,
-          },
-        },
-      },
+      include: storeOrderInclude,
     }),
     prisma.order.groupBy({
       by: ["status"],
@@ -149,34 +199,73 @@ export async function listStoreOrders(input: ListStoreOrdersInput) {
   ]);
 
   return {
-    items: orders.map((order) => ({
-      addressSnapshot: normalizeAddressSnapshot(order.addressSnapshot),
-      canceledAt: order.canceledAt,
-      cancelReason: order.cancelReason,
-      createdAt: order.createdAt,
-      id: order.id,
-      internalRemark: order.internalRemark,
-      items: order.items.map((item) => ({
-        dishId: item.dishId,
-        dishNameSnapshot: item.dishNameSnapshot,
-        id: item.id,
-        weightJin: toNumber(item.weightJin),
-      })),
-      logisticsNo: order.logisticsNo,
-      modifiedAt: order.modifiedAt,
-      orderNo: order.orderNo,
-      shippedAt: order.shippedAt,
-      signedAt: order.signedAt,
-      status: order.status,
-      store: order.store,
-      totalWeightJin: toNumber(order.totalWeightJin),
-      updatedAt: order.updatedAt,
-      user: order.user,
-      userPackage: order.userPackage,
-      userVisibleRemark: order.userVisibleRemark,
-    })),
+    items: orders.map(orderView),
     summary: summarizeStatus(summaryRows),
   };
+}
+
+export async function createStoreOrder(input: CreateStoreOrderInput) {
+  const operator = await getActiveOperator(input.operatorId);
+  const internalRemark = input.internalRemark?.trim() || null;
+  let submitted: Awaited<ReturnType<typeof submitReservation>>;
+
+  try {
+    submitted = await submitReservation({
+      addressId: input.addressId,
+      items: input.items,
+      storeId: input.storeId,
+      userId: input.userId,
+      userPackageId: input.userPackageId,
+      userVisibleRemark: input.userVisibleRemark,
+    });
+  } catch (error) {
+    if (error instanceof ReservationServiceError) {
+      throw new OrderServiceError(error.code, error.message);
+    }
+
+    throw error;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (internalRemark) {
+      await tx.order.update({
+        where: { id: submitted.id },
+        data: { internalRemark },
+      });
+    }
+
+    await tx.adminOperationLog.create({
+      data: {
+        action: "ORDER_CREATED",
+        afterValue: {
+          internalRemark,
+          itemCount: submitted.items.length,
+          orderNo: submitted.orderNo,
+          source: "ADMIN",
+          totalWeightJin: submitted.totalWeightJin,
+        },
+        beforeValue: Prisma.JsonNull,
+        operatorId: operator.id,
+        resource: "order",
+        resourceId: submitted.id,
+        storeId: input.storeId,
+      },
+    });
+  });
+
+  const order = await prisma.order.findFirst({
+    where: {
+      id: submitted.id,
+      storeId: input.storeId,
+    },
+    include: storeOrderInclude,
+  });
+
+  if (!order) {
+    throw new OrderServiceError("ORDER_NOT_FOUND", "订单不存在");
+  }
+
+  return orderView(order);
 }
 
 export async function updateOrderInternalRemark(
