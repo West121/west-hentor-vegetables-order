@@ -23,6 +23,24 @@ export type MiniappEditableOrderInput = MiniappStoreUserInput & {
   orderId?: string | null;
 };
 
+export type MiniappPackagePurchaseInput = MiniappStoreUserInput & {
+  templateId: string;
+};
+
+export type MiniappWechatPrepayInput = MiniappStoreUserInput & {
+  purchaseOrderId: string;
+};
+
+export class MiniappServiceError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "MiniappServiceError";
+  }
+}
+
 function toNumber(value: Prisma.Decimal | number | null | undefined) {
   if (value == null) {
     return 0;
@@ -285,6 +303,59 @@ export async function listMiniappPackages(input: MiniappStoreUserInput) {
         weightLimitJin: toNumber(template.weightLimitJin),
       })),
     },
+  };
+}
+
+export async function createMiniappPackagePurchase(
+  input: MiniappPackagePurchaseInput,
+) {
+  const template = await prisma.packageTemplate.findFirst({
+    where: {
+      id: input.templateId,
+      status: "ACTIVE",
+      storeId: input.storeId,
+    },
+    select: { id: true },
+  });
+
+  if (!template) {
+    throw new MiniappServiceError(
+      "PACKAGE_TEMPLATE_NOT_FOUND",
+      "套餐模板不存在或已停用",
+    );
+  }
+
+  return prisma.packagePurchaseOrder.create({
+    data: {
+      amountFen: 0,
+      payChannel: "WECHAT",
+      status: "PAYMENT_NOT_ENABLED",
+      storeId: input.storeId,
+      templateId: template.id,
+      userId: input.userId,
+    },
+  });
+}
+
+export async function reserveMiniappWechatPrepay(input: MiniappWechatPrepayInput) {
+  const purchaseOrder = await prisma.packagePurchaseOrder.findFirst({
+    where: {
+      id: input.purchaseOrderId,
+      storeId: input.storeId,
+      userId: input.userId,
+    },
+  });
+
+  if (!purchaseOrder) {
+    throw new MiniappServiceError(
+      "PACKAGE_PURCHASE_NOT_FOUND",
+      "套餐购买意向单不存在",
+    );
+  }
+
+  return {
+    id: purchaseOrder.id,
+    status: "PAYMENT_NOT_ENABLED" as const,
   };
 }
 

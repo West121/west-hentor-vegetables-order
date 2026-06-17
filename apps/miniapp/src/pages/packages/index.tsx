@@ -61,6 +61,9 @@ function formatDate(value: string) {
 export default function PackagesPage() {
   const [data, setData] = useState<PackagesData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [purchasingTemplateId, setPurchasingTemplateId] = useState<string | null>(
+    null,
+  );
 
   async function loadPackages() {
     setLoading(true);
@@ -102,6 +105,77 @@ export default function PackagesPage() {
   useEffect(() => {
     void loadPackages();
   }, []);
+
+  async function reservePurchase(templateId: string) {
+    if (purchasingTemplateId) {
+      return;
+    }
+
+    const token = Taro.getStorageSync("mini_session_token");
+    if (!token) {
+      Taro.navigateTo({ url: "/pages/login/index" });
+      return;
+    }
+
+    setPurchasingTemplateId(templateId);
+
+    try {
+      const purchaseResponse = await Taro.request<
+        ApiResponse<{
+          purchaseOrder: {
+            id: string;
+            status: string;
+          };
+        }>
+      >({
+        data: {
+          storeCode: STORE_CODE,
+          templateId,
+        },
+        header: { authorization: `Bearer ${token}` },
+        method: "POST",
+        url: `${API_BASE_URL}/api/v1/package-purchases`,
+      });
+      const purchasePayload = purchaseResponse.data;
+      const purchaseOrder = purchasePayload.data?.purchaseOrder;
+
+      if (!purchasePayload.success || !purchaseOrder) {
+        throw new Error(purchasePayload.error?.message ?? "购买入口暂不可用");
+      }
+
+      const prepayResponse = await Taro.request<
+        ApiResponse<{
+          prepay: {
+            status: string;
+          };
+        }>
+      >({
+        header: { authorization: `Bearer ${token}` },
+        method: "POST",
+        url: `${API_BASE_URL}/api/v1/package-purchases/${purchaseOrder.id}/wechat-prepay?storeCode=${STORE_CODE}`,
+      });
+      const prepayPayload = prepayResponse.data;
+
+      if (!prepayPayload.success) {
+        throw new Error(prepayPayload.error?.message ?? "微信支付暂未开放");
+      }
+
+      Taro.showToast({
+        icon: "none",
+        title:
+          prepayPayload.data?.prepay.status === "PAYMENT_NOT_ENABLED"
+            ? "微信支付暂未开放"
+            : "购买入口已预留",
+      });
+    } catch (error) {
+      Taro.showToast({
+        icon: "none",
+        title: error instanceof Error ? error.message : "购买入口暂不可用",
+      });
+    } finally {
+      setPurchasingTemplateId(null);
+    }
+  }
 
   return (
     <View className="packages">
@@ -162,15 +236,12 @@ export default function PackagesPage() {
               </View>
             </View>
             <Text
-              className="reserve__button"
-              onClick={() =>
-                Taro.showToast({
-                  icon: "none",
-                  title: "微信支付暂未开放",
-                })
-              }
+              className={`reserve__button ${
+                purchasingTemplateId === template.id ? "reserve__button--loading" : ""
+              }`}
+              onClick={() => void reservePurchase(template.id)}
             >
-              预留
+              {purchasingTemplateId === template.id ? "处理中" : "预留"}
             </Text>
           </View>
         ))}

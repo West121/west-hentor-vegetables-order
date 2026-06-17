@@ -16,6 +16,9 @@ type Fixture = {
   dish: Dish;
   otherStore: Store;
   pendingOrder: { id: string };
+  purchaseTemplate: {
+    id: string;
+  };
   shippedOrder: { id: string };
   store: Store;
   user: User;
@@ -174,7 +177,7 @@ async function createFixture(): Promise<Fixture> {
       weightLimitJin: new Prisma.Decimal("8.00"),
     },
   });
-  await prisma.packageTemplate.create({
+  const purchaseTemplate = await prisma.packageTemplate.create({
     data: {
       id: `miniapp-buy-template-${suffix}`,
       name: "12斤家庭套餐",
@@ -306,6 +309,7 @@ async function createFixture(): Promise<Fixture> {
     dish,
     otherStore,
     pendingOrder,
+    purchaseTemplate,
     shippedOrder,
     store,
     user,
@@ -580,5 +584,43 @@ describe("mini app customer portal", () => {
     });
     expect(shipped).toBeNull();
     expect(crossStore).toBeNull();
+  });
+
+  it("reserves package purchase intent without enabling WeChat payment yet", async () => {
+    const fixture = await createFixture();
+
+    const purchase = await miniapp.createMiniappPackagePurchase({
+      storeId: fixture.store.id,
+      templateId: fixture.purchaseTemplate.id,
+      userId: fixture.user.id,
+    });
+    const prepay = await miniapp.reserveMiniappWechatPrepay({
+      purchaseOrderId: purchase.id,
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(purchase).toMatchObject({
+      amountFen: 0,
+      payChannel: "WECHAT",
+      status: "PAYMENT_NOT_ENABLED",
+      storeId: fixture.store.id,
+      templateId: fixture.purchaseTemplate.id,
+      userId: fixture.user.id,
+    });
+    expect(prepay).toMatchObject({
+      id: purchase.id,
+      status: "PAYMENT_NOT_ENABLED",
+    });
+    await expect(
+      miniapp.createMiniappPackagePurchase({
+        storeId: fixture.otherStore.id,
+        templateId: fixture.purchaseTemplate.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "PACKAGE_TEMPLATE_NOT_FOUND",
+      message: "套餐模板不存在或已停用",
+    });
   });
 });
