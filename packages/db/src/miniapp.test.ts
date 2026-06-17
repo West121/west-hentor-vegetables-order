@@ -586,6 +586,74 @@ describe("mini app customer portal", () => {
     expect(crossStore).toBeNull();
   });
 
+  it("cancels pending orders and lets members hide canceled orders", async () => {
+    const fixture = await createFixture();
+    await Promise.all([
+      prisma.userPackage.update({
+        where: { id: fixture.userPackage.id },
+        data: { usedTimes: 3 },
+      }),
+      prisma.dish.update({
+        where: { id: fixture.dish.id },
+        data: { stockJin: new Prisma.Decimal("18.00") },
+      }),
+    ]);
+
+    const canceled = await miniapp.cancelMiniappOrder({
+      orderId: fixture.pendingOrder.id,
+      reason: "今天不在家",
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(canceled).toMatchObject({
+      cancelReason: "今天不在家",
+      id: fixture.pendingOrder.id,
+      status: "CANCELED",
+    });
+    await expect(
+      prisma.userPackage.findUniqueOrThrow({
+        where: { id: fixture.userPackage.id },
+      }),
+    ).resolves.toMatchObject({ usedTimes: 2 });
+    expect(
+      Number(
+        (
+          await prisma.dish.findUniqueOrThrow({
+            where: { id: fixture.dish.id },
+          })
+        ).stockJin,
+      ),
+    ).toBe(20);
+
+    await expect(
+      miniapp.cancelMiniappOrder({
+        orderId: fixture.shippedOrder.id,
+        reason: "想取消已发货",
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "ORDER_NOT_CANCELABLE",
+      message: "当前订单不可取消",
+    });
+
+    const hidden = await miniapp.hideMiniappOrder({
+      orderId: fixture.pendingOrder.id,
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+    expect(hidden.deletedByUserAt).toBeInstanceOf(Date);
+
+    const orders = await miniapp.listMiniappOrders({
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+    expect(orders.items.map((order) => order.id)).not.toContain(
+      fixture.pendingOrder.id,
+    );
+  });
+
   it("reserves package purchase intent without enabling WeChat payment yet", async () => {
     const fixture = await createFixture();
 

@@ -271,6 +271,24 @@ describe("submitReservation", () => {
         where: { id: fixture.userPackage.id },
       }),
     ).resolves.toMatchObject({ usedTimes: 1 });
+    expect(
+      Number(
+        (
+          await prisma.dish.findUniqueOrThrow({
+            where: { id: fixture.dishes.spinach.id },
+          })
+        ).stockJin,
+      ),
+    ).toBe(19);
+    expect(
+      Number(
+        (
+          await prisma.dish.findUniqueOrThrow({
+            where: { id: fixture.dishes.cucumber.id },
+          })
+        ).stockJin,
+      ),
+    ).toBe(18.5);
 
     const updated = await submitReservation({
       addressId: fixture.address.id,
@@ -296,6 +314,24 @@ describe("submitReservation", () => {
         where: { id: fixture.userPackage.id },
       }),
     ).resolves.toMatchObject({ usedTimes: 1 });
+    expect(
+      Number(
+        (
+          await prisma.dish.findUniqueOrThrow({
+            where: { id: fixture.dishes.spinach.id },
+          })
+        ).stockJin,
+      ),
+    ).toBe(18);
+    expect(
+      Number(
+        (
+          await prisma.dish.findUniqueOrThrow({
+            where: { id: fixture.dishes.cucumber.id },
+          })
+        ).stockJin,
+      ),
+    ).toBe(20);
     await expect(
       prisma.orderChangeLog.count({ where: { orderId: created.id } }),
     ).resolves.toBe(1);

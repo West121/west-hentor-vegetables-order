@@ -31,6 +31,14 @@ export type MiniappWechatPrepayInput = MiniappStoreUserInput & {
   purchaseOrderId: string;
 };
 
+export type MiniappOrderActionInput = MiniappStoreUserInput & {
+  orderId: string;
+};
+
+export type MiniappCancelOrderInput = MiniappOrderActionInput & {
+  reason: string;
+};
+
 export class MiniappServiceError extends Error {
   constructor(
     public readonly code: string,
@@ -39,6 +47,14 @@ export class MiniappServiceError extends Error {
     super(message);
     this.name = "MiniappServiceError";
   }
+}
+
+function requireText(value: string, code: string, message: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new MiniappServiceError(code, message);
+  }
+  return normalized;
 }
 
 function toNumber(value: Prisma.Decimal | number | null | undefined) {
@@ -357,6 +373,99 @@ export async function reserveMiniappWechatPrepay(input: MiniappWechatPrepayInput
     id: purchaseOrder.id,
     status: "PAYMENT_NOT_ENABLED" as const,
   };
+}
+
+export async function cancelMiniappOrder(input: MiniappCancelOrderInput) {
+  const reason = requireText(input.reason, "CANCEL_REASON_REQUIRED", "请选择取消原因");
+
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findFirst({
+      where: {
+        deletedByUserAt: null,
+        id: input.orderId,
+        storeId: input.storeId,
+        userId: input.userId,
+      },
+      include: {
+        items: {
+          select: {
+            dishId: true,
+            weightJin: true,
+          },
+        },
+        userPackage: {
+          select: {
+            id: true,
+            usedTimes: true,
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new MiniappServiceError("ORDER_NOT_FOUND", "订单不存在");
+    }
+
+    if (order.status !== "PENDING_SHIPMENT") {
+      throw new MiniappServiceError(
+        "ORDER_NOT_CANCELABLE",
+        "当前订单不可取消",
+      );
+    }
+
+    for (const item of order.items) {
+      await tx.dish.update({
+        where: { id: item.dishId },
+        data: {
+          stockJin: { increment: item.weightJin },
+        },
+      });
+    }
+
+    if (order.userPackage.usedTimes > 0) {
+      await tx.userPackage.update({
+        where: { id: order.userPackage.id },
+        data: {
+          usedTimes: { decrement: 1 },
+        },
+      });
+    }
+
+    return tx.order.update({
+      where: { id: order.id },
+      data: {
+        cancelReason: reason,
+        canceledAt: new Date(),
+        status: "CANCELED",
+      },
+    });
+  });
+}
+
+export async function hideMiniappOrder(input: MiniappOrderActionInput) {
+  const order = await prisma.order.findFirst({
+    where: {
+      deletedByUserAt: null,
+      id: input.orderId,
+      storeId: input.storeId,
+      userId: input.userId,
+    },
+  });
+
+  if (!order) {
+    throw new MiniappServiceError("ORDER_NOT_FOUND", "订单不存在");
+  }
+
+  if (order.status !== "CANCELED" && order.status !== "VOIDED") {
+    throw new MiniappServiceError("ORDER_NOT_HIDEABLE", "当前订单不可删除");
+  }
+
+  return prisma.order.update({
+    where: { id: order.id },
+    data: {
+      deletedByUserAt: new Date(),
+    },
+  });
 }
 
 export async function getMiniappEditableOrder(input: MiniappEditableOrderInput) {

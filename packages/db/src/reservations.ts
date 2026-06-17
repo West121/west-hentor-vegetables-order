@@ -97,6 +97,62 @@ function formatOrder(order: {
   };
 }
 
+function sumWeightsByDishId(
+  items: Array<{
+    dishId: string;
+    weightJin: Prisma.Decimal;
+  }>,
+) {
+  const result = new Map<string, Prisma.Decimal>();
+
+  for (const item of items) {
+    result.set(
+      item.dishId,
+      (result.get(item.dishId) ?? new Prisma.Decimal("0")).plus(item.weightJin),
+    );
+  }
+
+  return result;
+}
+
+async function applyInventoryDelta(
+  tx: Prisma.TransactionClient,
+  input: {
+    currentStockByDishId: Map<string, Prisma.Decimal>;
+    newWeightsByDishId: Map<string, Prisma.Decimal>;
+    oldWeightsByDishId: Map<string, Prisma.Decimal>;
+  },
+) {
+  const dishIds = new Set([
+    ...input.oldWeightsByDishId.keys(),
+    ...input.newWeightsByDishId.keys(),
+  ]);
+
+  for (const dishId of dishIds) {
+    const oldWeight =
+      input.oldWeightsByDishId.get(dishId) ?? new Prisma.Decimal("0");
+    const newWeight =
+      input.newWeightsByDishId.get(dishId) ?? new Prisma.Decimal("0");
+    const delta = oldWeight.minus(newWeight);
+
+    if (delta.equals(0)) {
+      continue;
+    }
+
+    const currentStock =
+      input.currentStockByDishId.get(dishId) ?? new Prisma.Decimal("0");
+    const nextStock = currentStock.plus(delta);
+
+    await tx.dish.update({
+      where: { id: dishId },
+      data: {
+        stockJin: nextStock,
+        ...(nextStock.equals(0) ? { status: "OFF_SALE" } : {}),
+      },
+    });
+  }
+}
+
 export async function submitReservation(input: SubmitReservationInput) {
   if (!input.items.length) {
     throw new ReservationServiceError("EMPTY_ITEMS", "请选择菜品");
@@ -138,24 +194,52 @@ export async function submitReservation(input: SubmitReservationInput) {
       throw new ReservationServiceError("ADDRESS_NOT_FOUND", "配送地址不存在");
     }
 
-    const dishIds = [...new Set(input.items.map((item) => item.dishId))];
-    if (dishIds.length !== input.items.length) {
+    const newDishIds = [...new Set(input.items.map((item) => item.dishId))];
+    if (newDishIds.length !== input.items.length) {
       throw new ReservationServiceError("DUPLICATE_DISH", "菜品不能重复提交");
     }
 
+    const existingOrder = input.orderId
+      ? await tx.order.findFirst({
+          where: {
+            id: input.orderId,
+            storeId: input.storeId,
+            userId: input.userId,
+            userPackageId: input.userPackageId,
+            status: "PENDING_SHIPMENT",
+            deletedByUserAt: null,
+          },
+          include: {
+            items: true,
+          },
+        })
+      : null;
+
+    if (input.orderId && !existingOrder) {
+      throw new ReservationServiceError("ORDER_NOT_EDITABLE", "当前订单不可修改");
+    }
+
+    const oldWeightsByDishId = sumWeightsByDishId(existingOrder?.items ?? []);
+    const dishIds = [...new Set([...newDishIds, ...oldWeightsByDishId.keys()])];
     const dishes = await tx.dish.findMany({
       where: {
         id: { in: dishIds },
         storeId: input.storeId,
-        status: "ON_SALE",
         deletedAt: null,
       },
     });
     const dishById = new Map(dishes.map((dish) => [dish.id, dish]));
+    const currentStockByDishId = new Map(
+      dishes.map((dish) => [dish.id, dish.stockJin]),
+    );
 
     const normalizedItems: NormalizedItem[] = input.items.map((item) => {
       const dish = dishById.get(item.dishId);
       if (!dish) {
+        throw new ReservationServiceError("DISH_NOT_FOUND", "菜品不存在或已下架");
+      }
+
+      if (dish.status !== "ON_SALE") {
         throw new ReservationServiceError("DISH_NOT_FOUND", "菜品不存在或已下架");
       }
 
@@ -167,7 +251,10 @@ export async function submitReservation(input: SubmitReservationInput) {
         throw new ReservationServiceError("INVALID_WEIGHT_STEP", "菜品重量不符合起订步进");
       }
 
-      if (item.weightJin > toNumber(dish.stockJin)) {
+      const reservedWeight =
+        oldWeightsByDishId.get(item.dishId) ?? new Prisma.Decimal("0");
+      const availableStock = dish.stockJin.plus(reservedWeight);
+      if (item.weightJin > toNumber(availableStock)) {
         throw new ReservationServiceError("DISH_STOCK_NOT_ENOUGH", "菜品库存不足");
       }
 
@@ -199,38 +286,28 @@ export async function submitReservation(input: SubmitReservationInput) {
       district: address.district,
       detail: address.detail,
     };
+    const newWeightsByDishId = sumWeightsByDishId(normalizedItems);
 
     if (input.orderId) {
-      const existingOrder = await tx.order.findFirst({
-        where: {
-          id: input.orderId,
-          storeId: input.storeId,
-          userId: input.userId,
-          userPackageId: input.userPackageId,
-          status: "PENDING_SHIPMENT",
-          deletedByUserAt: null,
-        },
-        include: {
-          items: true,
-        },
-      });
-
-      if (!existingOrder) {
-        throw new ReservationServiceError("ORDER_NOT_EDITABLE", "当前订单不可修改");
-      }
-
-      const beforeItems = existingOrder.items.map((item) => ({
+      const editableOrder = existingOrder!;
+      const beforeItems = editableOrder.items.map((item) => ({
         dishId: item.dishId,
         dishNameSnapshot: item.dishNameSnapshot,
         weightJin: toNumber(item.weightJin),
       }));
 
       await tx.orderItem.deleteMany({
-        where: { orderId: existingOrder.id },
+        where: { orderId: editableOrder.id },
+      });
+
+      await applyInventoryDelta(tx, {
+        currentStockByDishId,
+        newWeightsByDishId,
+        oldWeightsByDishId,
       });
 
       const order = await tx.order.update({
-        where: { id: existingOrder.id },
+        where: { id: editableOrder.id },
         data: {
           addressId: address.id,
           addressSnapshot,
@@ -253,9 +330,9 @@ export async function submitReservation(input: SubmitReservationInput) {
         data: {
           orderId: order.id,
           beforeAddress:
-            existingOrder.addressSnapshot === null
+            editableOrder.addressSnapshot === null
               ? Prisma.JsonNull
-              : (existingOrder.addressSnapshot as Prisma.InputJsonValue),
+              : (editableOrder.addressSnapshot as Prisma.InputJsonValue),
           afterAddress: addressSnapshot,
           beforeItems,
           afterItems: snapshotItems(normalizedItems),
@@ -269,6 +346,12 @@ export async function submitReservation(input: SubmitReservationInput) {
     if (userPackage.usedTimes >= userPackage.totalTimes) {
       throw new ReservationServiceError("PACKAGE_USED_UP", "套餐次数已用完");
     }
+
+    await applyInventoryDelta(tx, {
+      currentStockByDishId,
+      newWeightsByDishId,
+      oldWeightsByDishId,
+    });
 
     const order = await tx.order.create({
       data: {
