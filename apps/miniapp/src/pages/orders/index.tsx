@@ -105,6 +105,11 @@ export default function OrdersPage() {
     void loadOrders();
   }, []);
 
+  function editOrder(orderId: string) {
+    Taro.setStorageSync("editing_order_id", orderId);
+    Taro.switchTab({ url: "/pages/home/index" });
+  }
+
   return (
     <View className="orders">
       <View className="header">
@@ -145,7 +150,7 @@ export default function OrdersPage() {
             {order.canEdit ? (
               <Text
                 className="order__edit"
-                onClick={() => Taro.switchTab({ url: "/pages/home/index" })}
+                onClick={() => editOrder(order.id)}
               >
                 修改预订
               </Text>

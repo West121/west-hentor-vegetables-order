@@ -10,6 +10,10 @@ export type MiniappStoreUserInput = {
   userId: string;
 };
 
+export type MiniappEditableOrderInput = MiniappStoreUserInput & {
+  orderId?: string | null;
+};
+
 function toNumber(value: Prisma.Decimal | number | null | undefined) {
   if (value == null) {
     return 0;
@@ -216,6 +220,56 @@ export async function listMiniappPackages(input: MiniappStoreUserInput) {
         weightLimitJin: toNumber(template.weightLimitJin),
       })),
     },
+  };
+}
+
+export async function getMiniappEditableOrder(input: MiniappEditableOrderInput) {
+  const order = await prisma.order.findFirst({
+    where: {
+      deletedByUserAt: null,
+      ...(input.orderId ? { id: input.orderId } : {}),
+      status: "PENDING_SHIPMENT",
+      storeId: input.storeId,
+      userId: input.userId,
+    },
+    orderBy: { createdAt: "desc" },
+    include: {
+      address: true,
+      items: {
+        orderBy: { id: "asc" },
+        select: {
+          dishId: true,
+          dishNameSnapshot: true,
+          id: true,
+          weightJin: true,
+        },
+      },
+    },
+  });
+
+  if (!order) {
+    return null;
+  }
+
+  return {
+    address: order.address
+      ? {
+          detail: order.address.detail,
+          receiverName: order.address.receiverName,
+          receiverPhone: order.address.receiverPhone,
+        }
+      : normalizeAddressSnapshot(order.addressSnapshot),
+    addressId: order.addressId,
+    id: order.id,
+    items: order.items.map((item) => ({
+      dishId: item.dishId,
+      id: item.id,
+      name: item.dishNameSnapshot,
+      weightJin: toNumber(item.weightJin),
+    })),
+    orderNo: order.orderNo,
+    status: order.status,
+    totalWeightJin: toNumber(order.totalWeightJin),
   };
 }
 

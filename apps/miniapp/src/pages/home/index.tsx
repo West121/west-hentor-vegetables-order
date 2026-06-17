@@ -38,6 +38,7 @@ type HomeData = {
       name: string;
       weightJin: number;
     }>;
+    orderNo: string;
   };
   defaultAddress: null | {
     detail: string;
@@ -86,9 +87,15 @@ export default function HomePage() {
         Taro.navigateTo({ url: "/pages/login/index" });
         return;
       }
+      const editingOrderId = Taro.getStorageSync("editing_order_id") as
+        | string
+        | undefined;
+      const homeUrl = `${API_BASE_URL}/api/v1/home?storeCode=${STORE_CODE}${
+        editingOrderId ? `&orderId=${encodeURIComponent(editingOrderId)}` : ""
+      }`;
 
       const response = await Taro.request<ApiResponse<HomeData>>({
-        url: `${API_BASE_URL}/api/v1/home?storeCode=${STORE_CODE}`,
+        url: homeUrl,
         method: "GET",
         header: {
           authorization: `Bearer ${token}`,
@@ -106,6 +113,13 @@ export default function HomePage() {
       }
 
       setHomeData(payload.data);
+      if (
+        editingOrderId &&
+        (!payload.data.currentOrder || payload.data.currentOrder.id !== editingOrderId)
+      ) {
+        Taro.removeStorageSync("editing_order_id");
+        Taro.showToast({ title: "该订单已不可修改", icon: "none" });
+      }
       setSelected(
         payload.data.currentOrder?.items.reduce<Record<string, number>>(
           (result, item) => ({
@@ -220,6 +234,7 @@ export default function HomePage() {
       }
 
       await loadHome({ quiet: true });
+      Taro.removeStorageSync("editing_order_id");
       Taro.showToast({
         title: homeData.currentOrder ? "修改已保存" : "预订已提交",
         icon: "success",
@@ -251,7 +266,9 @@ export default function HomePage() {
             已选 {summary.totalWeightJin} / {packageInfo.weightLimitJin}斤
           </View>
           <View className="package-card__meta">
-            本周剩余 {packageInfo.remainingTimes} 次，可在截单前修改
+            {homeData?.currentOrder
+              ? `正在修改 ${homeData.currentOrder.orderNo}`
+              : `本周剩余 ${packageInfo.remainingTimes} 次，可在截单前修改`}
           </View>
         </View>
       ) : (

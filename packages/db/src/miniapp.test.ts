@@ -15,6 +15,8 @@ type Fixture = {
   address: Address;
   dish: Dish;
   otherStore: Store;
+  pendingOrder: { id: string };
+  shippedOrder: { id: string };
   store: Store;
   user: User;
   userPackage: UserPackage;
@@ -230,7 +232,7 @@ async function createFixture(): Promise<Fixture> {
     },
   });
 
-  await prisma.order.create({
+  const pendingOrder = await prisma.order.create({
     data: {
       addressId: address.id,
       addressSnapshot: {
@@ -254,7 +256,7 @@ async function createFixture(): Promise<Fixture> {
       userPackageId: userPackage.id,
     },
   });
-  await prisma.order.create({
+  const shippedOrder = await prisma.order.create({
     data: {
       addressId: address.id,
       addressSnapshot: {
@@ -291,7 +293,16 @@ async function createFixture(): Promise<Fixture> {
     },
   });
 
-  return { address, dish, otherStore, store, user, userPackage };
+  return {
+    address,
+    dish,
+    otherStore,
+    pendingOrder,
+    shippedOrder,
+    store,
+    user,
+    userPackage,
+  };
 }
 
 describe("mini app customer portal", () => {
@@ -371,5 +382,66 @@ describe("mini app customer portal", () => {
       userId: fixture.user.id,
     });
     expect(otherStoreOrders.items).toHaveLength(0);
+  });
+
+  it("loads a specific pending reservation for editing from the home page", async () => {
+    const fixture = await createFixture();
+    const laterPendingOrder = await prisma.order.create({
+      data: {
+        addressId: fixture.address.id,
+        addressSnapshot: {
+          detail: fixture.address.detail,
+          receiverName: fixture.address.receiverName,
+          receiverPhone: fixture.address.receiverPhone,
+        },
+        items: {
+          create: {
+            dishId: fixture.dish.id,
+            dishNameSnapshot: fixture.dish.name,
+            stepJinSnapshot: fixture.dish.stepJin,
+            weightJin: new Prisma.Decimal("3.00"),
+          },
+        },
+        orderNo: `ME${Date.now()}D${Math.random().toString(36).slice(2, 6)}`,
+        status: "PENDING_SHIPMENT",
+        storeId: fixture.store.id,
+        totalWeightJin: new Prisma.Decimal("3.00"),
+        userId: fixture.user.id,
+        userPackageId: fixture.userPackage.id,
+      },
+    });
+
+    const latest = await miniapp.getMiniappEditableOrder({
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+    const requested = await miniapp.getMiniappEditableOrder({
+      orderId: fixture.pendingOrder.id,
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+    const shipped = await miniapp.getMiniappEditableOrder({
+      orderId: fixture.shippedOrder.id,
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+    const crossStore = await miniapp.getMiniappEditableOrder({
+      orderId: fixture.pendingOrder.id,
+      storeId: fixture.otherStore.id,
+      userId: fixture.user.id,
+    });
+
+    expect(latest).toMatchObject({
+      id: laterPendingOrder.id,
+      items: [{ dishId: fixture.dish.id, weightJin: 3 }],
+      totalWeightJin: 3,
+    });
+    expect(requested).toMatchObject({
+      id: fixture.pendingOrder.id,
+      items: [{ dishId: fixture.dish.id, weightJin: 2 }],
+      totalWeightJin: 2,
+    });
+    expect(shipped).toBeNull();
+    expect(crossStore).toBeNull();
   });
 });

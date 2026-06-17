@@ -1,4 +1,9 @@
-import { getActiveTaskForStore, prisma, Prisma } from "@hentor/db";
+import {
+  getActiveTaskForStore,
+  getMiniappEditableOrder,
+  prisma,
+  Prisma,
+} from "@hentor/db";
 import { calculateReservationSummary, storeCodeSchema } from "@hentor/shared";
 
 import { fail, ok } from "@/app/lib/api";
@@ -20,6 +25,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const storeCode = searchParams.get("storeCode") ?? "lotus-garden";
+  const orderId = searchParams.get("orderId");
   const parsedStoreCode = storeCodeSchema.safeParse(storeCode);
 
   if (!parsedStoreCode.success) {
@@ -56,18 +62,10 @@ export async function GET(request: Request) {
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     }),
-    prisma.order.findFirst({
-      where: {
-        storeId: store.id,
-        userId: auth.session.userId,
-        status: "PENDING_SHIPMENT",
-        deletedByUserAt: null,
-      },
-      orderBy: { createdAt: "desc" },
-      include: {
-        items: true,
-        address: true,
-      },
+    getMiniappEditableOrder({
+      orderId,
+      storeId: store.id,
+      userId: auth.session.userId,
     }),
   ]);
   const dishes = activeTask?.dishes ?? fallbackDishes;
@@ -82,12 +80,7 @@ export async function GET(request: Request) {
       })
     : null;
 
-  const selectedItems =
-    order?.items.map((item) => ({
-      dishId: item.dishId,
-      name: item.dishNameSnapshot,
-      weightJin: toNumber(item.weightJin),
-    })) ?? [];
+  const selectedItems = order?.items ?? [];
   const summary = calculateReservationSummary(
     selectedItems,
     toNumber(userPackage?.weightLimitJin),
@@ -157,14 +150,8 @@ export async function GET(request: Request) {
           orderNo: order.orderNo,
           addressId: order.addressId,
           status: order.status,
-          totalWeightJin: toNumber(order.totalWeightJin),
-          address: order.address
-            ? {
-                receiverName: order.address.receiverName,
-                receiverPhone: order.address.receiverPhone,
-                detail: order.address.detail,
-              }
-            : order.addressSnapshot,
+          totalWeightJin: order.totalWeightJin,
+          address: order.address,
           items: selectedItems,
           summary,
         }
