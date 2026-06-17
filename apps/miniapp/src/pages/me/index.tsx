@@ -211,7 +211,10 @@ export default function MePage() {
       </View>
 
       <View className="card">
-        <View className="entry">
+        <View
+          className="entry"
+          onClick={() => Taro.navigateTo({ url: "/pages/addresses/index" })}
+        >
           <View>
             <View className="entry__main">地址管理</View>
             <View className="entry__meta">

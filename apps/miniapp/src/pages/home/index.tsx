@@ -1,5 +1,5 @@
 import { Image, Text, View } from "@tarojs/components";
-import Taro from "@tarojs/taro";
+import Taro, { useDidShow } from "@tarojs/taro";
 import { useEffect, useMemo, useState } from "react";
 
 import { calculateReservationSummary } from "@hentor/shared";
@@ -129,6 +129,12 @@ export default function HomePage() {
     void loadHome();
   }, []);
 
+  useDidShow(() => {
+    if (homeData) {
+      void loadHome({ quiet: true });
+    }
+  });
+
   const packageInfo = homeData?.package;
   const dishes = homeData?.dishes ?? [];
   const hasPackage = Boolean(packageInfo);
@@ -254,7 +260,10 @@ export default function HomePage() {
         </View>
       )}
 
-      <View className="address">
+      <View
+        className="address"
+        onClick={() => Taro.navigateTo({ url: "/pages/addresses/index" })}
+      >
         <Text className="address__main">
           默认地址：{homeData?.defaultAddress?.detail ?? "请先添加配送地址"}
         </Text>

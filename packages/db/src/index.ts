@@ -1,4 +1,5 @@
 export * from "./client";
+export * from "./addresses";
 export * from "./dishes";
 export * from "./generated/prisma/client";
 export * from "./members";
