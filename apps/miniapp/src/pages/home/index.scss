@@ -134,10 +134,20 @@
 }
 
 .dish__image {
+  align-items: center;
   background: #eef5eb;
   border-radius: 14px;
+  color: #1f8f4f;
+  display: flex;
   flex: 0 0 76px;
+  font-size: 28px;
+  font-weight: 800;
   height: 76px;
+  justify-content: center;
+}
+
+.dish__image--placeholder {
+  background: linear-gradient(135deg, #e4f4dc, #ffffff);
 }
 
 .dish__body {

@@ -1,56 +1,123 @@
 import { Image, Text, View } from "@tarojs/components";
 import Taro from "@tarojs/taro";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { calculateReservationSummary } from "@hentor/shared";
 
 import "./index.scss";
 
-const packageInfo = {
-  name: "8斤周套餐",
-  limit: 8,
-  remainingTimes: 5,
-  cutoff: "18:00",
-};
-
-const dishes = [
-  {
-    id: "spinach",
-    name: "菠菜",
-    category: "叶菜",
-    desc: "清炒、煮汤都合适",
-    step: 0.5,
-    image:
-      "https://images.unsplash.com/photo-1576045057995-568f588f82fb?auto=format&fit=crop&w=200&q=80",
-  },
-  {
-    id: "tomato",
-    name: "番茄",
-    category: "果菜",
-    desc: "酸甜多汁，适合凉拌和煮汤",
-    step: 1,
-    image:
-      "https://images.unsplash.com/photo-1546470427-e5ac89d6ec37?auto=format&fit=crop&w=200&q=80",
-  },
-  {
-    id: "cucumber",
-    name: "黄瓜",
-    category: "活动",
-    desc: "脆嫩清爽，今日活动菜",
-    step: 0.5,
-    image:
-      "https://images.unsplash.com/photo-1566486189376-d5f21e25aae4?auto=format&fit=crop&w=200&q=80",
-  },
-];
+const API_BASE_URL =
+  process.env.TARO_APP_API_BASE_URL || "http://127.0.0.1:3000";
+const STORE_CODE = "lotus-garden";
 
 const categories = ["叶菜", "水果", "根茎", "菌菇", "活动"];
 
+const CATEGORY_LABELS: Record<string, string> = {
+  ACTIVITY: "活动",
+  FRUIT: "果菜",
+  LEAFY: "叶菜",
+  MUSHROOM: "菌菇",
+  ROOT: "根茎",
+};
+
+type ApiResponse<T> = {
+  success: boolean;
+  data?: T;
+  error?: {
+    code: string;
+    message: string;
+  };
+};
+
+type HomeData = {
+  currentOrder: null | {
+    addressId: string | null;
+    id: string;
+    items: Array<{
+      dishId: string;
+      name: string;
+      weightJin: number;
+    }>;
+  };
+  defaultAddress: null | {
+    detail: string;
+    id: string;
+  };
+  dishes: Array<{
+    category: string;
+    description: string | null;
+    id: string;
+    imageUrl: string | null;
+    name: string;
+    stepJin: number;
+    stockJin: number;
+  }>;
+  member: null | {
+    id: string;
+  };
+  package: null | {
+    id: string;
+    name: string;
+    remainingTimes: number;
+    storeId: string;
+    userId: string;
+    weightLimitJin: number;
+  };
+  store: {
+    cutoffTime: string;
+    id: string;
+  };
+};
+
 export default function HomePage() {
-  const [selected, setSelected] = useState<Record<string, number>>({
-    spinach: 1,
-    cucumber: 1.5,
-  });
-  const [hasPackage] = useState(true);
+  const [homeData, setHomeData] = useState<HomeData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Record<string, number>>({});
+  const [submitting, setSubmitting] = useState(false);
+
+  async function loadHome(options?: { quiet?: boolean }) {
+    if (!options?.quiet) {
+      setLoading(true);
+    }
+
+    try {
+      const response = await Taro.request<ApiResponse<HomeData>>({
+        url: `${API_BASE_URL}/api/v1/home?storeCode=${STORE_CODE}`,
+        method: "GET",
+      });
+      const payload = response.data;
+
+      if (!payload.success || !payload.data) {
+        throw new Error(payload.error?.message ?? "首页数据加载失败");
+      }
+
+      setHomeData(payload.data);
+      setSelected(
+        payload.data.currentOrder?.items.reduce<Record<string, number>>(
+          (result, item) => ({
+            ...result,
+            [item.dishId]: item.weightJin,
+          }),
+          {},
+        ) ?? {},
+      );
+    } catch (error) {
+      Taro.showToast({
+        title: error instanceof Error ? error.message : "首页数据加载失败",
+        icon: "none",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadHome();
+  }, []);
+
+  const packageInfo = homeData?.package;
+  const dishes = homeData?.dishes ?? [];
+  const hasPackage = Boolean(packageInfo);
 
   const selectedItems = useMemo(
     () =>
@@ -63,7 +130,10 @@ export default function HomePage() {
         .filter((item) => item.weightJin > 0),
     [selected],
   );
-  const summary = calculateReservationSummary(selectedItems, packageInfo.limit);
+  const summary = calculateReservationSummary(
+    selectedItems,
+    packageInfo?.weightLimitJin ?? 0,
+  );
 
   function changeDish(id: string, delta: number, step: number) {
     if (!hasPackage) {
@@ -80,9 +150,16 @@ export default function HomePage() {
     });
   }
 
-  function submitOrder() {
+  async function submitOrder() {
     if (!hasPackage) {
       Taro.showToast({ title: "请先购买套餐", icon: "none" });
+      return;
+    }
+
+    const addressId =
+      homeData?.currentOrder?.addressId ?? homeData?.defaultAddress?.id;
+    if (!homeData || !packageInfo || !addressId) {
+      Taro.showToast({ title: "请先维护配送地址", icon: "none" });
       return;
     }
 
@@ -96,21 +173,61 @@ export default function HomePage() {
       return;
     }
 
-    Taro.showToast({ title: "预订已提交", icon: "success" });
+    setSubmitting(true);
+    Taro.showLoading({ title: "提交中" });
+
+    try {
+      const response = await Taro.request<ApiResponse<unknown>>({
+        url: `${API_BASE_URL}/api/v1/reservations`,
+        method: "POST",
+        data: {
+          addressId,
+          items: selectedItems.map((item) => ({
+            dishId: item.dishId,
+            weightJin: item.weightJin,
+          })),
+          orderId: homeData.currentOrder?.id,
+          storeId: homeData.store.id,
+          userId: packageInfo.userId,
+          userPackageId: packageInfo.id,
+        },
+      });
+      const payload = response.data;
+
+      if (!payload.success) {
+        throw new Error(payload.error?.message ?? "预订提交失败");
+      }
+
+      await loadHome({ quiet: true });
+      Taro.showToast({
+        title: homeData.currentOrder ? "修改已保存" : "预订已提交",
+        icon: "success",
+      });
+    } catch (error) {
+      Taro.showToast({
+        title: error instanceof Error ? error.message : "预订提交失败",
+        icon: "none",
+      });
+    } finally {
+      Taro.hideLoading();
+      setSubmitting(false);
+    }
   }
 
   return (
     <View className="home">
       <View className="topbar">
         <Text className="home__title">首页</Text>
-        <Text className="cutoff">{packageInfo.cutoff} 截单</Text>
+        <Text className="cutoff">{homeData?.store.cutoffTime ?? "18:00"} 截单</Text>
       </View>
 
-      {hasPackage ? (
+      {loading && !homeData ? (
+        <View className="empty-package">正在加载今日可预订内容...</View>
+      ) : hasPackage && packageInfo ? (
         <View className="package-card">
           <View className="package-card__name">{packageInfo.name}</View>
           <View className="package-card__main">
-            已选 {summary.totalWeightJin} / {packageInfo.limit}斤
+            已选 {summary.totalWeightJin} / {packageInfo.weightLimitJin}斤
           </View>
           <View className="package-card__meta">
             本周剩余 {packageInfo.remainingTimes} 次，可在截单前修改
@@ -123,7 +240,9 @@ export default function HomePage() {
       )}
 
       <View className="address">
-        <Text className="address__main">默认地址：莲花小区 3栋 602</Text>
+        <Text className="address__main">
+          默认地址：{homeData?.defaultAddress?.detail ?? "请先添加配送地址"}
+        </Text>
         <Text className="address__action">切换</Text>
       </View>
 
@@ -147,23 +266,32 @@ export default function HomePage() {
         <View className="dish-list">
           {dishes.map((dish) => {
             const weight = selected[dish.id] ?? 0;
+            const categoryLabel = CATEGORY_LABELS[dish.category] ?? "菜品";
             return (
               <View className="dish" key={dish.id}>
-                <Image className="dish__image" mode="aspectFill" src={dish.image} />
+                {dish.imageUrl ? (
+                  <Image className="dish__image" mode="aspectFill" src={dish.imageUrl} />
+                ) : (
+                  <View className="dish__image dish__image--placeholder">
+                    {dish.name.slice(0, 1)}
+                  </View>
+                )}
                 <View className="dish__body">
                   <View className="dish__name">{dish.name}</View>
-                  <View className="dish__desc">{dish.desc}</View>
+                  <View className="dish__desc">
+                    {dish.description ?? `${categoryLabel} · 库存 ${dish.stockJin}斤`}
+                  </View>
                   <View className="dish__actions">
                     <Text
                       className="round-btn round-btn--ghost"
-                      onClick={() => changeDish(dish.id, -dish.step, dish.step)}
+                      onClick={() => changeDish(dish.id, -dish.stepJin, dish.stepJin)}
                     >
                       -
                     </Text>
                     <Text className="weight">{weight}</Text>
                     <Text
                       className="round-btn"
-                      onClick={() => changeDish(dish.id, dish.step, dish.step)}
+                      onClick={() => changeDish(dish.id, dish.stepJin, dish.stepJin)}
                     >
                       +
                     </Text>
@@ -194,7 +322,7 @@ export default function HomePage() {
           }
           onClick={submitOrder}
         >
-          提交预订
+          {submitting ? "提交中" : homeData?.currentOrder ? "保存修改" : "提交预订"}
         </Text>
       </View>
     </View>

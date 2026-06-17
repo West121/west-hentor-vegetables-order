@@ -48,6 +48,14 @@ async function getDashboardData() {
   return { stores, members, orders, packages, latestOrders };
 }
 
+const ORDER_STATUS_LABELS: Record<string, string> = {
+  CANCELED: "已取消",
+  PENDING_SHIPMENT: "待配送",
+  SHIPPED: "已发货",
+  SIGNED: "已签收",
+  VOIDED: "已作废",
+};
+
 export default async function DashboardPage() {
   const session = await getAdminSession();
 
@@ -194,7 +202,7 @@ export default async function DashboardPage() {
                       <td className="px-4 py-4">{Number(order.totalWeightJin)} 斤</td>
                       <td className="px-4 py-4">
                         <span className="rounded-full bg-[#e8f6ed] px-3 py-1 text-xs font-semibold text-[#1f8f4f]">
-                          待配送
+                          {ORDER_STATUS_LABELS[order.status] ?? order.status}
                         </span>
                       </td>
                     </tr>
