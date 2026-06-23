@@ -128,9 +128,13 @@ function emptyList<TItem, TSummary extends Record<string, number>>(
 }
 
 async function readApi<T>(path: string): Promise<T> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 15000);
+
   const response = await fetch(path, {
     credentials: "same-origin",
-  });
+    signal: controller.signal,
+  }).finally(() => window.clearTimeout(timeout));
   const payload = await response.json().catch(() => null);
 
   if (!response.ok || !payload?.success) {
@@ -370,9 +374,10 @@ export default function DashboardPage() {
             caught instanceof Error ? caught.message : "加载后台数据失败";
           if (message.includes("请先登录") || message.includes("登录已过期")) {
             router.replace("/login");
+            window.location.replace("/login");
             return;
           }
-          setError(message);
+          setError(message.includes("aborted") ? "后台数据请求超时" : message);
         }
       } finally {
         if (!cancelled) {
@@ -388,16 +393,6 @@ export default function DashboardPage() {
     };
   }, [router, selectedStoreId]);
 
-  if (loading || !data || !session) {
-    return (
-      <div className="grid min-h-screen place-items-center bg-[#f5f8f3] text-[#14231a]">
-        <div className="rounded-2xl border border-[#dbe6dc] bg-white px-6 py-5 text-sm shadow-sm">
-          正在加载后台数据
-        </div>
-      </div>
-    );
-  }
-
   if (error) {
     return (
       <div className="grid min-h-screen place-items-center bg-[#f5f8f3] text-[#14231a]">
@@ -411,6 +406,16 @@ export default function DashboardPage() {
           >
             重新加载
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading || !data || !session) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#f5f8f3] text-[#14231a]">
+        <div className="rounded-2xl border border-[#dbe6dc] bg-white px-6 py-5 text-sm shadow-sm">
+          正在加载后台数据
         </div>
       </div>
     );
