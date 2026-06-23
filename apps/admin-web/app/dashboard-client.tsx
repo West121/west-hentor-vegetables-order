@@ -59,6 +59,17 @@ type ListResult<TItem, TSummary = Record<string, number>> = {
   summary: TSummary;
 };
 
+type SpringListPayload<TItem, TSummary = Record<string, number>> = {
+  items?: TItem[];
+  page?: number;
+  pageSize?: number;
+  pagination?: ReturnType<typeof emptyPagination>;
+  summary?: TSummary;
+  take?: number;
+  total?: number;
+  totalPages?: number;
+};
+
 type DashboardData = {
   activePackages: number;
   activeStore: StoreOption | null;
@@ -144,13 +155,89 @@ async function readApi<T>(path: string): Promise<T> {
   return payload.data as T;
 }
 
+function normalizeSummary<TItem, TSummary extends Record<string, number>>(
+  items: TItem[],
+  fallbackSummary: TSummary,
+  total: number,
+): TSummary {
+  const summary: Record<string, number> = {
+    ...fallbackSummary,
+    total,
+  };
+  const statusOf = (item: TItem) =>
+    String((item as { status?: unknown }).status ?? "").toUpperCase();
+  const countStatus = (...statuses: string[]) =>
+    items.filter((item) => statuses.includes(statusOf(item))).length;
+
+  if ("active" in summary) summary.active = countStatus("ACTIVE");
+  if ("disabled" in summary) summary.disabled = countStatus("DISABLED");
+  if ("draft" in summary) summary.draft = countStatus("DRAFT");
+  if ("frozen" in summary) summary.frozen = countStatus("FROZEN");
+  if ("expired" in summary) summary.expired = countStatus("EXPIRED");
+  if ("onSale" in summary) summary.onSale = countStatus("ON_SALE");
+  if ("offSale" in summary) summary.offSale = countStatus("OFF_SALE");
+  if ("pendingShipment" in summary) {
+    summary.pendingShipment = countStatus("PENDING_SHIPMENT");
+  }
+  if ("shipped" in summary) summary.shipped = countStatus("SHIPPED");
+  if ("signed" in summary) summary.signed = countStatus("SIGNED");
+  if ("canceled" in summary) {
+    summary.canceled = countStatus("CANCELED", "CANCELLED");
+  }
+  if ("stock" in summary) {
+    summary.stock = items.reduce(
+      (sum, item) => sum + Number((item as { stockJin?: unknown }).stockJin ?? 0),
+      0,
+    );
+  }
+  if ("lowStock" in summary) {
+    summary.lowStock = items.filter(
+      (item) => Number((item as { stockJin?: unknown }).stockJin ?? 0) <= 10,
+    ).length;
+  }
+
+  return summary as TSummary;
+}
+
+function normalizeListResult<TItem, TSummary extends Record<string, number>>(
+  payload: SpringListPayload<TItem, TSummary>,
+  fallbackSummary: TSummary,
+  pageSize: number,
+): ListResult<TItem, TSummary> {
+  const items = payload.items ?? [];
+  const total = Number(payload.total ?? payload.pagination?.total ?? items.length);
+  const normalizedPageSize = Number(
+    payload.pageSize ?? payload.pagination?.pageSize ?? payload.take ?? pageSize,
+  );
+
+  return {
+    items,
+    pagination:
+      payload.pagination ??
+      {
+        page: Number(payload.page ?? 1),
+        pageSize: normalizedPageSize,
+        skip: Math.max(Number(payload.page ?? 1) - 1, 0) * normalizedPageSize,
+        take: normalizedPageSize,
+        total,
+        totalPages: Number(
+          payload.totalPages ?? Math.max(Math.ceil(total / normalizedPageSize), 1),
+        ),
+      },
+    summary:
+      payload.summary ??
+      normalizeSummary(items, fallbackSummary, total),
+  };
+}
+
 async function readList<TItem, TSummary extends Record<string, number>>(
   path: string,
   fallbackSummary: TSummary,
   pageSize = ADMIN_LIST_PAGE_SIZE,
 ): Promise<ListResult<TItem, TSummary>> {
   try {
-    return await readApi<ListResult<TItem, TSummary>>(path);
+    const payload = await readApi<SpringListPayload<TItem, TSummary>>(path);
+    return normalizeListResult(payload, fallbackSummary, pageSize);
   } catch {
     return emptyList<TItem, TSummary>(fallbackSummary, pageSize);
   }
