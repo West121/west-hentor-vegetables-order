@@ -2,6 +2,7 @@ import {
   createDishImageObjectKey,
   uploadObject,
 } from "@/app/lib/object-storage";
+import { getPermissionFailure } from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -17,6 +18,14 @@ export async function POST(request: Request) {
   const session = await getAdminSession();
   if (!session) {
     return fail("UNAUTHORIZED", "请先登录", 401);
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "dishes.write",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const formData = await request.formData().catch(() => null);

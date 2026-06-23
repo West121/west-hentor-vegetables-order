@@ -4,6 +4,11 @@ import {
   type DishCategory,
   type DishStatus,
 } from "./generated/prisma/client";
+import {
+  buildPaginationMeta,
+  normalizePagination,
+  type ListPaginationInput,
+} from "./pagination";
 
 export class DishServiceError extends Error {
   constructor(
@@ -15,10 +20,15 @@ export class DishServiceError extends Error {
   }
 }
 
-export type ListDishesInput = {
+export type ListDishesInput = ListPaginationInput & {
   category?: DishCategory;
   query?: string;
   status?: DishStatus;
+  storeId: string;
+};
+
+export type GetDishInput = {
+  dishId: string;
   storeId: string;
 };
 
@@ -149,16 +159,20 @@ export async function listDishes(input: ListDishesInput) {
     ...(query
       ? {
           OR: [
-            { name: { contains: query, mode: "insensitive" } },
-            { description: { contains: query, mode: "insensitive" } },
+            { name: { contains: query } },
+            { description: { contains: query } },
           ],
         }
       : {}),
   };
 
-  const [dishes, summaryRows] = await Promise.all([
+  const paginationInput = normalizePagination(input);
+
+  const [dishes, total, summaryRows, stockSummary, lowStockCount] = await Promise.all([
     prisma.dish.findMany({
       where,
+      skip: paginationInput.skip,
+      take: paginationInput.take,
       orderBy: [
         { status: "asc" },
         { category: "asc" },
@@ -176,6 +190,7 @@ export async function listDishes(input: ListDishesInput) {
         },
       },
     }),
+    prisma.dish.count({ where }),
     prisma.dish.groupBy({
       by: ["status"],
       where: {
@@ -183,6 +198,20 @@ export async function listDishes(input: ListDishesInput) {
         storeId: input.storeId,
       },
       _count: { _all: true },
+    }),
+    prisma.dish.aggregate({
+      where: {
+        deletedAt: null,
+        storeId: input.storeId,
+      },
+      _sum: { stockJin: true },
+    }),
+    prisma.dish.count({
+      where: {
+        deletedAt: null,
+        stockJin: { lte: new Prisma.Decimal(5) },
+        storeId: input.storeId,
+      },
     }),
   ]);
 
@@ -197,7 +226,13 @@ export async function listDishes(input: ListDishesInput) {
       }
       return value;
     },
-    { offSale: 0, onSale: 0, total: 0 },
+    {
+      lowStock: lowStockCount,
+      offSale: 0,
+      onSale: 0,
+      stock: Number(stockSummary._sum.stockJin?.toString() ?? 0),
+      total: 0,
+    },
   );
 
   return {
@@ -217,7 +252,71 @@ export async function listDishes(input: ListDishesInput) {
       store: dish.store,
       updatedAt: dish.updatedAt,
     })),
+    pagination: buildPaginationMeta(paginationInput, total),
     summary,
+  };
+}
+
+export async function getDish(input: GetDishInput) {
+  const dish = await prisma.dish.findFirst({
+    where: {
+      deletedAt: null,
+      id: input.dishId,
+      storeId: input.storeId,
+    },
+    include: {
+      inventoryLogs: {
+        take: 20,
+        orderBy: { createdAt: "desc" },
+        include: {
+          operator: {
+            select: {
+              id: true,
+              name: true,
+              username: true,
+            },
+          },
+        },
+      },
+      store: {
+        select: {
+          code: true,
+          id: true,
+          name: true,
+          type: true,
+        },
+      },
+    },
+  });
+
+  if (!dish) {
+    throw new DishServiceError("DISH_NOT_FOUND", "菜品不存在");
+  }
+
+  return {
+    category: dish.category,
+    createdAt: dish.createdAt,
+    deletedAt: dish.deletedAt,
+    description: dish.description,
+    id: dish.id,
+    imageKey: dish.imageKey,
+    imageUrl: dish.imageUrl,
+    inventoryLogs: dish.inventoryLogs.map((log) => ({
+      afterJin: toNumber(log.afterJin),
+      beforeJin: toNumber(log.beforeJin),
+      changeJin: toNumber(log.changeJin),
+      createdAt: log.createdAt,
+      id: log.id,
+      operator: log.operator,
+      reason: log.reason,
+    })),
+    name: dish.name,
+    sortOrder: dish.sortOrder,
+    status: dish.status,
+    stepJin: toNumber(dish.stepJin),
+    stockJin: toNumber(dish.stockJin),
+    store: dish.store,
+    updatedAt: dish.updatedAt,
   };
 }
 

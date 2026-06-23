@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   AddressServiceError,
+  createMiniappOperationLog,
   createMiniappAddress,
   findAvailableMiniappStore,
   listMiniappAddresses,
@@ -9,7 +10,14 @@ import {
 import { storeCodeSchema } from "@hentor/shared";
 
 import { fail, ok } from "@/app/lib/api";
+import {
+  addressAuditRequestParams,
+  addressAuditResponseData,
+  formatAddressAuditSnapshot,
+  maskAddressPhone,
+} from "@/app/lib/address-audit";
 import { requireMiniSession } from "@/app/lib/mini-auth";
+import { getRequestAuditMeta } from "@/app/lib/request-audit";
 
 const addressSchema = z.object({
   city: z.string().nullable().optional(),
@@ -22,8 +30,26 @@ const addressSchema = z.object({
   storeCode: storeCodeSchema.optional(),
 });
 
+type AddressResponseInput = {
+  city: string | null;
+  detail: string;
+  district: string | null;
+  province: string | null;
+};
+
 function statusForAddressError(code: string) {
+  if (code === "ADDRESS_LIMIT_EXCEEDED") {
+    return 409;
+  }
+
   return code.endsWith("_NOT_FOUND") ? 404 : 400;
+}
+
+function addressResponse<T extends AddressResponseInput>(address: T) {
+  return {
+    ...address,
+    fullAddress: formatAddressAuditSnapshot(address),
+  };
 }
 
 async function getSessionStore(request: Request, storeCode?: string) {
@@ -83,6 +109,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   const parsed = addressSchema.safeParse(await request.json().catch(() => null));
 
   if (!parsed.success) {
@@ -107,7 +134,26 @@ export async function POST(request: Request) {
       userId: sessionStore.session!.userId,
     });
 
-    return ok({ address });
+    await createMiniappOperationLog({
+      action: "MINIAPP_ADDRESS_CREATED",
+      afterValue: {
+        address: formatAddressAuditSnapshot(address),
+        isDefault: address.isDefault,
+        receiverName: address.receiverName,
+        receiverPhone: maskAddressPhone(address.receiverPhone),
+      },
+      durationMs: Date.now() - startedAt,
+      requestParams: addressAuditRequestParams(parsed.data),
+      resource: "address",
+      resourceId: address.id,
+      responseData: addressAuditResponseData(address),
+      storeId: sessionStore.storeId!,
+      statusCode: 200,
+      userId: sessionStore.session!.userId,
+      ...getRequestAuditMeta(request),
+    });
+
+    return ok({ address: addressResponse(address) });
   } catch (error) {
     if (error instanceof AddressServiceError) {
       return fail(error.code, error.message, statusForAddressError(error.code));

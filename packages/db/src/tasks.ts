@@ -1,5 +1,11 @@
 import { prisma } from "./client";
+import { normalizeCutoffTimeValue } from "./cutoff-time";
 import { Prisma, type TaskStatus } from "./generated/prisma/client";
+import {
+  buildPaginationMeta,
+  normalizePagination,
+  type ListPaginationInput,
+} from "./pagination";
 
 export class TaskServiceError extends Error {
   constructor(
@@ -11,10 +17,15 @@ export class TaskServiceError extends Error {
   }
 }
 
-export type ListTasksInput = {
+export type ListTasksInput = ListPaginationInput & {
   query?: string;
   status?: TaskStatus;
   storeId: string;
+};
+
+export type GetTaskInput = {
+  storeId: string;
+  taskId: string;
 };
 
 export type TaskMutationInput = {
@@ -35,11 +46,8 @@ export type UpdateTaskInput = TaskMutationInput & {
   id: string;
 };
 
-export type CopyTaskInput = {
+export type CopyTaskInput = Omit<TaskMutationInput, "status"> & {
   id: string;
-  name: string;
-  operatorId: string;
-  storeId: string;
 };
 
 export type GetActiveTaskForStoreInput = {
@@ -68,14 +76,14 @@ async function getActiveOperator(operatorId: string) {
 
 function normalizeTaskInput(input: TaskMutationInput) {
   const name = input.name.trim();
-  const cutoffTime = input.cutoffTime.trim();
+  const cutoffTime = normalizeCutoffTimeValue(input.cutoffTime);
   const tag = input.tag?.trim() || null;
 
   if (!name) {
     throw new TaskServiceError("NAME_REQUIRED", "请输入任务名称");
   }
 
-  if (!/^\d{2}:\d{2}$/.test(cutoffTime)) {
+  if (!cutoffTime) {
     throw new TaskServiceError("CUTOFF_TIME_INVALID", "截单时间不正确");
   }
 
@@ -171,16 +179,20 @@ export async function listTasks(input: ListTasksInput) {
     ...(query
       ? {
           OR: [
-            { name: { contains: query, mode: "insensitive" } },
-            { tag: { contains: query, mode: "insensitive" } },
+            { name: { contains: query } },
+            { tag: { contains: query } },
           ],
         }
       : {}),
   };
 
-  const [tasks, summaryRows] = await Promise.all([
+  const paginationInput = normalizePagination(input);
+
+  const [tasks, total, summaryRows] = await Promise.all([
     prisma.task.findMany({
       where,
+      skip: paginationInput.skip,
+      take: paginationInput.take,
       orderBy: [{ status: "asc" }, { startsAt: "desc" }],
       include: {
         dishes: {
@@ -207,6 +219,7 @@ export async function listTasks(input: ListTasksInput) {
         },
       },
     }),
+    prisma.task.count({ where }),
     prisma.task.groupBy({
       by: ["status"],
       where: { storeId: input.storeId },
@@ -254,7 +267,74 @@ export async function listTasks(input: ListTasksInput) {
       tag: task.tag,
       updatedAt: task.updatedAt,
     })),
+    pagination: buildPaginationMeta(paginationInput, total),
     summary,
+  };
+}
+
+export async function getTask(input: GetTaskInput) {
+  const task = await prisma.task.findFirst({
+    where: {
+      id: input.taskId,
+      storeId: input.storeId,
+    },
+    include: {
+      dishes: {
+        orderBy: { sortOrder: "asc" },
+        include: {
+          dish: {
+            select: {
+              category: true,
+              description: true,
+              id: true,
+              imageKey: true,
+              imageUrl: true,
+              name: true,
+              status: true,
+              stepJin: true,
+              stockJin: true,
+            },
+          },
+        },
+      },
+      store: {
+        select: {
+          code: true,
+          id: true,
+          name: true,
+        },
+      },
+    },
+  });
+
+  if (!task) {
+    throw new TaskServiceError("TASK_NOT_FOUND", "任务不存在");
+  }
+
+  return {
+    cutoffTime: task.cutoffTime,
+    createdAt: task.createdAt,
+    dishCount: task.dishes.length,
+    dishes: task.dishes.map((taskDish) => ({
+      category: taskDish.dish.category,
+      description: taskDish.dish.description,
+      id: taskDish.dish.id,
+      imageKey: taskDish.dish.imageKey,
+      imageUrl: taskDish.dish.imageUrl,
+      name: taskDish.dish.name,
+      sortOrder: taskDish.sortOrder,
+      status: taskDish.dish.status,
+      stepJin: toNumber(taskDish.dish.stepJin),
+      stockJin: toNumber(taskDish.dish.stockJin),
+    })),
+    endsAt: task.endsAt,
+    id: task.id,
+    name: task.name,
+    startsAt: task.startsAt,
+    status: task.status,
+    store: task.store,
+    tag: task.tag,
+    updatedAt: task.updatedAt,
   };
 }
 
@@ -317,6 +397,13 @@ export async function updateTask(input: UpdateTaskInput) {
       throw new TaskServiceError("TASK_NOT_FOUND", "任务不存在");
     }
 
+    if (task.status === "ACTIVE") {
+      throw new TaskServiceError(
+        "TASK_ALREADY_ACTIVE",
+        "已生效任务不能再修改",
+      );
+    }
+
     await ensureTaskDishes(tx, input.storeId, data.dishIds);
 
     const updated = await tx.task.update({
@@ -359,11 +446,7 @@ export async function updateTask(input: UpdateTaskInput) {
 
 export async function copyTask(input: CopyTaskInput) {
   const operator = await getActiveOperator(input.operatorId);
-  const name = input.name.trim();
-
-  if (!name) {
-    throw new TaskServiceError("NAME_REQUIRED", "请输入任务名称");
-  }
+  const data = normalizeTaskInput({ ...input, status: "DRAFT" });
 
   return prisma.$transaction(async (tx) => {
     const task = await tx.task.findFirst({
@@ -371,42 +454,35 @@ export async function copyTask(input: CopyTaskInput) {
         id: input.id,
         storeId: input.storeId,
       },
-      include: {
-        dishes: {
-          orderBy: { sortOrder: "asc" },
-          select: { dishId: true },
-        },
-      },
+      select: { id: true },
     });
 
     if (!task) {
       throw new TaskServiceError("TASK_NOT_FOUND", "任务不存在");
     }
 
+    await ensureTaskDishes(tx, input.storeId, data.dishIds);
+
     const copied = await tx.task.create({
       data: {
-        cutoffTime: task.cutoffTime,
-        endsAt: task.endsAt,
-        name,
-        startsAt: task.startsAt,
+        cutoffTime: data.cutoffTime,
+        endsAt: data.endsAt,
+        name: data.name,
+        startsAt: data.startsAt,
         status: "DRAFT",
         storeId: input.storeId,
-        tag: task.tag,
+        tag: data.tag,
       },
     });
 
-    await replaceTaskDishes(
-      tx,
-      copied.id,
-      task.dishes.map((dish) => dish.dishId),
-    );
+    await replaceTaskDishes(tx, copied.id, data.dishIds);
 
     await tx.adminOperationLog.create({
       data: {
         action: "TASK_COPIED",
         afterValue: taskLogValue({
           cutoffTime: copied.cutoffTime,
-          dishIds: task.dishes.map((dish) => dish.dishId),
+          dishIds: data.dishIds,
           endsAt: copied.endsAt,
           name: copied.name,
           startsAt: copied.startsAt,

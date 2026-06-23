@@ -40,6 +40,13 @@ function requireWechatConfig() {
   return { appId, appSecret };
 }
 
+function createWechatUrl(path: string) {
+  const baseUrl = (
+    process.env.WECHAT_API_BASE_URL ?? "https://api.weixin.qq.com"
+  ).replace(/\/+$/, "");
+  return new URL(`${baseUrl}${path}`);
+}
+
 async function readJson<T>(response: Response) {
   if (!response.ok) {
     throw new Error(`WECHAT_HTTP_${response.status}`);
@@ -50,7 +57,7 @@ async function readJson<T>(response: Response) {
 
 export async function exchangeWechatLoginCode(code: string) {
   const { appId, appSecret } = requireWechatConfig();
-  const url = new URL("https://api.weixin.qq.com/sns/jscode2session");
+  const url = createWechatUrl("/sns/jscode2session");
   url.searchParams.set("appid", appId);
   url.searchParams.set("secret", appSecret);
   url.searchParams.set("js_code", code);
@@ -70,7 +77,7 @@ export async function exchangeWechatLoginCode(code: string) {
 
 export async function getWechatAccessToken() {
   const { appId, appSecret } = requireWechatConfig();
-  const url = new URL("https://api.weixin.qq.com/cgi-bin/token");
+  const url = createWechatUrl("/cgi-bin/token");
   url.searchParams.set("grant_type", "client_credential");
   url.searchParams.set("appid", appId);
   url.searchParams.set("secret", appSecret);
@@ -86,7 +93,7 @@ export async function getWechatAccessToken() {
 
 export async function exchangeWechatPhoneCode(code: string) {
   const accessToken = await getWechatAccessToken();
-  const url = new URL("https://api.weixin.qq.com/wxa/business/getuserphonenumber");
+  const url = createWechatUrl("/wxa/business/getuserphonenumber");
   url.searchParams.set("access_token", accessToken);
 
   const payload = await readJson<WechatPhoneResponse>(

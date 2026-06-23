@@ -11,7 +11,7 @@ import { fail, ok } from "@/app/lib/api";
 import { requireMiniSession } from "@/app/lib/mini-auth";
 
 const cancelSchema = z.object({
-  reason: z.string().min(1),
+  reason: z.string().trim().min(1),
   storeCode: storeCodeSchema.optional(),
 });
 

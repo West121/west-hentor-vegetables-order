@@ -67,7 +67,7 @@ function createClient(config = getObjectStorageConfig()) {
     accessKey: env("MINIO_ACCESS_KEY", "hentor_minio"),
     endPoint: config.endpoint,
     port: config.port,
-    secretKey: env("MINIO_SECRET_KEY", "hentor_minio_password"),
+    secretKey: env("MINIO_SECRET_KEY", "unconfigured"),
     useSSL: config.useSSL,
   });
 }

@@ -1,5 +1,7 @@
 import { Prisma } from "./generated/prisma/client";
 import { prisma } from "./client";
+import { getBusinessClockMinutes, getBusinessDayRange } from "./business-day";
+import { getDeliveryRangeFailure } from "./delivery-range";
 
 export class ReservationServiceError extends Error {
   constructor(
@@ -13,10 +15,15 @@ export class ReservationServiceError extends Error {
 
 export type SubmitReservationInput = {
   addressId: string;
+  benefitSelections?: Array<{
+    quantity: number;
+    userPackageBenefitId: string;
+  }>;
   items: Array<{
     dishId: string;
     weightJin: number;
   }>;
+  now?: Date;
   orderId?: string;
   storeId: string;
   userId: string;
@@ -31,7 +38,37 @@ type NormalizedItem = {
   weightJin: Prisma.Decimal;
 };
 
+type NormalizedBenefit = {
+  id: string;
+  kind: string;
+  nameSnapshot: string;
+  quantity: Prisma.Decimal;
+  shipmentGroup: string | null;
+  unitSnapshot: string;
+};
+
+type PackageBenefitForSelection = {
+  id: string;
+  kind: string;
+  nameSnapshot: string;
+  shipmentGroup: string | null;
+  totalQuantity: Prisma.Decimal;
+  unitSnapshot: string;
+  usedQuantity: Prisma.Decimal;
+};
+
+type ExistingOrderBenefitForSelection = {
+  quantity: Prisma.Decimal;
+  userPackageBenefitId: string | null;
+};
+
 export type SubmittedReservation = {
+  benefits: Array<{
+    kind: string;
+    nameSnapshot: string;
+    quantity: number;
+    unitSnapshot: string;
+  }>;
   id: string;
   orderNo: string;
   status: string;
@@ -45,6 +82,27 @@ export type SubmittedReservation = {
 
 function toNumber(value: Prisma.Decimal | number) {
   return Number(value);
+}
+
+async function findFirstUsableUserPackage(
+  tx: Prisma.TransactionClient,
+  input: { storeId: string; userId: string },
+) {
+  const packages = await tx.userPackage.findMany({
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      totalTimes: true,
+      usedTimes: true,
+    },
+    where: {
+      status: "ACTIVE",
+      storeId: input.storeId,
+      userId: input.userId,
+    },
+  });
+
+  return packages.find((item) => item.usedTimes < item.totalTimes) ?? null;
 }
 
 function formatDatePart(date: Date) {
@@ -65,6 +123,21 @@ function assertStep(weight: number, step: number) {
   return Math.abs(ratio - Math.round(ratio)) < 0.000001;
 }
 
+function isPastCutoff(cutoffTime: string, now: Date) {
+  const matched = cutoffTime.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!matched) {
+    return false;
+  }
+
+  const hour = Number(matched[1]);
+  const minute = Number(matched[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return false;
+  }
+
+  return getBusinessClockMinutes(now) >= hour * 60 + minute;
+}
+
 function snapshotItems(items: NormalizedItem[]) {
   return items.map((item) => ({
     dishId: item.dishId,
@@ -74,6 +147,12 @@ function snapshotItems(items: NormalizedItem[]) {
 }
 
 function formatOrder(order: {
+  benefitItems?: Array<{
+    kind: string;
+    nameSnapshot: string;
+    quantity: Prisma.Decimal;
+    unitSnapshot: string;
+  }>;
   id: string;
   orderNo: string;
   status: string;
@@ -85,6 +164,13 @@ function formatOrder(order: {
   }>;
 }): SubmittedReservation {
   return {
+    benefits:
+      order.benefitItems?.map((benefit) => ({
+        kind: benefit.kind,
+        nameSnapshot: benefit.nameSnapshot,
+        quantity: toNumber(benefit.quantity),
+        unitSnapshot: benefit.unitSnapshot,
+      })) ?? [],
     id: order.id,
     orderNo: order.orderNo,
     status: order.status,
@@ -95,6 +181,146 @@ function formatOrder(order: {
       weightJin: toNumber(item.weightJin),
     })),
   };
+}
+
+function remainingBenefitQuantity(benefit: {
+  totalQuantity: Prisma.Decimal;
+  usedQuantity: Prisma.Decimal;
+}) {
+  const remaining = benefit.totalQuantity.minus(benefit.usedQuantity);
+  return remaining.gt(0) ? remaining : new Prisma.Decimal("0");
+}
+
+function sumExistingBenefitQuantitiesById(
+  benefits: ExistingOrderBenefitForSelection[] = [],
+) {
+  const result = new Map<string, Prisma.Decimal>();
+
+  for (const benefit of benefits) {
+    if (!benefit.userPackageBenefitId) {
+      continue;
+    }
+
+    result.set(
+      benefit.userPackageBenefitId,
+      (result.get(benefit.userPackageBenefitId) ?? new Prisma.Decimal("0")).plus(
+        benefit.quantity,
+      ),
+    );
+  }
+
+  return result;
+}
+
+function restoreEditableBenefitAllowance<T extends PackageBenefitForSelection>(
+  benefits: T[],
+  existingBenefits: ExistingOrderBenefitForSelection[] = [],
+): T[] {
+  const existingQuantityById = sumExistingBenefitQuantitiesById(existingBenefits);
+
+  return benefits.map((benefit) => {
+    const existingQuantity =
+      existingQuantityById.get(benefit.id) ?? new Prisma.Decimal("0");
+    const usedQuantity = benefit.usedQuantity.minus(existingQuantity);
+
+    return {
+      ...benefit,
+      usedQuantity: usedQuantity.gt(0) ? usedQuantity : new Prisma.Decimal("0"),
+    };
+  });
+}
+
+function normalizeSelectedBenefits(
+  benefits: Array<{
+    id: string;
+    kind: string;
+    nameSnapshot: string;
+    shipmentGroup: string | null;
+    totalQuantity: Prisma.Decimal;
+    unitSnapshot: string;
+    usedQuantity: Prisma.Decimal;
+  }>,
+  selections: SubmitReservationInput["benefitSelections"] = [],
+): NormalizedBenefit[] {
+  const benefitById = new Map(benefits.map((benefit) => [benefit.id, benefit]));
+  const seen = new Set<string>();
+
+  return selections.map((selection) => {
+    if (seen.has(selection.userPackageBenefitId)) {
+      throw new ReservationServiceError(
+        "DUPLICATE_BENEFIT",
+        "附加权益不能重复选择",
+      );
+    }
+    seen.add(selection.userPackageBenefitId);
+
+    const benefit = benefitById.get(selection.userPackageBenefitId);
+    if (!benefit) {
+      throw new ReservationServiceError(
+        "BENEFIT_NOT_AVAILABLE",
+        "附加权益不可用",
+      );
+    }
+
+    const quantity = new Prisma.Decimal(selection.quantity.toFixed(2));
+    if (quantity.lte(0)) {
+      throw new ReservationServiceError(
+        "INVALID_BENEFIT_QUANTITY",
+        "附加权益数量必须大于 0",
+      );
+    }
+
+    const remaining = remainingBenefitQuantity(benefit);
+    if (quantity.gt(remaining)) {
+      throw new ReservationServiceError(
+        "BENEFIT_QUANTITY_EXCEEDED",
+        "附加权益剩余数量不足",
+      );
+    }
+
+    return {
+      id: benefit.id,
+      kind: benefit.kind,
+      nameSnapshot: benefit.nameSnapshot,
+      quantity,
+      shipmentGroup: benefit.shipmentGroup,
+      unitSnapshot: benefit.unitSnapshot,
+    };
+  });
+}
+
+function buildShipmentCreates(
+  benefits: Array<{
+    kind: string;
+    nameSnapshot: string;
+    shipmentGroup: string | null;
+  }>,
+) {
+  const shipments = [
+    {
+      packageName: "蔬菜包裹",
+      packageType: "VEGETABLE",
+      sortOrder: 0,
+    },
+  ];
+  const seen = new Set(["VEGETABLE:蔬菜包裹"]);
+
+  for (const benefit of benefits) {
+    const packageName = benefit.shipmentGroup?.trim() || `${benefit.nameSnapshot}包裹`;
+    const packageType = benefit.kind || "EXTRA";
+    const key = `${packageType}:${packageName}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    shipments.push({
+      packageName,
+      packageType,
+      sortOrder: shipments.length,
+    });
+  }
+
+  return shipments;
 }
 
 function sumWeightsByDishId(
@@ -159,11 +385,88 @@ export async function submitReservation(input: SubmitReservationInput) {
   }
 
   return prisma.$transaction(async (tx) => {
+    const now = input.now ?? new Date();
+    const store = await tx.store.findUnique({
+      where: { id: input.storeId },
+      select: {
+        cutoffTime: true,
+        deliveryCities: true,
+        deliveryProvinces: true,
+      },
+    });
+
+    if (!store) {
+      throw new ReservationServiceError("STORE_NOT_FOUND", "门店不存在");
+    }
+
+    const activeTask = await tx.task.findFirst({
+      where: {
+        endsAt: { gte: now },
+        startsAt: { lte: now },
+        status: "ACTIVE",
+        storeId: input.storeId,
+      },
+      orderBy: [{ startsAt: "desc" }, { createdAt: "desc" }],
+      select: {
+        cutoffTime: true,
+        dishes: {
+          select: {
+            dishId: true,
+          },
+        },
+      },
+    });
+
+    if (isPastCutoff(activeTask?.cutoffTime ?? store.cutoffTime, now)) {
+      throw new ReservationServiceError(
+        "ORDER_CUTOFF_PASSED",
+        "今日已截单，不能提交预订",
+      );
+    }
+
+    const memberBinding = await tx.memberStoreBinding.findFirst({
+      where: {
+        storeId: input.storeId,
+        userId: input.userId,
+      },
+      include: {
+        user: {
+          select: {
+            disabledReason: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!memberBinding) {
+      throw new ReservationServiceError(
+        "STORE_REQUIRED",
+        "请先绑定当前门店后再预订",
+      );
+    }
+
+    if (
+      memberBinding.status !== "ACTIVE" ||
+      memberBinding.user.status !== "ACTIVE"
+    ) {
+      const reason = memberBinding.user.disabledReason?.trim();
+      throw new ReservationServiceError(
+        "MEMBER_DISABLED",
+        reason ? `会员已停用：${reason}` : "会员已停用，暂不能预订",
+      );
+    }
+
     const userPackage = await tx.userPackage.findFirst({
       where: {
         id: input.userPackageId,
         storeId: input.storeId,
         userId: input.userId,
+      },
+      include: {
+        benefits: {
+          orderBy: { sortOrder: "asc" },
+        },
       },
     });
 
@@ -178,7 +481,7 @@ export async function submitReservation(input: SubmitReservationInput) {
       );
     }
 
-    if (userPackage.status !== "ACTIVE" || userPackage.expiresAt < new Date()) {
+    if (userPackage.status !== "ACTIVE") {
       throw new ReservationServiceError("PACKAGE_UNAVAILABLE", "套餐不可用");
     }
 
@@ -194,14 +497,36 @@ export async function submitReservation(input: SubmitReservationInput) {
       throw new ReservationServiceError("ADDRESS_NOT_FOUND", "配送地址不存在");
     }
 
+    const deliveryRangeFailure = getDeliveryRangeFailure(address, store);
+    if (deliveryRangeFailure) {
+      throw new ReservationServiceError(
+        deliveryRangeFailure.code,
+        deliveryRangeFailure.message,
+      );
+    }
+
     const newDishIds = [...new Set(input.items.map((item) => item.dishId))];
     if (newDishIds.length !== input.items.length) {
       throw new ReservationServiceError("DUPLICATE_DISH", "菜品不能重复提交");
     }
 
+    if (activeTask) {
+      const taskDishIds = new Set(
+        activeTask.dishes.map((taskDish) => taskDish.dishId),
+      );
+      if (newDishIds.some((dishId) => !taskDishIds.has(dishId))) {
+        throw new ReservationServiceError(
+          "DISH_NOT_IN_ACTIVE_TASK",
+          "菜品不在今日可预订任务中",
+        );
+      }
+    }
+
+    const { end: todayEnd, start: todayStart } = getBusinessDayRange(now);
     const existingOrder = input.orderId
       ? await tx.order.findFirst({
           where: {
+            createdAt: { gte: todayStart, lt: todayEnd },
             id: input.orderId,
             storeId: input.storeId,
             userId: input.userId,
@@ -210,6 +535,7 @@ export async function submitReservation(input: SubmitReservationInput) {
             deletedByUserAt: null,
           },
           include: {
+            benefitItems: true,
             items: true,
           },
         })
@@ -217,6 +543,41 @@ export async function submitReservation(input: SubmitReservationInput) {
 
     if (input.orderId && !existingOrder) {
       throw new ReservationServiceError("ORDER_NOT_EDITABLE", "当前订单不可修改");
+    }
+
+    if (!input.orderId) {
+      const firstUsablePackage = await findFirstUsableUserPackage(tx, {
+        storeId: input.storeId,
+        userId: input.userId,
+      });
+
+      if (
+        firstUsablePackage &&
+        firstUsablePackage.id !== input.userPackageId
+      ) {
+        throw new ReservationServiceError(
+          "PACKAGE_NOT_CURRENT",
+          "请刷新后使用最早可用套餐预订",
+        );
+      }
+
+      const existingTodayOrder = await tx.order.findFirst({
+        where: {
+          createdAt: { gte: todayStart, lt: todayEnd },
+          deletedByUserAt: null,
+          status: { notIn: ["CANCELED", "VOIDED"] },
+          storeId: input.storeId,
+          userId: input.userId,
+        },
+        select: { id: true },
+      });
+
+      if (existingTodayOrder) {
+        throw new ReservationServiceError(
+          "ORDER_ALREADY_EXISTS",
+          "今日已提交预订，请修改今日预订",
+        );
+      }
     }
 
     const oldWeightsByDishId = sumWeightsByDishId(existingOrder?.items ?? []);
@@ -295,8 +656,29 @@ export async function submitReservation(input: SubmitReservationInput) {
         dishNameSnapshot: item.dishNameSnapshot,
         weightJin: toNumber(item.weightJin),
       }));
+      const benefitSelections =
+        input.benefitSelections ??
+        editableOrder.benefitItems
+          .filter((benefit) => benefit.userPackageBenefitId)
+          .map((benefit) => ({
+            quantity: toNumber(benefit.quantity),
+            userPackageBenefitId: benefit.userPackageBenefitId!,
+          }));
+      const selectedBenefits = normalizeSelectedBenefits(
+        restoreEditableBenefitAllowance(
+          userPackage.benefits,
+          editableOrder.benefitItems,
+        ),
+        benefitSelections,
+      );
 
       await tx.orderItem.deleteMany({
+        where: { orderId: editableOrder.id },
+      });
+      await tx.orderBenefitItem.deleteMany({
+        where: { orderId: editableOrder.id },
+      });
+      await tx.orderShipment.deleteMany({
         where: { orderId: editableOrder.id },
       });
 
@@ -311,9 +693,21 @@ export async function submitReservation(input: SubmitReservationInput) {
         data: {
           addressId: address.id,
           addressSnapshot,
-          modifiedAt: new Date(),
+          modifiedAt: now,
           totalWeightJin,
           userVisibleRemark: input.userVisibleRemark,
+          benefitItems: selectedBenefits.length
+            ? {
+                create: selectedBenefits.map((benefit) => ({
+                  kind: benefit.kind,
+                  nameSnapshot: benefit.nameSnapshot,
+                  quantity: benefit.quantity,
+                  shipmentGroup: benefit.shipmentGroup,
+                  unitSnapshot: benefit.unitSnapshot,
+                  userPackageBenefitId: benefit.id,
+                })),
+              }
+            : undefined,
           items: {
             create: normalizedItems.map((item) => ({
               dishId: item.dishId,
@@ -322,9 +716,34 @@ export async function submitReservation(input: SubmitReservationInput) {
               weightJin: item.weightJin,
             })),
           },
+          shipments: {
+            create: buildShipmentCreates(selectedBenefits),
+          },
         },
-        include: { items: true },
+        include: { benefitItems: true, items: true },
       });
+
+      for (const benefit of editableOrder.benefitItems) {
+        if (!benefit.userPackageBenefitId) {
+          continue;
+        }
+
+        await tx.userPackageBenefit.update({
+          where: { id: benefit.userPackageBenefitId },
+          data: {
+            usedQuantity: { decrement: benefit.quantity },
+          },
+        });
+      }
+
+      for (const benefit of selectedBenefits) {
+        await tx.userPackageBenefit.update({
+          where: { id: benefit.id },
+          data: {
+            usedQuantity: { increment: benefit.quantity },
+          },
+        });
+      }
 
       await tx.orderChangeLog.create({
         data: {
@@ -353,16 +772,34 @@ export async function submitReservation(input: SubmitReservationInput) {
       oldWeightsByDishId,
     });
 
+    const selectedBenefits = normalizeSelectedBenefits(
+      userPackage.benefits,
+      input.benefitSelections,
+    );
+
     const order = await tx.order.create({
       data: {
         addressId: address.id,
         addressSnapshot,
-        orderNo: createOrderNo(),
+        createdAt: now,
+        orderNo: createOrderNo(now),
         storeId: input.storeId,
         totalWeightJin,
         userId: input.userId,
         userPackageId: input.userPackageId,
         userVisibleRemark: input.userVisibleRemark,
+        benefitItems: selectedBenefits.length
+          ? {
+              create: selectedBenefits.map((benefit) => ({
+                kind: benefit.kind,
+                nameSnapshot: benefit.nameSnapshot,
+                quantity: benefit.quantity,
+                shipmentGroup: benefit.shipmentGroup,
+                unitSnapshot: benefit.unitSnapshot,
+                userPackageBenefitId: benefit.id,
+              })),
+            }
+          : undefined,
         items: {
           create: normalizedItems.map((item) => ({
             dishId: item.dishId,
@@ -371,17 +808,29 @@ export async function submitReservation(input: SubmitReservationInput) {
             weightJin: item.weightJin,
           })),
         },
+        shipments: {
+          create: buildShipmentCreates(selectedBenefits),
+        },
       },
-      include: { items: true },
+      include: { benefitItems: true, items: true },
     });
 
     await tx.userPackage.update({
       where: { id: userPackage.id },
       data: {
         usedTimes: { increment: 1 },
-        lastUsedAt: new Date(),
+        lastUsedAt: now,
       },
     });
+
+    for (const benefit of selectedBenefits) {
+      await tx.userPackageBenefit.update({
+        where: { id: benefit.id },
+        data: {
+          usedQuantity: { increment: benefit.quantity },
+        },
+      });
+    }
 
     return formatOrder(order);
   });

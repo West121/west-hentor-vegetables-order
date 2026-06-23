@@ -206,7 +206,6 @@ async function createFixture(): Promise<Fixture> {
       expiresAt: new Date("2099-12-31T15:59:59.000Z"),
       id: `miniapp-user-package-${suffix}`,
       nameSnapshot: template.name,
-      nextOrderDate: new Date("2026-06-24T00:00:00.000Z"),
       status: "ACTIVE",
       storeId: store.id,
       templateId: template.id,
@@ -525,6 +524,249 @@ describe("mini app customer portal", () => {
     expect(otherStoreOrders.items).toHaveLength(0);
   });
 
+  it("returns public store agreement settings for login and profile entry points", async () => {
+    const fixture = await createFixture();
+    await prisma.store.update({
+      where: { id: fixture.store.id },
+      data: { type: "DIRECT" },
+    });
+    await prisma.systemConfig.createMany({
+      data: [
+        {
+          key: "about_text",
+          storeId: fixture.store.id,
+          value: "莲花小区门店配送范围",
+        },
+        {
+          key: "privacy_policy_url",
+          storeId: fixture.store.id,
+          value: "https://example.com/privacy",
+        },
+        {
+          key: "login_image_url",
+          storeId: fixture.store.id,
+          value: "/uploads/login.jpg",
+        },
+        {
+          key: "login_title",
+          storeId: fixture.store.id,
+          value: "Hentor Fresh",
+        },
+        {
+          key: "login_subtitle",
+          storeId: fixture.store.id,
+          value: "社区鲜蔬会员",
+        },
+        {
+          key: "login_welcome",
+          storeId: fixture.store.id,
+          value: "欢迎来到蔬菜预订",
+        },
+        {
+          key: "user_agreement_url",
+          storeId: fixture.store.id,
+          value: "https://example.com/agreement",
+        },
+      ],
+    });
+
+    await expect(
+      miniapp.getMiniappStorePublicSettings({
+        storeCode: fixture.store.code,
+      }),
+    ).resolves.toMatchObject({
+      aboutText: "莲花小区门店配送范围",
+      loginImageUrl: "/uploads/login.jpg",
+      loginSubtitle: "社区鲜蔬会员",
+      loginTitle: "Hentor Fresh",
+      loginWelcome: "欢迎来到蔬菜预订",
+      privacyPolicyUrl: "https://example.com/privacy",
+      store: {
+        code: fixture.store.code,
+        id: fixture.store.id,
+      },
+      userAgreementUrl: "https://example.com/agreement",
+    });
+  });
+
+  it("soft-cancels the miniapp account for the current store without deleting history", async () => {
+    const fixture = await createFixture();
+
+    const account = await miniapp.cancelMiniappAccount({
+      reason: "用户主动注销",
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(account).toMatchObject({
+      bindingStatus: "DISABLED",
+      disabledReason: "用户主动注销",
+      status: "DISABLED",
+      userId: fixture.user.id,
+    });
+
+    await expect(
+      prisma.order.count({
+        where: {
+          storeId: fixture.store.id,
+          userId: fixture.user.id,
+        },
+      }),
+    ).resolves.toBeGreaterThan(0);
+    await expect(
+      miniapp.createMiniappPackagePurchase({
+        storeId: fixture.store.id,
+        templateId: fixture.purchaseTemplate.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "MEMBER_DISABLED",
+    });
+  });
+
+  it("keeps disabled miniapp users locked even if the store binding is active", async () => {
+    const fixture = await createFixture();
+    await prisma.user.update({
+      where: { id: fixture.user.id },
+      data: {
+        disabledReason: "账号已注销",
+        status: "DISABLED",
+      },
+    });
+
+    await expect(
+      miniapp.createMiniappPackagePurchase({
+        storeId: fixture.store.id,
+        templateId: fixture.purchaseTemplate.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "MEMBER_DISABLED",
+      message: "会员已停用：账号已注销",
+    });
+  });
+
+  it("lists available member stores and switches the current mini app store", async () => {
+    const fixture = await createFixture();
+    await prisma.store.updateMany({
+      where: { id: { in: [fixture.store.id, fixture.otherStore.id] } },
+      data: { type: "DIRECT" },
+    });
+    await prisma.memberStoreBinding.create({
+      data: {
+        isDefault: false,
+        source: "test-switch",
+        status: "ACTIVE",
+        storeId: fixture.otherStore.id,
+        userId: fixture.user.id,
+      },
+    });
+
+    const availableStores = await miniapp.listMiniappMemberStores({
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(availableStores).toMatchObject({
+      currentStore: {
+        id: fixture.store.id,
+        isCurrent: true,
+        isDefault: true,
+      },
+      stores: [
+        expect.objectContaining({
+          id: fixture.store.id,
+          isCurrent: true,
+          isDefault: true,
+        }),
+        expect.objectContaining({
+          id: fixture.otherStore.id,
+          isCurrent: false,
+          isDefault: false,
+        }),
+      ],
+    });
+
+    const switched = await miniapp.switchMiniappStore({
+      storeId: fixture.otherStore.id,
+      userId: fixture.user.id,
+    });
+
+    expect(switched).toMatchObject({
+      id: fixture.otherStore.id,
+      isCurrent: true,
+      isDefault: true,
+    });
+    await expect(
+      prisma.user.findUniqueOrThrow({
+        where: { id: fixture.user.id },
+        select: { defaultStoreId: true },
+      }),
+    ).resolves.toEqual({ defaultStoreId: fixture.otherStore.id });
+    await expect(
+      prisma.memberStoreBinding.findMany({
+        where: { userId: fixture.user.id },
+        orderBy: { storeId: "asc" },
+        select: { isDefault: true, storeId: true },
+      }),
+    ).resolves.toEqual([
+      { isDefault: true, storeId: fixture.otherStore.id },
+      { isDefault: false, storeId: fixture.store.id },
+    ]);
+  });
+
+  it("rejects switching to a store that is not bound to the member", async () => {
+    const fixture = await createFixture();
+    await prisma.store.update({
+      where: { id: fixture.otherStore.id },
+      data: { type: "DIRECT" },
+    });
+
+    await expect(
+      miniapp.switchMiniappStore({
+        storeId: fixture.otherStore.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "STORE_BINDING_NOT_FOUND",
+      message: "当前会员未绑定该门店",
+    } satisfies Partial<miniapp.MiniappServiceError>);
+  });
+
+  it("returns disabled member state and reason in the mini app profile", async () => {
+    const fixture = await createFixture();
+    await prisma.user.update({
+      where: { id: fixture.user.id },
+      data: { disabledReason: "后台暂停服务" },
+    });
+    await prisma.memberStoreBinding.updateMany({
+      where: {
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      },
+      data: { status: "DISABLED" },
+    });
+
+    const profile = await miniapp.getMiniappProfile({
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(profile).toMatchObject({
+      member: {
+        bindingStatus: "DISABLED",
+        disabledReason: "后台暂停服务",
+        id: fixture.user.id,
+        nickname: "小程序张三",
+        phone: "13800005555",
+      },
+      store: {
+        id: fixture.store.id,
+        name: "小程序测试加盟店",
+      },
+    });
+  });
+
   it("returns a frozen current package for home state when no active package is available", async () => {
     const fixture = await createFixture();
     await prisma.userPackage.update({
@@ -560,6 +802,61 @@ describe("mini app customer portal", () => {
       remainingTimes: 6,
       status: "FROZEN",
     });
+  });
+
+  it("uses the earliest active package with remaining times as the current package", async () => {
+    const fixture = await createFixture();
+    const newerPackage = await prisma.userPackage.create({
+      data: {
+        expiresAt: new Date("2099-12-31T15:59:59.000Z"),
+        id: `${fixture.userPackage.id}-newer`,
+        nameSnapshot: "新开通套餐",
+        status: "ACTIVE",
+        storeId: fixture.store.id,
+        templateId: fixture.userPackage.templateId,
+        totalTimes: 8,
+        usedTimes: 0,
+        userId: fixture.user.id,
+        weightLimitJin: new Prisma.Decimal("8.00"),
+      },
+    });
+
+    const currentPackage = await miniapp.getMiniappCurrentPackage({
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(currentPackage?.id).toBe(fixture.userPackage.id);
+    expect(currentPackage?.id).not.toBe(newerPackage.id);
+  });
+
+  it("skips an older active package after its times are used up", async () => {
+    const fixture = await createFixture();
+    const newerPackage = await prisma.userPackage.create({
+      data: {
+        expiresAt: new Date("2099-12-31T15:59:59.000Z"),
+        id: `${fixture.userPackage.id}-newer-usable`,
+        nameSnapshot: "后续套餐",
+        status: "ACTIVE",
+        storeId: fixture.store.id,
+        templateId: fixture.userPackage.templateId,
+        totalTimes: 8,
+        usedTimes: 0,
+        userId: fixture.user.id,
+        weightLimitJin: new Prisma.Decimal("8.00"),
+      },
+    });
+    await prisma.userPackage.update({
+      data: { usedTimes: fixture.userPackage.totalTimes },
+      where: { id: fixture.userPackage.id },
+    });
+
+    const currentPackage = await miniapp.getMiniappCurrentPackage({
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(currentPackage?.id).toBe(newerPackage.id);
   });
 
   it("loads a specific pending reservation for editing from the home page", async () => {
@@ -608,6 +905,11 @@ describe("mini app customer portal", () => {
       storeId: fixture.otherStore.id,
       userId: fixture.user.id,
     });
+    const tomorrow = await miniapp.getMiniappEditableOrder({
+      now: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
 
     expect(latest).toMatchObject({
       id: laterPendingOrder.id,
@@ -621,6 +923,7 @@ describe("mini app customer portal", () => {
     });
     expect(shipped).toBeNull();
     expect(crossStore).toBeNull();
+    expect(tomorrow).toBeNull();
   });
 
   it("cancels pending orders and lets members hide canceled orders", async () => {
@@ -691,6 +994,63 @@ describe("mini app customer portal", () => {
     );
   });
 
+  it("blocks disabled members from canceling pending orders", async () => {
+    const fixture = await createFixture();
+    await Promise.all([
+      prisma.user.update({
+        where: { id: fixture.user.id },
+        data: { disabledReason: "暂停履约操作" },
+      }),
+      prisma.memberStoreBinding.updateMany({
+        where: {
+          storeId: fixture.store.id,
+          userId: fixture.user.id,
+        },
+        data: { status: "DISABLED" },
+      }),
+      prisma.userPackage.update({
+        where: { id: fixture.userPackage.id },
+        data: { usedTimes: 3 },
+      }),
+      prisma.dish.update({
+        where: { id: fixture.dish.id },
+        data: { stockJin: new Prisma.Decimal("18.00") },
+      }),
+    ]);
+
+    await expect(
+      miniapp.cancelMiniappOrder({
+        orderId: fixture.pendingOrder.id,
+        reason: "今天不在家",
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "MEMBER_DISABLED",
+      message: "会员已停用：暂停履约操作",
+    });
+
+    await expect(
+      prisma.order.findUniqueOrThrow({
+        where: { id: fixture.pendingOrder.id },
+      }),
+    ).resolves.toMatchObject({ status: "PENDING_SHIPMENT" });
+    await expect(
+      prisma.userPackage.findUniqueOrThrow({
+        where: { id: fixture.userPackage.id },
+      }),
+    ).resolves.toMatchObject({ usedTimes: 3 });
+    expect(
+      Number(
+        (
+          await prisma.dish.findUniqueOrThrow({
+            where: { id: fixture.dish.id },
+          })
+        ).stockJin,
+      ),
+    ).toBe(18);
+  });
+
   it("reserves package purchase intent without enabling WeChat payment yet", async () => {
     const fixture = await createFixture();
 
@@ -717,6 +1077,15 @@ describe("mini app customer portal", () => {
       id: purchase.id,
       status: "PAYMENT_NOT_ENABLED",
     });
+
+    await prisma.memberStoreBinding.create({
+      data: {
+        source: "test-cross-store",
+        status: "ACTIVE",
+        storeId: fixture.otherStore.id,
+        userId: fixture.user.id,
+      },
+    });
     await expect(
       miniapp.createMiniappPackagePurchase({
         storeId: fixture.otherStore.id,
@@ -726,6 +1095,102 @@ describe("mini app customer portal", () => {
     ).rejects.toMatchObject({
       code: "PACKAGE_TEMPLATE_NOT_FOUND",
       message: "套餐模板不存在或已停用",
+    });
+  });
+
+  it("blocks package purchase intents for disabled or unbound members", async () => {
+    const fixture = await createFixture();
+
+    await prisma.user.update({
+      where: { id: fixture.user.id },
+      data: { disabledReason: "暂停购买套餐" },
+    });
+    await prisma.memberStoreBinding.updateMany({
+      where: {
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      },
+      data: { status: "DISABLED" },
+    });
+
+    await expect(
+      miniapp.createMiniappPackagePurchase({
+        storeId: fixture.store.id,
+        templateId: fixture.purchaseTemplate.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "MEMBER_DISABLED",
+      message: "会员已停用：暂停购买套餐",
+    });
+
+    await prisma.memberStoreBinding.deleteMany({
+      where: {
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      },
+    });
+
+    await expect(
+      miniapp.createMiniappPackagePurchase({
+        storeId: fixture.store.id,
+        templateId: fixture.purchaseTemplate.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "STORE_REQUIRED",
+      message: "请先绑定当前门店后再购买套餐",
+    });
+  });
+
+  it("blocks package prepay reservations for disabled or unbound members", async () => {
+    const fixture = await createFixture();
+
+    const purchase = await miniapp.createMiniappPackagePurchase({
+      storeId: fixture.store.id,
+      templateId: fixture.purchaseTemplate.id,
+      userId: fixture.user.id,
+    });
+
+    await prisma.user.update({
+      where: { id: fixture.user.id },
+      data: { disabledReason: "暂停支付套餐" },
+    });
+    await prisma.memberStoreBinding.updateMany({
+      where: {
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      },
+      data: { status: "DISABLED" },
+    });
+
+    await expect(
+      miniapp.reserveMiniappWechatPrepay({
+        purchaseOrderId: purchase.id,
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "MEMBER_DISABLED",
+      message: "会员已停用：暂停支付套餐",
+    });
+
+    await prisma.memberStoreBinding.deleteMany({
+      where: {
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      },
+    });
+
+    await expect(
+      miniapp.reserveMiniappWechatPrepay({
+        purchaseOrderId: purchase.id,
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "STORE_REQUIRED",
+      message: "请先绑定当前门店后再支付套餐",
     });
   });
 });

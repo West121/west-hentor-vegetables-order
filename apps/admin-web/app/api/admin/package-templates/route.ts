@@ -6,7 +6,11 @@ import {
   PackageTemplateServiceError,
 } from "@hentor/db";
 
-import { getStoreAccessFailure } from "@/app/lib/admin-access";
+import {
+  getPermissionFailure,
+  getStoreAccessFailure,
+} from "@/app/lib/admin-access";
+import { getAdminPaginationParams } from "@/app/lib/admin-pagination";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -16,12 +20,23 @@ const querySchema = z.object({
   storeId: z.string().min(1),
 });
 
+const benefitSchema = z.object({
+  kind: z.string().optional(),
+  name: z.string().min(1),
+  sortOrder: z.coerce.number().int().optional(),
+  totalQuantity: z.coerce.number().positive(),
+  unit: z.string().min(1),
+});
+
+const INTERNAL_VALID_DAYS = 36500;
+
 const createSchema = z.object({
+  benefits: z.array(benefitSchema).optional(),
   name: z.string().min(1),
   sortOrder: z.coerce.number().int().optional(),
   storeId: z.string().min(1),
   totalTimes: z.coerce.number().int().min(1),
-  validDays: z.coerce.number().int().min(1),
+  validDays: z.coerce.number().int().min(1).optional().default(INTERNAL_VALID_DAYS),
   weightLimitJin: z.coerce.number().positive(),
 });
 
@@ -32,6 +47,15 @@ function statusForTemplateError(code: string) {
 function serializeTemplate(template: Awaited<ReturnType<typeof createPackageTemplate>>) {
   return {
     createdAt: template.createdAt,
+    benefits: template.benefits.map((benefit) => ({
+      id: benefit.id,
+      kind: benefit.kind,
+      name: benefit.name,
+      shipmentGroup: benefit.shipmentGroup,
+      sortOrder: benefit.sortOrder,
+      totalQuantity: Number(benefit.totalQuantity),
+      unit: benefit.unit,
+    })),
     id: template.id,
     name: template.name,
     purchaseOrderCount: 0,
@@ -62,6 +86,14 @@ export async function GET(request: Request) {
     return fail("INVALID_PARAMS", "查询参数不完整");
   }
 
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "packages.read",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
+  }
+
   const accessFailure = await getStoreAccessFailure(
     session.adminUserId,
     parsed.data.storeId,
@@ -70,7 +102,12 @@ export async function GET(request: Request) {
     return accessFailure;
   }
 
-  return ok(await listPackageTemplates(parsed.data));
+  return ok(
+    await listPackageTemplates({
+      ...parsed.data,
+      ...getAdminPaginationParams(url.searchParams),
+    }),
+  );
 }
 
 export async function POST(request: Request) {
@@ -82,6 +119,14 @@ export async function POST(request: Request) {
   const parsed = createSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return fail("INVALID_PARAMS", "套餐模板参数不完整");
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "packages.write",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const accessFailure = await getStoreAccessFailure(

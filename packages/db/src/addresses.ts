@@ -1,4 +1,5 @@
 import { prisma } from "./client";
+import { getDeliveryRangeFailure } from "./delivery-range";
 import { Prisma } from "./generated/prisma/client";
 
 export class AddressServiceError extends Error {
@@ -34,7 +35,12 @@ export type DeleteMiniappAddressInput = MiniappAddressScope & {
   addressId: string;
 };
 
+export type SetDefaultMiniappAddressInput = MiniappAddressScope & {
+  addressId: string;
+};
+
 const MAX_ADDRESS_COUNT = 10;
+const MIN_ADDRESS_DETAIL_LENGTH = 8;
 const MAINLAND_PHONE_PATTERN = /^1[3-9]\d{9}$/;
 
 function normalizeRequiredText(value: string, code: string, message: string) {
@@ -65,9 +71,22 @@ function normalizeAddressInput(input: MiniappAddressInput) {
     );
   }
 
+  const detail = normalizeRequiredText(
+    input.detail,
+    "DETAIL_REQUIRED",
+    "请输入详细地址",
+  );
+
+  if (detail.length < MIN_ADDRESS_DETAIL_LENGTH) {
+    throw new AddressServiceError(
+      "DETAIL_TOO_SHORT",
+      "详细地址至少 8 个字",
+    );
+  }
+
   return {
     city: normalizeNullableText(input.city),
-    detail: normalizeRequiredText(input.detail, "DETAIL_REQUIRED", "请输入详细地址"),
+    detail,
     district: normalizeNullableText(input.district),
     province: normalizeNullableText(input.province),
     receiverName: normalizeRequiredText(
@@ -85,11 +104,16 @@ async function ensureActiveMemberBinding(
 ) {
   const binding = await tx.memberStoreBinding.findFirst({
     where: {
-      status: "ACTIVE",
       storeId: input.storeId,
       userId: input.userId,
     },
-    select: { id: true },
+    include: {
+      user: {
+        select: {
+          disabledReason: true,
+        },
+      },
+    },
   });
 
   if (!binding) {
@@ -97,6 +121,40 @@ async function ensureActiveMemberBinding(
       "MEMBER_STORE_NOT_FOUND",
       "当前门店会员不存在",
     );
+  }
+
+  if (binding.status !== "ACTIVE") {
+    const reason = binding.user.disabledReason?.trim();
+    throw new AddressServiceError(
+      "MEMBER_DISABLED",
+      reason ? `会员已停用：${reason}` : "会员已停用，暂不能维护地址",
+    );
+  }
+}
+
+async function ensureAddressInDeliveryRange(
+  tx: Prisma.TransactionClient | typeof prisma,
+  input: MiniappAddressScope,
+  address: {
+    city: string | null;
+    province: string | null;
+  },
+) {
+  const store = await tx.store.findUnique({
+    where: { id: input.storeId },
+    select: {
+      deliveryCities: true,
+      deliveryProvinces: true,
+    },
+  });
+
+  if (!store) {
+    throw new AddressServiceError("STORE_NOT_FOUND", "门店不存在");
+  }
+
+  const failure = getDeliveryRangeFailure(address, store);
+  if (failure) {
+    throw new AddressServiceError(failure.code, failure.message);
   }
 }
 
@@ -153,6 +211,7 @@ export async function createMiniappAddress(input: MiniappAddressInput) {
 
   return prisma.$transaction(async (tx) => {
     await ensureActiveMemberBinding(tx, input);
+    await ensureAddressInDeliveryRange(tx, input, normalized);
     const addressCount = await tx.address.count({
       where: {
         storeId: input.storeId,
@@ -195,18 +254,21 @@ export async function updateMiniappAddress(input: UpdateMiniappAddressInput) {
 
   return prisma.$transaction(async (tx) => {
     await ensureActiveMemberBinding(tx, input);
+    await ensureAddressInDeliveryRange(tx, input, normalized);
     const existing = await tx.address.findFirst({
       where: {
         id: input.addressId,
         storeId: input.storeId,
         userId: input.userId,
       },
-      select: { id: true },
+      select: { city: true, id: true, province: true },
     });
 
     if (!existing) {
       throw new AddressServiceError("ADDRESS_NOT_FOUND", "配送地址不存在");
     }
+
+    await ensureAddressInDeliveryRange(tx, input, existing);
 
     if (input.isDefault === true) {
       await tx.address.updateMany({
@@ -225,6 +287,43 @@ export async function updateMiniappAddress(input: UpdateMiniappAddressInput) {
         ...normalized,
         ...(input.isDefault === true ? { isDefault: true } : {}),
       },
+    });
+  });
+}
+
+export async function setDefaultMiniappAddress(
+  input: SetDefaultMiniappAddressInput,
+) {
+  return prisma.$transaction(async (tx) => {
+    await ensureActiveMemberBinding(tx, input);
+
+    const existing = await tx.address.findFirst({
+      where: {
+        id: input.addressId,
+        storeId: input.storeId,
+        userId: input.userId,
+      },
+      select: { city: true, id: true, province: true },
+    });
+
+    if (!existing) {
+      throw new AddressServiceError("ADDRESS_NOT_FOUND", "配送地址不存在");
+    }
+
+    await ensureAddressInDeliveryRange(tx, input, existing);
+
+    await tx.address.updateMany({
+      where: {
+        storeId: input.storeId,
+        userId: input.userId,
+        NOT: { id: input.addressId },
+      },
+      data: { isDefault: false },
+    });
+
+    return tx.address.update({
+      where: { id: input.addressId },
+      data: { isDefault: true },
     });
   });
 }

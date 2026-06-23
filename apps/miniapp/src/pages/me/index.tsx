@@ -1,12 +1,23 @@
-import { Text, View } from "@tarojs/components";
-import Taro from "@tarojs/taro";
-import { useEffect, useState } from "react";
+import { Button, Form, Image, Input, Text, View } from "@tarojs/components";
+import Taro, { useDidShow } from "@tarojs/taro";
+import { useState } from "react";
+
+import { getAgreementEntry } from "../../lib/agreements";
+import { MiniCustomTop } from "../../components/mini-custom-top";
+import loginVegetablesImage from "../../assets/login-vegetables.jpg";
+import { getMemberLockNotice, getPackageUsageStats } from "../../lib/me";
+import {
+  ACTIVE_STORE_CODE_KEY,
+  buildMiniappMeUrl,
+  buildStoreSettingsUrl,
+  getActiveStoreCode,
+} from "../../lib/stores";
 
 import "./index.scss";
 
 const API_BASE_URL =
-  process.env.TARO_APP_API_BASE_URL || "http://127.0.0.1:3000";
-const STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
+  process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
+const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 
 type ApiResponse<T> = {
   data?: T;
@@ -19,7 +30,6 @@ type ApiResponse<T> = {
 
 type MeData = {
   currentPackage: null | {
-    expiresAt: string;
     nameSnapshot: string;
     remainingTimes: number;
     status: string;
@@ -32,8 +42,11 @@ type MeData = {
     receiverPhone: string;
   };
   member: null | {
+    bindingStatus?: string | null;
+    disabledReason?: string | null;
     nickname: string | null;
     phone: string | null;
+    status?: string | null;
   };
   orderSummary: {
     pendingShipment: number;
@@ -43,14 +56,25 @@ type MeData = {
   recentOrders: Array<{
     canEdit: boolean;
     id: string;
+    items?: Array<{
+      dishNameSnapshot: string;
+      weightJin: number;
+    }>;
     orderNo: string;
     status: string;
     totalWeightJin: number;
   }>;
   store: null | {
+    code?: string;
+    cutoffTime?: string | null;
     customerServiceTel: string | null;
     name: string;
   };
+};
+
+type PublicSettings = {
+  privacyPolicyUrl: string;
+  userAgreementUrl: string;
 };
 
 function maskPhone(phone?: string | null) {
@@ -61,20 +85,39 @@ function maskPhone(phone?: string | null) {
   return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
 }
 
-function formatDate(value?: string) {
-  if (!value) {
-    return "未设置";
-  }
-
-  const date = new Date(value);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-    date.getDate(),
-  ).padStart(2, "0")}`;
-}
-
 export default function MePage() {
   const [data, setData] = useState<MeData | null>(null);
+  const [settings, setSettings] = useState<PublicSettings>({
+    privacyPolicyUrl: "",
+    userAgreementUrl: "",
+  });
   const [loading, setLoading] = useState(true);
+  const [nicknameModalOpen, setNicknameModalOpen] = useState(false);
+  const [nicknameDraft, setNicknameDraft] = useState("");
+  const [nicknameSaving, setNicknameSaving] = useState(false);
+
+  async function loadPublicSettings() {
+    try {
+      const storeCode = getActiveStoreCode(
+        Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+        DEFAULT_STORE_CODE,
+      );
+      const response = await Taro.request<ApiResponse<PublicSettings>>({
+        method: "GET",
+        url: buildStoreSettingsUrl({
+          apiBaseUrl: API_BASE_URL,
+          storeCode,
+        }),
+      });
+      const payload = response.data;
+
+      if (payload.success && payload.data) {
+        setSettings(payload.data);
+      }
+    } catch {
+      // 协议配置失败不影响会员主页主流程。
+    }
+  }
 
   async function loadMe() {
     setLoading(true);
@@ -85,11 +128,18 @@ export default function MePage() {
         Taro.navigateTo({ url: "/pages/login/index" });
         return;
       }
+      const storeCode = getActiveStoreCode(
+        Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+        DEFAULT_STORE_CODE,
+      );
 
       const response = await Taro.request<ApiResponse<MeData>>({
         header: { authorization: `Bearer ${token}` },
         method: "GET",
-        url: `${API_BASE_URL}/api/v1/me?storeCode=${STORE_CODE}`,
+        url: buildMiniappMeUrl({
+          apiBaseUrl: API_BASE_URL,
+          storeCode,
+        }),
       });
       const payload = response.data;
 
@@ -103,6 +153,7 @@ export default function MePage() {
       }
 
       setData(payload.data);
+      await loadPublicSettings();
     } catch (error) {
       Taro.showToast({
         icon: "none",
@@ -113,132 +164,289 @@ export default function MePage() {
     }
   }
 
-  useEffect(() => {
+  useDidShow(() => {
     void loadMe();
-  }, []);
+  });
 
   const memberName = data?.member?.nickname || "微信会员";
   const packageInfo = data?.currentPackage;
   const pendingOrder = data?.recentOrders.find((order) => order.canEdit);
+  const lockNotice = getMemberLockNotice(data?.member);
+  const memberStatusText = lockNotice ? "服务已暂停" : "正常会员";
+  const packageStats = getPackageUsageStats(
+    packageInfo,
+    pendingOrder?.totalWeightJin ?? 0,
+  );
+  const serviceEntries = [
+    {
+      icon: "order",
+      label: "订单",
+      onClick: () => Taro.navigateTo({ url: "/pages/orders/index" }),
+    },
+    {
+      icon: "pin",
+      label: "地址管理",
+      onClick: () => Taro.navigateTo({ url: "/pages/addresses/index" }),
+    },
+    {
+      icon: "card",
+      label: "套餐",
+      onClick: () => Taro.navigateTo({ url: "/pages/packages/index" }),
+    },
+    {
+      icon: "user",
+      label: "账号设置",
+      onClick: () => void openAccountSettings(),
+    },
+  ];
+
+  function openAgreement(label: string, url?: string | null) {
+    const entry = getAgreementEntry(label, url);
+    if (entry.disabled || !entry.url) {
+      Taro.showToast({
+        icon: "none",
+        title: entry.toastTitle ?? `暂未配置${label}`,
+      });
+      return;
+    }
+
+    Taro.navigateTo({ url: entry.url });
+  }
+
+  async function openAccountSettings() {
+    try {
+      const result = await Taro.showActionSheet({
+        itemList: ["修改昵称", "用户协议", "隐私政策", "退出登录"],
+      });
+
+      if (result.tapIndex === 0) {
+        setNicknameDraft(data?.member?.nickname ?? "");
+        setNicknameModalOpen(true);
+      }
+      if (result.tapIndex === 1) {
+        openAgreement("用户协议", settings.userAgreementUrl);
+      }
+      if (result.tapIndex === 2) {
+        openAgreement("隐私政策", settings.privacyPolicyUrl);
+      }
+      if (result.tapIndex === 3) {
+        logout();
+      }
+    } catch {
+      // 用户取消弹层时不需要反馈。
+    }
+  }
+
+  async function saveNickname(value?: unknown) {
+    const nickname =
+      typeof value === "string" && value.trim()
+        ? value.trim()
+        : nicknameDraft.trim();
+    if (!nickname) {
+      Taro.showToast({ icon: "none", title: "请输入昵称" });
+      return;
+    }
+    if (nickname.length > 24) {
+      Taro.showToast({ icon: "none", title: "昵称最多 24 个字符" });
+      return;
+    }
+
+    setNicknameSaving(true);
+    Taro.showLoading({ title: "保存中" });
+
+    try {
+      const storeCode = getActiveStoreCode(
+        Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+        DEFAULT_STORE_CODE,
+      );
+      const response = await Taro.request<ApiResponse<{ member: { nickname: string } }>>({
+        data: {
+          nickname,
+          storeCode,
+        },
+        header: { authorization: `Bearer ${Taro.getStorageSync("mini_session_token")}` },
+        method: "PATCH",
+        url: `${API_BASE_URL}/api/v1/account`,
+      });
+
+      if (!response.data.success) {
+        throw new Error(response.data.error?.message ?? "昵称保存失败");
+      }
+
+      setNicknameModalOpen(false);
+      await loadMe();
+      Taro.showToast({ icon: "success", title: "昵称已更新" });
+    } catch (error) {
+      Taro.showToast({
+        icon: "none",
+        title: error instanceof Error ? error.message : "昵称保存失败",
+      });
+    } finally {
+      Taro.hideLoading();
+      setNicknameSaving(false);
+    }
+  }
+
+  function logout() {
+    Taro.removeStorageSync("mini_session_token");
+    Taro.removeStorageSync("editing_order_id");
+    setData(null);
+    Taro.showToast({ icon: "success", title: "已退出登录" });
+    Taro.navigateTo({ url: "/pages/login/index" });
+  }
 
   return (
     <View className="me">
-      <View className="profile">
-        <View className="profile__avatar">{memberName.slice(0, 1)}</View>
-        <View className="profile__body">
-          <View className="profile__name">{memberName}</View>
-          <View className="profile__meta">
-            {maskPhone(data?.member?.phone)} · {data?.store?.name ?? "当前门店"}
+      <View className="profile-hero">
+        <MiniCustomTop className="profile-hero__top" dark />
+        <View className="profile-hero__content">
+          <View className="profile__avatar">{memberName.slice(0, 1)}</View>
+          <View className="profile__body">
+            <View className="profile__name">{memberName}</View>
+            <View className="profile__meta">
+              {maskPhone(data?.member?.phone)} · {memberStatusText}
+            </View>
           </View>
         </View>
+        <Image
+          className="profile-hero__image"
+          mode="aspectFill"
+          src={loginVegetablesImage}
+        />
       </View>
+
+      {lockNotice ? (
+        <View className="lock-notice">
+          <View>
+            <View className="lock-notice__title">{lockNotice.title}</View>
+            <View className="lock-notice__message">{lockNotice.message}</View>
+          </View>
+        </View>
+      ) : null}
 
       {loading && !data ? (
         <View className="card card--muted">正在加载会员信息...</View>
       ) : (
-        <View className="package-hero">
-          <View>
-            <View className="package-hero__label">当前套餐</View>
-            <View className="package-hero__name">
-              {packageInfo?.nameSnapshot ?? "暂无有效套餐"}
+        <View className="member-card">
+          <View className="member-card__head">
+            <View>
+              <View className="member-card__label">{packageStats.title}</View>
+              <View className="member-card__title">{packageStats.meta}</View>
             </View>
-            <View className="package-hero__meta">
-              {packageInfo
-                ? `剩余 ${packageInfo.remainingTimes} 次 · 每次 ${packageInfo.weightLimitJin}斤`
-                : "购买套餐入口已预留，微信支付暂未开放"}
-            </View>
+            <Text
+              className="member-card__button"
+              onClick={() => Taro.navigateTo({ url: "/pages/packages/index" })}
+            >
+              查看套餐
+            </Text>
           </View>
-          <Text
-            className="package-hero__button"
-            onClick={() => Taro.navigateTo({ url: "/pages/packages/index" })}
-          >
-            套餐
-          </Text>
+          <View className="member-card__usage">
+            <View className="member-card__usage-value">
+              {packageStats.remainingWeightLabel}
+            </View>
+            <View className="member-card__usage-meta">本次剩余额度</View>
+          </View>
+          <View className="member-card__progress">
+            <View
+              className="member-card__progress-fill"
+              style={{ width: `${packageStats.progressPercent}%` }}
+            />
+          </View>
         </View>
       )}
 
-      <View className="card">
-        <View className="card__title">今日预订</View>
-        <View className="today">
-          <View>
-            <View className="today__main">
-              {pendingOrder ? "待发货，可修改" : "暂无待发货预订"}
+      <View className="service-card">
+        <View className="service-grid">
+          {serviceEntries.map((entry) => (
+            <View
+              className="service-item"
+              key={entry.label}
+              onClick={entry.onClick}
+            >
+              <View
+                className={`service-item__icon service-item__icon--${entry.icon}`}
+              />
+              <View className="service-item__label">{entry.label}</View>
             </View>
-            <View className="today__meta">
-              {pendingOrder
-                ? `${pendingOrder.orderNo} · ${pendingOrder.totalWeightJin}斤`
-                : "从首页选择菜品后提交预订"}
-            </View>
-          </View>
-          <Text
-            className="today__button"
-            onClick={() => Taro.switchTab({ url: "/pages/home/index" })}
-          >
-            {pendingOrder ? "修改" : "去预订"}
-          </Text>
+          ))}
         </View>
       </View>
 
-      <View className="card">
-        <View className="card__title">我的服务</View>
-        <View
-          className="entry"
-          onClick={() => Taro.navigateTo({ url: "/pages/orders/index" })}
-        >
-          <View>
-            <View className="entry__main">订单</View>
-            <View className="entry__meta">
-              共 {data?.orderSummary.total ?? 0} 单，待发货{" "}
-              {data?.orderSummary.pendingShipment ?? 0} 单
+      {nicknameModalOpen ? (
+        <View className="nickname-modal">
+          <View
+            className="nickname-modal__mask"
+            onClick={() => setNicknameModalOpen(false)}
+          />
+          <View className="nickname-panel">
+            <View className="nickname-panel__handle" />
+            <View className="nickname-panel__head">
+              <View>
+                <View className="nickname-panel__title">修改昵称</View>
+                <View className="nickname-panel__meta">
+                  可使用微信昵称快捷填写，也可手动输入
+                </View>
+              </View>
+              <Text
+                className="nickname-panel__close"
+                onClick={() => setNicknameModalOpen(false)}
+              >
+                关闭
+              </Text>
             </View>
+            <View className="nickname-panel__label">昵称</View>
+            <Form
+              onSubmit={(event) => {
+                const value = event.detail.value as { nickname?: string };
+                if (!nicknameSaving) {
+                  void saveNickname(value.nickname);
+                }
+              }}
+            >
+              <Input
+                className="nickname-panel__input"
+                maxlength={24}
+                name="nickname"
+                onBlur={(event) => {
+                  setNicknameDraft(String(event.detail.value ?? ""));
+                }}
+                onConfirm={(event) => {
+                  setNicknameDraft(String(event.detail.value ?? ""));
+                }}
+                onInput={(event) => {
+                  setNicknameDraft(String(event.detail.value ?? ""));
+                }}
+                onNickNameReview={(event) => {
+                  const detail = event.detail as
+                    | { pass?: boolean; timeout?: boolean }
+                    | undefined;
+                  if (detail?.pass === false && !detail.timeout) {
+                    Taro.showToast({
+                      icon: "none",
+                      title: "昵称审核未通过，请调整后再保存",
+                    });
+                  }
+                }}
+                placeholder="请输入昵称"
+                type="nickname"
+                value={nicknameDraft}
+              />
+              <Button
+                className={
+                  nicknameSaving
+                    ? "nickname-panel__save nickname-panel__save--disabled"
+                    : "nickname-panel__save"
+                }
+                disabled={nicknameSaving}
+                formType="submit"
+              >
+                {nicknameSaving ? "保存中" : "保存昵称"}
+              </Button>
+            </Form>
           </View>
-          <Text className="entry__arrow">›</Text>
         </View>
-        <View
-          className="entry"
-          onClick={() => Taro.navigateTo({ url: "/pages/packages/index" })}
-        >
-          <View>
-            <View className="entry__main">套餐</View>
-            <View className="entry__meta">
-              {packageInfo
-                ? `${packageInfo.nameSnapshot}，${formatDate(packageInfo.expiresAt)} 到期`
-                : "查看套餐权益和购买预留"}
-            </View>
-          </View>
-          <Text className="entry__arrow">›</Text>
-        </View>
-      </View>
+      ) : null}
 
-      <View className="card">
-        <View
-          className="entry"
-          onClick={() => Taro.navigateTo({ url: "/pages/addresses/index" })}
-        >
-          <View>
-            <View className="entry__main">地址管理</View>
-            <View className="entry__meta">
-              {data?.defaultAddress?.detail ?? "暂无默认地址"}
-            </View>
-          </View>
-          <Text className="entry__arrow">›</Text>
-        </View>
-        <View
-          className="entry"
-          onClick={() =>
-            Taro.showToast({
-              icon: "none",
-              title: data?.store?.customerServiceTel ?? "请联系门店客服",
-            })
-          }
-        >
-          <View>
-            <View className="entry__main">联系客服</View>
-            <View className="entry__meta">套餐、配送、门店问题</View>
-          </View>
-          <Text className="entry__arrow">›</Text>
-        </View>
-      </View>
     </View>
   );
 }

@@ -1,10 +1,13 @@
 import { z } from "zod";
 
 import {
+  getAdminUser,
+  listAccessibleStores,
   resetAdminUserPassword,
   SystemManagementServiceError,
 } from "@hentor/db";
 
+import { getPermissionFailure } from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -30,9 +33,25 @@ export async function POST(
     return fail("INVALID_PARAMS", "密码参数不完整");
   }
 
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "system.manage",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
+  }
+
   const { adminUserId } = await context.params;
+  const access = await listAccessibleStores(session.adminUserId);
 
   try {
+    await getAdminUser({
+      adminUserId,
+      ...(access.scope === "ALL"
+        ? {}
+        : { storeIds: access.stores.map((store) => store.id) }),
+    });
+
     const adminUser = await resetAdminUserPassword({
       adminUserId,
       newPassword: parsed.data.newPassword,

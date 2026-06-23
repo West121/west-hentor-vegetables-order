@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   prisma,
+  createMiniappOperationLog,
   type AdminRole,
   type AdminUser,
   type Store,
@@ -20,21 +21,25 @@ type Fixture = {
 const createdStoreIds = new Set<string>();
 const createdAdminIds = new Set<string>();
 const createdRoleIds = new Set<string>();
+const createdPermissionIds = new Set<string>();
 const createdUserIds = new Set<string>();
 
 async function cleanup() {
   const storeIds = [...createdStoreIds];
   const adminIds = [...createdAdminIds];
   const roleIds = [...createdRoleIds];
+  const permissionIds = [...createdPermissionIds];
   const userIds = [...createdUserIds];
 
   const logConditions = [
     ...(storeIds.length ? [{ storeId: { in: storeIds } }] : []),
     ...(adminIds.length ? [{ operatorId: { in: adminIds } }] : []),
     ...(adminIds.length ? [{ resourceId: { in: adminIds } }] : []),
+    ...(userIds.length ? [{ userId: { in: userIds } }] : []),
+    ...(userIds.length ? [{ resourceId: { in: userIds } }] : []),
   ];
 
-  if (storeIds.length || adminIds.length) {
+  if (storeIds.length || adminIds.length || userIds.length) {
     await prisma.adminOperationLog.deleteMany({
       where: { OR: logConditions },
     });
@@ -49,10 +54,20 @@ async function cleanup() {
     });
   }
 
-  if (roleIds.length) {
+  if (roleIds.length || permissionIds.length) {
     await prisma.adminRolePermission.deleteMany({
-      where: { roleId: { in: roleIds } },
+      where: {
+        OR: [
+          ...(roleIds.length ? [{ roleId: { in: roleIds } }] : []),
+          ...(permissionIds.length
+            ? [{ permissionId: { in: permissionIds } }]
+            : []),
+        ],
+      },
     });
+  }
+
+  if (roleIds.length) {
     await prisma.adminUserRole.deleteMany({
       where: { roleId: { in: roleIds } },
     });
@@ -66,6 +81,12 @@ async function cleanup() {
     await prisma.adminRole.deleteMany({ where: { id: { in: roleIds } } });
   }
 
+  if (permissionIds.length) {
+    await prisma.adminPermission.deleteMany({
+      where: { id: { in: permissionIds } },
+    });
+  }
+
   if (userIds.length) {
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   }
@@ -77,6 +98,7 @@ async function cleanup() {
   createdStoreIds.clear();
   createdAdminIds.clear();
   createdRoleIds.clear();
+  createdPermissionIds.clear();
   createdUserIds.clear();
 }
 
@@ -262,6 +284,102 @@ describe("system management", () => {
     expect(logs.summary.total).toBeGreaterThanOrEqual(1);
   });
 
+  it("lists miniapp user operation logs with member context", async () => {
+    const fixture = await createFixture();
+
+    await createMiniappOperationLog({
+      action: "MINIAPP_PHONE_LOGIN",
+      afterValue: { phone: "138****6666" },
+      durationMs: 42,
+      requestMethod: "POST",
+      requestParams: { storeCode: "system-test-store" },
+      requestPath: "/api/v1/auth/wx-phone",
+      resource: "miniapp_session",
+      resourceId: fixture.memberUser.id,
+      responseData: { success: true },
+      statusCode: 200,
+      storeId: fixture.store.id,
+      userAgent: "wechat-devtools",
+      userId: fixture.memberUser.id,
+    });
+
+    const logs = await systemManagement.listAdminOperationLogs({
+      resource: "miniapp_session",
+      storeId: fixture.store.id,
+    });
+    const log = logs.items[0];
+    expect(log).toBeDefined();
+
+    expect(log).toMatchObject({
+      action: "MINIAPP_PHONE_LOGIN",
+      operator: null,
+      requestMethod: "POST",
+      requestPath: "/api/v1/auth/wx-phone",
+      resource: "miniapp_session",
+      resourceId: fixture.memberUser.id,
+      statusCode: 200,
+      user: {
+        id: fixture.memberUser.id,
+        phone: "13800006666",
+      },
+    });
+    expect(log!.durationMs).toBe(42);
+    expect(log!.requestParams).toEqual({
+      storeCode: "system-test-store",
+    });
+    expect(log!.responseData).toEqual({ success: true });
+  });
+
+  it("filters operation logs by action, keyword, status code and date range", async () => {
+    const fixture = await createFixture();
+    const resourceId = `address-filter-${fixture.store.id}`;
+    const dateFrom = new Date();
+    dateFrom.setHours(0, 0, 0, 0);
+    const dateTo = new Date();
+    dateTo.setHours(23, 59, 59, 999);
+
+    await createMiniappOperationLog({
+      action: "MINIAPP_ADDRESS_UPDATED",
+      afterValue: { addressId: resourceId },
+      durationMs: 35,
+      requestMethod: "PATCH",
+      requestParams: { addressId: resourceId },
+      requestPath: `/api/v1/addresses/${resourceId}`,
+      resource: "address",
+      resourceId,
+      responseData: { success: true },
+      statusCode: 201,
+      storeId: fixture.store.id,
+      userId: fixture.memberUser.id,
+    });
+
+    const logs = await systemManagement.listAdminOperationLogs({
+      action: "MINIAPP_ADDRESS_UPDATED",
+      dateFrom,
+      dateTo,
+      query: resourceId,
+      statusCode: 201,
+      storeId: fixture.store.id,
+    });
+
+    expect(logs.items).toHaveLength(1);
+    expect(logs.items[0]).toMatchObject({
+      action: "MINIAPP_ADDRESS_UPDATED",
+      resource: "address",
+      resourceId,
+      statusCode: 201,
+    });
+
+    const unmatched = await systemManagement.listAdminOperationLogs({
+      action: "MINIAPP_ADDRESS_UPDATED",
+      query: resourceId,
+      statusCode: 500,
+      storeId: fixture.store.id,
+    });
+
+    expect(unmatched.items).toHaveLength(0);
+  });
+
   it("lists accessible franchise stores by backend user scope", async () => {
     const fixture = await createFixture();
 
@@ -337,5 +455,159 @@ describe("system management", () => {
 
     expect(list.items.map((item) => item.id)).toContain(authorized.id);
     expect(list.items.map((item) => item.id)).not.toContain(forbidden.id);
+  });
+
+  it("gets a backend admin user detail within authorized store scope", async () => {
+    const fixture = await createFixture();
+
+    const created = await systemManagement.createAdminUser({
+      name: "详情账号",
+      operatorId: fixture.operator.id,
+      password: "Admin123456",
+      phone: "13800009999",
+      roleIds: [fixture.role.id],
+      status: "ACTIVE",
+      storeIds: [fixture.store.id],
+      username: `system-detail-${fixture.store.id}`,
+    });
+    createdAdminIds.add(created.id);
+
+    const detail = await (
+      systemManagement as typeof systemManagement & {
+        getAdminUser: (input: {
+          adminUserId: string;
+          storeIds?: string[];
+        }) => Promise<{
+          id: string;
+          name: string;
+          roleIds: string[];
+          roleNames: string[];
+          storeIds: string[];
+          stores: Array<{ id: string; name: string }>;
+          username: string;
+        }>;
+      }
+    ).getAdminUser({
+      adminUserId: created.id,
+      storeIds: [fixture.store.id],
+    });
+
+    expect(detail).toMatchObject({
+      id: created.id,
+      name: "详情账号",
+      roleIds: [fixture.role.id],
+      roleNames: ["系统测试角色"],
+      storeIds: [fixture.store.id],
+      username: `system-detail-${fixture.store.id}`,
+    });
+    expect(detail.stores).toEqual([
+      expect.objectContaining({
+        id: fixture.store.id,
+        name: fixture.store.name,
+      }),
+    ]);
+  });
+
+  it("rejects backend admin user detail outside authorized store scope", async () => {
+    const fixture = await createFixture();
+    const otherStoreId = `system-detail-other-store-${Date.now()}`;
+    createdStoreIds.add(otherStoreId);
+
+    const otherStore = await prisma.store.create({
+      data: {
+        id: otherStoreId,
+        code: otherStoreId,
+        contactName: "其他店长",
+        contactPhone: "13900008888",
+        name: "详情其他加盟店",
+        status: "ACTIVE",
+        type: "FRANCHISE",
+      },
+    });
+
+    const forbidden = await systemManagement.createAdminUser({
+      name: "其他店详情账号",
+      operatorId: fixture.operator.id,
+      password: "Admin123456",
+      phone: null,
+      roleIds: [fixture.role.id],
+      status: "ACTIVE",
+      storeIds: [otherStore.id],
+      username: `system-detail-forbidden-${otherStore.id}`,
+    });
+    createdAdminIds.add(forbidden.id);
+
+    await expect(
+      (
+        systemManagement as typeof systemManagement & {
+          getAdminUser: (input: {
+            adminUserId: string;
+            storeIds?: string[];
+          }) => Promise<unknown>;
+        }
+      ).getAdminUser({
+        adminUserId: forbidden.id,
+        storeIds: [fixture.store.id],
+      }),
+    ).rejects.toMatchObject({
+      code: "ADMIN_USER_NOT_FOUND",
+      message: "后台用户不存在",
+    });
+  });
+
+  it("lists backend roles with permissions and usage counts", async () => {
+    const fixture = await createFixture();
+    const permissionId = `system-test-permission-${Date.now()}`;
+    const permissionCode = `system.permission.${fixture.store.id}`;
+    createdPermissionIds.add(permissionId);
+
+    const permission = await prisma.adminPermission.create({
+      data: {
+        id: permissionId,
+        code: permissionCode,
+        name: "系统测试权限",
+      },
+    });
+
+    await prisma.adminRolePermission.create({
+      data: {
+        permissionId: permission.id,
+        roleId: fixture.role.id,
+      },
+    });
+
+    const created = await systemManagement.createAdminUser({
+      name: "角色绑定账号",
+      operatorId: fixture.operator.id,
+      password: "Admin123456",
+      phone: null,
+      roleIds: [fixture.role.id],
+      status: "ACTIVE",
+      storeIds: [fixture.store.id],
+      username: `system-role-user-${fixture.store.id}`,
+    });
+    createdAdminIds.add(created.id);
+
+    const roles = await systemManagement.listAdminRoles({
+      query: "系统测试角色",
+    });
+
+    expect(roles.items).toEqual([
+      expect.objectContaining({
+        code: fixture.role.code,
+        id: fixture.role.id,
+        name: "系统测试角色",
+        permissionCodes: [permissionCode],
+        permissions: [
+          {
+            code: permissionCode,
+            id: permission.id,
+            name: "系统测试权限",
+          },
+        ],
+        userCount: 1,
+      }),
+    ]);
+    expect(roles.summary.total).toBe(1);
   });
 });

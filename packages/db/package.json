@@ -14,10 +14,12 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "^7.8.0",
+    "@prisma/adapter-mariadb": "^7.8.0",
     "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
+    "mariadb": "^3.5.3",
     "pg": "^8.21.0"
   },
   "devDependencies": {

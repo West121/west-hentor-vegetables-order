@@ -4,6 +4,8 @@ import { storeCodeSchema } from "@hentor/shared";
 import { fail, ok } from "@/app/lib/api";
 import { requireMiniSession } from "@/app/lib/mini-auth";
 
+export { POST } from "../reservations/route";
+
 export async function GET(request: Request) {
   const auth = requireMiniSession(request);
   if (!auth.session) {

@@ -6,7 +6,11 @@ import {
   StoreManagementServiceError,
 } from "@hentor/db";
 
-import { getAllStoresAccessFailure } from "@/app/lib/admin-access";
+import {
+  getAllStoresAccessFailure,
+  getPermissionFailure,
+} from "@/app/lib/admin-access";
+import { getAdminPaginationParams } from "@/app/lib/admin-pagination";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -34,6 +38,14 @@ export async function GET(request: Request) {
     return fail("UNAUTHORIZED", "请先登录", 401);
   }
 
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "stores.manage",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
+  }
+
   const accessFailure = await getAllStoresAccessFailure(session.adminUserId);
   if (accessFailure) {
     return accessFailure;
@@ -49,13 +61,26 @@ export async function GET(request: Request) {
     return fail("INVALID_PARAMS", "加盟商查询参数不正确");
   }
 
-  return ok(await listFranchisees(parsed.data));
+  return ok(
+    await listFranchisees({
+      ...parsed.data,
+      ...getAdminPaginationParams(url.searchParams),
+    }),
+  );
 }
 
 export async function POST(request: Request) {
   const session = await getAdminSession();
   if (!session) {
     return fail("UNAUTHORIZED", "请先登录", 401);
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "stores.manage",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const accessFailure = await getAllStoresAccessFailure(session.adminUserId);

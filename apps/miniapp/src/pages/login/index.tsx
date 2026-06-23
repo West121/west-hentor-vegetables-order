@@ -1,12 +1,20 @@
-import { Button, View } from "@tarojs/components";
+import { Button, Image, Text, View } from "@tarojs/components";
 import Taro from "@tarojs/taro";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { MiniCustomTop } from "../../components/mini-custom-top";
+import { getAgreementEntry } from "../../lib/agreements";
+import {
+  ACTIVE_STORE_CODE_KEY,
+  buildStoreSettingsUrl,
+  getActiveStoreCode,
+} from "../../lib/stores";
+import loginVegetablesImage from "../../assets/login-vegetables.jpg";
 import "./index.scss";
 
 const API_BASE_URL =
-  process.env.TARO_APP_API_BASE_URL || "http://127.0.0.1:3000";
-const STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
+  process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
+const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 
 type ApiResponse<T> = {
   data?: T;
@@ -23,8 +31,79 @@ type PhoneEvent = {
   };
 };
 
+type PublicSettings = {
+  loginImageUrl: string;
+  loginSubtitle: string;
+  loginTitle: string;
+  loginWelcome: string;
+  privacyPolicyUrl: string;
+  userAgreementUrl: string;
+};
+
+const DEFAULT_LOGIN_SETTINGS = {
+  loginImageUrl: "",
+  loginSubtitle: "社区鲜蔬会员",
+  loginTitle: "Hentor Fresh",
+  loginWelcome: "欢迎来到蔬菜预订",
+  privacyPolicyUrl: "",
+  userAgreementUrl: "",
+} satisfies PublicSettings;
+
 export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
+  const [settings, setSettings] = useState<PublicSettings>(
+    DEFAULT_LOGIN_SETTINGS,
+  );
+
+  async function loadPublicSettings() {
+    try {
+      const storeCode = getActiveStoreCode(
+        Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+        DEFAULT_STORE_CODE,
+      );
+      const response = await Taro.request<ApiResponse<PublicSettings>>({
+        method: "GET",
+        url: buildStoreSettingsUrl({
+          apiBaseUrl: API_BASE_URL,
+          storeCode,
+        }),
+      });
+      if (response.data.success && response.data.data) {
+        setSettings({
+          ...DEFAULT_LOGIN_SETTINGS,
+          ...response.data.data,
+        });
+      }
+    } catch {
+      // 协议链接加载失败不阻断登录，点击时给出未配置提示。
+    }
+  }
+
+  useEffect(() => {
+    void loadPublicSettings();
+  }, []);
+
+  function openAgreement(label: string, url?: string | null) {
+    const entry = getAgreementEntry(label, url);
+    if (entry.disabled || !entry.url) {
+      Taro.showToast({
+        icon: "none",
+        title: entry.toastTitle ?? `暂未配置${label}`,
+      });
+      return;
+    }
+
+    Taro.navigateTo({ url: entry.url });
+  }
+
+  function goBack() {
+    if (Taro.getCurrentPages().length > 1) {
+      Taro.navigateBack();
+      return;
+    }
+
+    Taro.switchTab({ url: "/pages/home/index" });
+  }
 
   async function handlePhoneLogin(event: PhoneEvent) {
     if (submitting) {
@@ -47,13 +126,19 @@ export default function LoginPage() {
 
       const response = await Taro.request<
         ApiResponse<{
+          store: {
+            code: string;
+          };
           token: string;
         }>
       >({
         data: {
           loginCode: login.code,
           phoneCode: event.detail.code,
-          storeCode: STORE_CODE,
+          storeCode: getActiveStoreCode(
+            Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+            DEFAULT_STORE_CODE,
+          ),
         },
         method: "POST",
         url: `${API_BASE_URL}/api/v1/auth/wx-phone`,
@@ -63,6 +148,9 @@ export default function LoginPage() {
 
       if (response.statusCode >= 200 && response.statusCode < 300 && token) {
         Taro.setStorageSync("mini_session_token", token);
+        if (payload.data?.store.code) {
+          Taro.setStorageSync(ACTIVE_STORE_CODE_KEY, payload.data.store.code);
+        }
         Taro.switchTab({ url: "/pages/home/index" });
         return;
       }
@@ -81,10 +169,22 @@ export default function LoginPage() {
 
   return (
     <View className="login">
-      <View className="login__hero">
-        <View className="login__image" />
-        <View className="login__title">账号登录</View>
-        <View className="login__sub">授权手机号后，可查看套餐并提交蔬菜预订。</View>
+      <MiniCustomTop back className="login__custom-top" onBack={goBack} />
+
+      <View className="login__brand">
+        <View className="login__mark">
+          <Image
+            className="login__mark-image"
+            mode="aspectFill"
+            src={settings.loginImageUrl || loginVegetablesImage}
+          />
+        </View>
+        <View className="login__brand-name">{settings.loginTitle}</View>
+        <View className="login__brand-subtitle">{settings.loginSubtitle}</View>
+        <View className="login__welcome">{settings.loginWelcome}</View>
+      </View>
+
+      <View className="login__actions">
         <Button
           className="login__button"
           disabled={submitting}
@@ -92,10 +192,23 @@ export default function LoginPage() {
           openType="getPhoneNumber"
           onGetPhoneNumber={handlePhoneLogin}
         >
-          手机号快捷登录
+          立即登录
         </Button>
         <View className="login__agreement">
-          登录即代表同意《用户协议》和《隐私政策》
+          我已阅读、理解并接受
+          <Text
+            className="login__agreement-link"
+            onClick={() => openAgreement("用户协议", settings.userAgreementUrl)}
+          >
+            《用户协议》
+          </Text>
+          和
+          <Text
+            className="login__agreement-link"
+            onClick={() => openAgreement("隐私政策", settings.privacyPolicyUrl)}
+          >
+            《隐私政策》
+          </Text>
         </View>
       </View>
     </View>

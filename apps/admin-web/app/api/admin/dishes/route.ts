@@ -7,7 +7,11 @@ import {
   type Dish,
 } from "@hentor/db";
 
-import { getStoreAccessFailure } from "@/app/lib/admin-access";
+import {
+  getPermissionFailure,
+  getStoreAccessFailure,
+} from "@/app/lib/admin-access";
+import { getAdminPaginationParams } from "@/app/lib/admin-pagination";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -73,6 +77,14 @@ export async function GET(request: Request) {
     return fail("INVALID_PARAMS", "查询参数不完整");
   }
 
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "dishes.read",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
+  }
+
   const accessFailure = await getStoreAccessFailure(
     session.adminUserId,
     parsed.data.storeId,
@@ -81,7 +93,12 @@ export async function GET(request: Request) {
     return accessFailure;
   }
 
-  return ok(await listDishes(parsed.data));
+  return ok(
+    await listDishes({
+      ...parsed.data,
+      ...getAdminPaginationParams(url.searchParams),
+    }),
+  );
 }
 
 export async function POST(request: Request) {
@@ -93,6 +110,14 @@ export async function POST(request: Request) {
   const parsed = createSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return fail("INVALID_PARAMS", "菜品参数不完整");
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "dishes.write",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const accessFailure = await getStoreAccessFailure(

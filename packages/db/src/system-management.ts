@@ -5,6 +5,11 @@ import {
   Prisma,
   type AdminStatus,
 } from "./generated/prisma/client";
+import {
+  buildPaginationMeta,
+  normalizePagination,
+  type ListPaginationInput,
+} from "./pagination";
 
 export class SystemManagementServiceError extends Error {
   constructor(
@@ -16,10 +21,33 @@ export class SystemManagementServiceError extends Error {
   }
 }
 
-export type ListAdminUsersInput = {
+export type ListAdminUsersInput = ListPaginationInput & {
   query?: string;
   status?: AdminStatus;
   storeIds?: string[];
+};
+
+export type GetAdminUserInput = {
+  adminUserId: string;
+  storeIds?: string[];
+};
+
+export type ListAdminRolesInput = ListPaginationInput & {
+  query?: string;
+};
+
+export type CreateAdminRoleInput = {
+  code: string;
+  name: string;
+  operatorId: string;
+  permissionIds: string[];
+};
+
+export type UpdateAdminRoleInput = {
+  name: string;
+  operatorId: string;
+  permissionIds: string[];
+  roleId: string;
 };
 
 export type CreateAdminUserInput = {
@@ -43,11 +71,15 @@ export type ResetAdminUserPasswordInput = {
   operatorId: string;
 };
 
-export type ListAdminOperationLogsInput = {
+export type ListAdminOperationLogsInput = ListPaginationInput & {
+  action?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
   operatorId?: string;
+  query?: string;
   resource?: string;
+  statusCode?: number;
   storeId?: string;
-  take?: number;
 };
 
 export type StoreAccessScope = "ALL" | "ASSIGNED";
@@ -134,6 +166,59 @@ function normalizePassword(password: string) {
   return password;
 }
 
+function normalizeRoleCode(code: string) {
+  const normalized = code.trim();
+
+  if (!/^[a-z][a-z0-9_.-]*$/.test(normalized)) {
+    throw new SystemManagementServiceError(
+      "ROLE_CODE_INVALID",
+      "角色编码只能使用小写字母、数字、点、下划线和短横线，且需以字母开头",
+    );
+  }
+
+  return normalized;
+}
+
+function normalizeRoleInput(input: {
+  name: string;
+  permissionIds: string[];
+}) {
+  const name = input.name.trim();
+  if (!name) {
+    throw new SystemManagementServiceError("ROLE_NAME_REQUIRED", "请输入角色名称");
+  }
+
+  const permissionIds = [...new Set(input.permissionIds)];
+  if (permissionIds.length === 0 || permissionIds.length !== input.permissionIds.length) {
+    throw new SystemManagementServiceError(
+      "PERMISSION_IDS_INVALID",
+      "请选择不重复的角色权限",
+    );
+  }
+
+  return {
+    name,
+    permissionIds,
+  };
+}
+
+async function ensurePermissions(
+  tx: Prisma.TransactionClient,
+  permissionIds: string[],
+) {
+  const permissions = await tx.adminPermission.findMany({
+    where: { id: { in: permissionIds } },
+    select: { id: true },
+  });
+
+  if (permissions.length !== permissionIds.length) {
+    throw new SystemManagementServiceError(
+      "PERMISSION_NOT_FOUND",
+      "角色权限不存在",
+    );
+  }
+}
+
 async function ensureRolesAndStores(
   tx: Prisma.TransactionClient,
   roleIds: string[],
@@ -214,6 +299,59 @@ function adminUserLogValue(input: {
   };
 }
 
+function adminRoleLogValue(input: {
+  code: string;
+  name: string;
+  permissionIds: string[];
+}) {
+  return {
+    code: input.code,
+    name: input.name,
+    permissionIds: input.permissionIds,
+  };
+}
+
+async function adminRoleSnapshot(tx: Prisma.TransactionClient, roleId: string) {
+  const role = await tx.adminRole.findUnique({
+    where: { id: roleId },
+    include: {
+      permissions: {
+        orderBy: { permissionId: "asc" },
+        select: { permissionId: true },
+      },
+    },
+  });
+
+  if (!role) {
+    throw new SystemManagementServiceError("ROLE_NOT_FOUND", "后台角色不存在");
+  }
+
+  const permissionIds = role.permissions.map((item) => item.permissionId);
+
+  return {
+    role,
+    value: adminRoleLogValue({
+      code: role.code,
+      name: role.name,
+      permissionIds,
+    }),
+  };
+}
+
+async function replaceAdminRolePermissions(
+  tx: Prisma.TransactionClient,
+  roleId: string,
+  permissionIds: string[],
+) {
+  await tx.adminRolePermission.deleteMany({ where: { roleId } });
+  await tx.adminRolePermission.createMany({
+    data: permissionIds.map((permissionId) => ({
+      permissionId,
+      roleId,
+    })),
+  });
+}
+
 async function adminUserSnapshot(tx: Prisma.TransactionClient, adminUserId: string) {
   const adminUser = await tx.adminUser.findUnique({
     where: { id: adminUserId },
@@ -262,17 +400,21 @@ export async function listAdminUsers(input: ListAdminUsersInput = {}) {
     ...(query
       ? {
           OR: [
-            { username: { contains: query, mode: "insensitive" } },
-            { name: { contains: query, mode: "insensitive" } },
-            { phone: { contains: query, mode: "insensitive" } },
+            { username: { contains: query } },
+            { name: { contains: query } },
+            { phone: { contains: query } },
           ],
         }
       : {}),
   };
 
-  const [items, summaryRows] = await Promise.all([
+  const paginationInput = normalizePagination(input);
+
+  const [items, total, summaryRows] = await Promise.all([
     prisma.adminUser.findMany({
       where,
+      skip: paginationInput.skip,
+      take: paginationInput.take,
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
       include: {
         roles: {
@@ -301,8 +443,10 @@ export async function listAdminUsers(input: ListAdminUsersInput = {}) {
         },
       },
     }),
+    prisma.adminUser.count({ where }),
     prisma.adminUser.groupBy({
       by: ["status"],
+      where,
       _count: { _all: true },
     }),
   ]);
@@ -337,8 +481,232 @@ export async function listAdminUsers(input: ListAdminUsersInput = {}) {
       updatedAt: item.updatedAt,
       username: item.username,
     })),
+    pagination: buildPaginationMeta(paginationInput, total),
     summary,
   };
+}
+
+export async function getAdminUser(input: GetAdminUserInput) {
+  const adminUser = await prisma.adminUser.findFirst({
+    where: {
+      id: input.adminUserId,
+      ...(input.storeIds
+        ? { stores: { some: { storeId: { in: input.storeIds } } } }
+        : {}),
+    },
+    include: {
+      roles: {
+        include: {
+          role: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: { roleId: "asc" },
+      },
+      stores: {
+        include: {
+          store: {
+            select: {
+              code: true,
+              id: true,
+              name: true,
+              type: true,
+            },
+          },
+        },
+        orderBy: { storeId: "asc" },
+      },
+    },
+  });
+
+  if (!adminUser) {
+    throw new SystemManagementServiceError(
+      "ADMIN_USER_NOT_FOUND",
+      "后台用户不存在",
+    );
+  }
+
+  return {
+    createdAt: adminUser.createdAt,
+    id: adminUser.id,
+    lastLoginAt: adminUser.lastLoginAt,
+    name: adminUser.name,
+    phone: adminUser.phone,
+    roleIds: adminUser.roles.map(({ role }) => role.id),
+    roleNames: adminUser.roles.map(({ role }) => role.name),
+    status: adminUser.status,
+    storeIds: adminUser.stores.map(({ store }) => store.id),
+    storeNames: adminUser.stores.map(({ store }) => store.name),
+    stores: adminUser.stores.map(({ store }) => store),
+    updatedAt: adminUser.updatedAt,
+    username: adminUser.username,
+  };
+}
+
+export async function listAdminRoles(input: ListAdminRolesInput = {}) {
+  const query = input.query?.trim();
+  const where: Prisma.AdminRoleWhereInput = {
+    ...(query
+      ? {
+          OR: [
+            { code: { contains: query } },
+            { name: { contains: query } },
+          ],
+        }
+      : {}),
+  };
+
+  const paginationInput = normalizePagination(input);
+
+  const [items, total] = await Promise.all([
+    prisma.adminRole.findMany({
+      where,
+      skip: paginationInput.skip,
+      take: paginationInput.take,
+      orderBy: [{ createdAt: "asc" }, { code: "asc" }],
+      include: {
+        _count: {
+          select: {
+            users: true,
+          },
+        },
+        permissions: {
+          include: {
+            permission: true,
+          },
+        },
+      },
+    }),
+    prisma.adminRole.count({ where }),
+  ]);
+
+  return {
+    items: items.map((item) => {
+      const permissions = item.permissions
+        .map(({ permission }) => ({
+          code: permission.code,
+          id: permission.id,
+          name: permission.name,
+        }))
+        .sort((left, right) => left.code.localeCompare(right.code));
+
+      return {
+        code: item.code,
+        createdAt: item.createdAt,
+        id: item.id,
+        name: item.name,
+        permissionCodes: permissions.map((permission) => permission.code),
+        permissions,
+        updatedAt: item.updatedAt,
+        userCount: item._count.users,
+      };
+    }),
+    pagination: buildPaginationMeta(paginationInput, total),
+    summary: {
+      total,
+    },
+  };
+}
+
+export async function listAdminPermissions() {
+  const permissions = await prisma.adminPermission.findMany({
+    orderBy: [{ code: "asc" }],
+  });
+
+  return {
+    items: permissions.map((permission) => ({
+      code: permission.code,
+      createdAt: permission.createdAt,
+      id: permission.id,
+      name: permission.name,
+    })),
+    summary: {
+      total: permissions.length,
+    },
+  };
+}
+
+export async function createAdminRole(input: CreateAdminRoleInput) {
+  const code = normalizeRoleCode(input.code);
+  const normalized = normalizeRoleInput(input);
+
+  return prisma.$transaction(async (tx) => {
+    const operator = await getActiveOperator(tx, input.operatorId);
+    await ensurePermissions(tx, normalized.permissionIds);
+
+    const existing = await tx.adminRole.findUnique({ where: { code } });
+    if (existing) {
+      throw new SystemManagementServiceError(
+        "ROLE_CODE_EXISTS",
+        "角色编码已存在",
+      );
+    }
+
+    const created = await tx.adminRole.create({
+      data: {
+        code,
+        name: normalized.name,
+      },
+    });
+
+    await replaceAdminRolePermissions(tx, created.id, normalized.permissionIds);
+
+    await tx.adminOperationLog.create({
+      data: {
+        action: "ADMIN_ROLE_CREATED",
+        afterValue: adminRoleLogValue({
+          code: created.code,
+          name: created.name,
+          permissionIds: normalized.permissionIds,
+        }),
+        beforeValue: Prisma.JsonNull,
+        operatorId: operator.id,
+        resource: "admin_role",
+        resourceId: created.id,
+      },
+    });
+
+    return created;
+  });
+}
+
+export async function updateAdminRole(input: UpdateAdminRoleInput) {
+  const normalized = normalizeRoleInput(input);
+
+  return prisma.$transaction(async (tx) => {
+    const operator = await getActiveOperator(tx, input.operatorId);
+    await ensurePermissions(tx, normalized.permissionIds);
+    const before = await adminRoleSnapshot(tx, input.roleId);
+
+    const updated = await tx.adminRole.update({
+      where: { id: input.roleId },
+      data: {
+        name: normalized.name,
+      },
+    });
+
+    await replaceAdminRolePermissions(tx, updated.id, normalized.permissionIds);
+
+    await tx.adminOperationLog.create({
+      data: {
+        action: "ADMIN_ROLE_UPDATED",
+        afterValue: adminRoleLogValue({
+          code: updated.code,
+          name: updated.name,
+          permissionIds: normalized.permissionIds,
+        }),
+        beforeValue: before.value,
+        operatorId: operator.id,
+        resource: "admin_role",
+        resourceId: updated.id,
+      },
+    });
+
+    return updated;
+  });
 }
 
 export async function createAdminUser(input: CreateAdminUserInput) {
@@ -478,18 +846,48 @@ export async function resetAdminUserPassword(input: ResetAdminUserPasswordInput)
 export async function listAdminOperationLogs(
   input: ListAdminOperationLogsInput = {},
 ) {
+  const query = input.query?.trim();
+  const paginationInput = normalizePagination({
+    skip: input.skip,
+    take: input.take ?? 50,
+  });
   const where: Prisma.AdminOperationLogWhereInput = {
+    ...(input.action ? { action: input.action } : {}),
     ...(input.operatorId ? { operatorId: input.operatorId } : {}),
     ...(input.resource ? { resource: input.resource } : {}),
+    ...(typeof input.statusCode === "number"
+      ? { statusCode: input.statusCode }
+      : {}),
     ...(input.storeId ? { storeId: input.storeId } : {}),
+    ...(input.dateFrom || input.dateTo
+      ? {
+          createdAt: {
+            ...(input.dateFrom ? { gte: input.dateFrom } : {}),
+            ...(input.dateTo ? { lte: input.dateTo } : {}),
+          },
+        }
+      : {}),
+    ...(query
+      ? {
+          OR: [
+            { action: { contains: query } },
+            { resource: { contains: query } },
+            { resourceId: { contains: query } },
+            { requestMethod: { contains: query } },
+            { requestPath: { contains: query } },
+            { operator: { is: { name: { contains: query } } } },
+            { operator: { is: { username: { contains: query } } } },
+            { user: { is: { nickname: { contains: query } } } },
+            { user: { is: { phone: { contains: query } } } },
+            { store: { is: { code: { contains: query } } } },
+            { store: { is: { name: { contains: query } } } },
+          ],
+        }
+      : {}),
   };
-  const take = Math.min(Math.max(input.take ?? 50, 1), 200);
 
   const [items, total] = await Promise.all([
     prisma.adminOperationLog.findMany({
-      where,
-      take,
-      orderBy: { createdAt: "desc" },
       include: {
         operator: {
           select: {
@@ -506,7 +904,18 @@ export async function listAdminOperationLogs(
             type: true,
           },
         },
+        user: {
+          select: {
+            id: true,
+            nickname: true,
+            phone: true,
+          },
+        },
       },
+      orderBy: { createdAt: "desc" },
+      skip: paginationInput.skip,
+      take: paginationInput.take,
+      where,
     }),
     prisma.adminOperationLog.count({ where }),
   ]);
@@ -517,14 +926,41 @@ export async function listAdminOperationLogs(
       afterValue: item.afterValue,
       beforeValue: item.beforeValue,
       createdAt: item.createdAt,
+      durationMs: item.durationMs,
       id: item.id,
       ip: item.ip,
-      operator: item.operator,
+      operator: item.operator
+        ? {
+            id: item.operator.id,
+            name: item.operator.name,
+            username: item.operator.username,
+          }
+        : null,
       resource: item.resource,
       resourceId: item.resourceId,
-      store: item.store,
+      requestMethod: item.requestMethod,
+      requestParams: item.requestParams,
+      requestPath: item.requestPath,
+      responseData: item.responseData,
+      store: item.store
+        ? {
+            code: item.store.code,
+            id: item.store.id,
+            name: item.store.name,
+            type: item.store.type,
+          }
+        : null,
+      user: item.user
+        ? {
+            id: item.user.id,
+            nickname: item.user.nickname,
+            phone: item.user.phone,
+          }
+        : null,
+      statusCode: item.statusCode,
       userAgent: item.userAgent,
     })),
+    pagination: buildPaginationMeta(paginationInput, total),
     summary: {
       total,
     },

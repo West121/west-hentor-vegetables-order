@@ -119,6 +119,8 @@ describe("store management", () => {
           contactName: string;
           contactPhone: string;
           cutoffTime: string;
+          deliveryCities: string[];
+          deliveryProvinces: string[];
           district: string;
           franchiseEndsAt: Date;
           franchiseeId: string;
@@ -136,6 +138,8 @@ describe("store management", () => {
       contactName: "王店长",
       contactPhone: "13900002222",
       cutoffTime: "18:30",
+      deliveryCities: ["北京市"],
+      deliveryProvinces: ["北京市"],
       district: "西城区",
       franchiseEndsAt: new Date("2028-12-31T15:59:59.000Z"),
       franchiseeId: franchisee.id,
@@ -164,6 +168,8 @@ describe("store management", () => {
       contactName: "赵店长",
       contactPhone: "13900003333",
       cutoffTime: "17:30",
+      deliveryCities: ["北京市", "天津市", "北京市"],
+      deliveryProvinces: ["北京市"],
       district: "西城区",
       franchiseEndsAt: new Date("2029-12-31T15:59:59.000Z"),
       franchiseeId: franchisee.id,
@@ -177,6 +183,8 @@ describe("store management", () => {
 
     expect(updatedStore).toMatchObject({
       contactName: "赵店长",
+      deliveryCities: ["北京市", "天津市"],
+      deliveryProvinces: ["北京市"],
       name: "西直门蔬菜加盟店",
       status: "DISABLED",
     });
@@ -214,6 +222,8 @@ describe("store management", () => {
       id: store.id,
       memberCount: 0,
       orderCount: 0,
+      deliveryCities: ["北京市", "天津市"],
+      deliveryProvinces: ["北京市"],
     });
 
     await expect(
@@ -276,6 +286,118 @@ describe("store management", () => {
     expect(stores.items[0]).toMatchObject({
       contactName: "第一店长",
       operatorVisible: true,
+    });
+  });
+
+  it("rejects invalid store cutoff time without writing a store", async () => {
+    const fixture = await createFixture();
+
+    await expect(
+      storeManagement.createStore({
+        address: "和平路 1 号",
+        city: "南京市",
+        code: `invalid-cutoff-${Date.now()}`,
+        contactName: "截单店长",
+        contactPhone: "13900009999",
+        cutoffTime: "99:99",
+        district: "玄武区",
+        name: "非法截单门店",
+        operatorId: fixture.operator.id,
+        province: "江苏省",
+        status: "ACTIVE",
+        type: "DIRECT",
+      }),
+    ).rejects.toMatchObject({
+      code: "CUTOFF_TIME_INVALID",
+      message: "截单时间不正确",
+    } satisfies Partial<storeManagement.StoreManagementServiceError>);
+
+    await expect(
+      prisma.store.count({ where: { name: "非法截单门店" } }),
+    ).resolves.toBe(0);
+  });
+
+  it("gets franchisee and store details for multi-store management", async () => {
+    const fixture = await createFixture();
+
+    const franchisee = await storeManagement.createFranchisee({
+      contactName: "周加盟",
+      contactPhone: "13900007777",
+      contractEndsAt: new Date("2029-12-31T15:59:59.000Z"),
+      name: "东城社区加盟商",
+      operatorId: fixture.operator.id,
+      remark: "东城片区",
+      status: "ACTIVE",
+    });
+    createdFranchiseeIds.add(franchisee.id);
+
+    const store = await storeManagement.createStore({
+      address: "东四十条 88 号",
+      city: "北京市",
+      code: `detail-store-${franchisee.id}`,
+      contactName: "陈店长",
+      contactPhone: "13900008888",
+      cutoffTime: "18:00",
+      district: "东城区",
+      franchiseEndsAt: new Date("2029-12-31T15:59:59.000Z"),
+      franchiseeId: franchisee.id,
+      name: "东四蔬菜加盟店",
+      operatorId: fixture.operator.id,
+      province: "北京市",
+      status: "ACTIVE",
+      type: "FRANCHISE",
+    });
+    createdStoreIds.add(store.id);
+
+    const franchiseeDetail = await (
+      storeManagement as typeof storeManagement & {
+        getFranchisee: (input: { franchiseeId: string }) => Promise<{
+          id: string;
+          name: string;
+          storeCount: number;
+          stores: Array<{ id: string; name: string; status: "ACTIVE" | "DISABLED" }>;
+        }>;
+      }
+    ).getFranchisee({ franchiseeId: franchisee.id });
+
+    expect(franchiseeDetail).toMatchObject({
+      id: franchisee.id,
+      name: "东城社区加盟商",
+      storeCount: 1,
+    });
+    expect(franchiseeDetail.stores).toEqual([
+      expect.objectContaining({
+        id: store.id,
+        name: store.name,
+        status: "ACTIVE",
+      }),
+    ]);
+
+    const storeDetail = await (
+      storeManagement as typeof storeManagement & {
+        getStore: (input: { storeId: string }) => Promise<{
+          adminUserCount: number;
+          franchisee: { id: string; name: string } | null;
+          id: string;
+          memberCount: number;
+          name: string;
+          orderCount: number;
+          packageTemplateCount: number;
+        }>;
+      }
+    ).getStore({ storeId: store.id });
+
+    expect(storeDetail).toMatchObject({
+      adminUserCount: 0,
+      franchisee: {
+        id: franchisee.id,
+        name: franchisee.name,
+      },
+      id: store.id,
+      memberCount: 0,
+      name: store.name,
+      orderCount: 0,
+      packageTemplateCount: 0,
     });
   });
 });

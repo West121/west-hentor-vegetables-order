@@ -2,17 +2,32 @@ import { z } from "zod";
 
 import { createStoreOrder, listStoreOrders, OrderServiceError } from "@hentor/db";
 
-import { getStoreAccessFailure } from "@/app/lib/admin-access";
+import {
+  getPermissionFailure,
+  getStoreAccessFailure,
+} from "@/app/lib/admin-access";
+import { getAdminPaginationParams } from "@/app/lib/admin-pagination";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
 const querySchema = z.object({
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
   query: z.string().optional(),
   status: z
     .enum(["PENDING_SHIPMENT", "SHIPPED", "SIGNED", "CANCELED", "VOIDED"])
     .optional(),
   storeId: z.string().min(1),
 });
+
+function parseDate(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
 
 const createSchema = z.object({
   addressId: z.string().min(1),
@@ -56,6 +71,8 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const parsed = querySchema.safeParse({
+    dateFrom: url.searchParams.get("dateFrom") ?? undefined,
+    dateTo: url.searchParams.get("dateTo") ?? undefined,
     query: url.searchParams.get("query") ?? undefined,
     status: url.searchParams.get("status") ?? undefined,
     storeId: url.searchParams.get("storeId") ?? "",
@@ -63,6 +80,14 @@ export async function GET(request: Request) {
 
   if (!parsed.success) {
     return fail("INVALID_PARAMS", "查询参数不完整");
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "orders.read",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const accessFailure = await getStoreAccessFailure(
@@ -73,7 +98,16 @@ export async function GET(request: Request) {
     return accessFailure;
   }
 
-  return ok(await listStoreOrders(parsed.data));
+  return ok(
+    await listStoreOrders({
+      dateFrom: parseDate(parsed.data.dateFrom),
+      dateTo: parseDate(parsed.data.dateTo),
+      query: parsed.data.query,
+      ...getAdminPaginationParams(url.searchParams),
+      status: parsed.data.status,
+      storeId: parsed.data.storeId,
+    }),
+  );
 }
 
 export async function POST(request: Request) {
@@ -85,6 +119,14 @@ export async function POST(request: Request) {
   const parsed = createSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return fail("INVALID_PARAMS", "订单参数不完整");
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "orders.write",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const accessFailure = await getStoreAccessFailure(

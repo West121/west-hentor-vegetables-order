@@ -7,7 +7,7 @@ import {
 } from "@hentor/db";
 import { storeCodeSchema } from "@hentor/shared";
 
-import { fail, ok } from "@/app/lib/api";
+import { fail, isServiceErrorLike, ok } from "@/app/lib/api";
 import { requireMiniSession } from "@/app/lib/mini-auth";
 
 const reservationItemSchema = z.object({
@@ -15,8 +15,14 @@ const reservationItemSchema = z.object({
   weightJin: z.coerce.number().positive(),
 });
 
+const benefitSelectionSchema = z.object({
+  quantity: z.coerce.number().positive(),
+  userPackageBenefitId: z.string().min(1),
+});
+
 const submitReservationSchema = z.object({
   addressId: z.string().min(1),
+  benefitSelections: z.array(benefitSelectionSchema).optional(),
   items: z.array(reservationItemSchema).min(1),
   orderId: z.string().optional(),
   storeCode: storeCodeSchema.optional(),
@@ -29,7 +35,11 @@ function statusForReservationError(code: string) {
     return 404;
   }
 
-  if (code === "PACKAGE_UNAVAILABLE" || code === "ORDER_NOT_EDITABLE") {
+  if (
+    code === "PACKAGE_UNAVAILABLE" ||
+    code === "ORDER_ALREADY_EXISTS" ||
+    code === "ORDER_NOT_EDITABLE"
+  ) {
     return 409;
   }
 
@@ -62,6 +72,7 @@ export async function POST(request: Request) {
   try {
     const reservation = await submitReservation({
       addressId: parsed.data.addressId,
+      benefitSelections: parsed.data.benefitSelections,
       items: parsed.data.items,
       orderId: parsed.data.orderId,
       storeId: store.id,
@@ -72,7 +83,10 @@ export async function POST(request: Request) {
 
     return ok({ reservation });
   } catch (error) {
-    if (error instanceof ReservationServiceError) {
+    if (
+      error instanceof ReservationServiceError ||
+      isServiceErrorLike(error, "ReservationServiceError")
+    ) {
       return fail(
         error.code,
         error.message,

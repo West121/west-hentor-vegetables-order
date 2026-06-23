@@ -170,7 +170,13 @@ describe("package template management", () => {
             userPackageCount: number;
             weightLimitJin: number;
           }>;
-          summary: { active: number; disabled: number; total: number };
+          summary: {
+            active: number;
+            disabled: number;
+            purchaseOrders: number;
+            total: number;
+            userPackages: number;
+          };
         }>;
       }
     ).listPackageTemplates({ storeId: fixture.store.id });
@@ -178,7 +184,9 @@ describe("package template management", () => {
     expect(result.summary).toEqual({
       active: 1,
       disabled: 0,
+      purchaseOrders: 1,
       total: 1,
+      userPackages: 1,
     });
     expect(result.items).toHaveLength(1);
     expect(result.items[0]).toMatchObject({
@@ -189,6 +197,41 @@ describe("package template management", () => {
       weightLimitJin: 8,
     });
     expect(result.items[0]?.id).not.toBe(otherFixture.template.id);
+  });
+
+  it("gets a package template detail with usage counts", async () => {
+    const fixture = await createFixture();
+
+    const detail = await (
+      templateOperations as typeof templateOperations & {
+        getPackageTemplate: (input: {
+          storeId: string;
+          templateId: string;
+        }) => Promise<{
+          id: string;
+          purchaseOrderCount: number;
+          store: { id: string; name: string };
+          totalTimes: number;
+          userPackageCount: number;
+          weightLimitJin: number;
+        }>;
+      }
+    ).getPackageTemplate({
+      storeId: fixture.store.id,
+      templateId: fixture.template.id,
+    });
+
+    expect(detail).toMatchObject({
+      id: fixture.template.id,
+      purchaseOrderCount: 1,
+      store: {
+        id: fixture.store.id,
+        name: fixture.store.name,
+      },
+      totalTimes: 8,
+      userPackageCount: 1,
+      weightLimitJin: 8,
+    });
   });
 
   it("creates and updates a package template with admin operation logs", async () => {
@@ -282,5 +325,57 @@ describe("package template management", () => {
         },
       }),
     ).resolves.toBe(2);
+  });
+
+  it("blocks changing total times and weight limit after a template has user packages", async () => {
+    const fixture = await createFixture();
+
+    await expect(
+      (
+        templateOperations as typeof templateOperations & {
+          updatePackageTemplate: (input: {
+            id: string;
+            name: string;
+            operatorId: string;
+            sortOrder: number;
+            status: "ACTIVE" | "DISABLED";
+            storeId: string;
+            totalTimes: number;
+            validDays: number;
+            weightLimitJin: number;
+          }) => Promise<PackageTemplate>;
+        }
+      ).updatePackageTemplate({
+        id: fixture.template.id,
+        name: "8斤月套餐-改额度",
+        operatorId: fixture.admin.id,
+        sortOrder: 2,
+        status: "ACTIVE",
+        storeId: fixture.store.id,
+        totalTimes: 10,
+        validDays: 120,
+        weightLimitJin: 10,
+      }),
+    ).rejects.toMatchObject({
+      code: "PACKAGE_TEMPLATE_IN_USE",
+      message: "已有用户套餐使用该模板，不能修改总次数或单次重量",
+    });
+
+    await expect(
+      prisma.packageTemplate.findUniqueOrThrow({
+        where: { id: fixture.template.id },
+      }),
+    ).resolves.toMatchObject({
+      name: "8斤月套餐",
+      totalTimes: 8,
+      validDays: 90,
+    });
+    await expect(
+      prisma.packageTemplate.findUniqueOrThrow({
+        where: { id: fixture.template.id },
+      }),
+    ).resolves.toMatchObject({
+      weightLimitJin: new Prisma.Decimal("8.00"),
+    });
   });
 });

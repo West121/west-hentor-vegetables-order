@@ -1,4 +1,5 @@
 import { prisma } from "./client";
+import { getBusinessDayRange, isInBusinessDay } from "./business-day";
 import {
   type FranchiseeStatus,
   Prisma,
@@ -19,7 +20,14 @@ export type MiniappStoreUserInput = {
   userId: string;
 };
 
+export type MiniappSwitchStoreInput = {
+  now?: Date;
+  storeId: string;
+  userId: string;
+};
+
 export type MiniappEditableOrderInput = MiniappStoreUserInput & {
+  now?: Date;
   orderId?: string | null;
 };
 
@@ -43,6 +51,10 @@ export type MiniappCancelOrderInput = MiniappOrderActionInput & {
   reason: string;
 };
 
+export type MiniappCancelAccountInput = MiniappStoreUserInput & {
+  reason: string;
+};
+
 export class MiniappServiceError extends Error {
   constructor(
     public readonly code: string,
@@ -61,6 +73,41 @@ function requireText(value: string, code: string, message: string) {
   return normalized;
 }
 
+async function ensureActiveMiniappMember(
+  input: MiniappStoreUserInput,
+  messages: {
+    disabled: string;
+    storeRequired: string;
+  },
+) {
+  const binding = await prisma.memberStoreBinding.findFirst({
+    where: {
+      storeId: input.storeId,
+      userId: input.userId,
+    },
+    include: {
+      user: {
+        select: {
+          disabledReason: true,
+          status: true,
+        },
+      },
+    },
+  });
+
+  if (!binding) {
+    throw new MiniappServiceError("STORE_REQUIRED", messages.storeRequired);
+  }
+
+  if (binding.status !== "ACTIVE" || binding.user.status !== "ACTIVE") {
+    const reason = binding.user.disabledReason?.trim();
+    throw new MiniappServiceError(
+      "MEMBER_DISABLED",
+      reason ? `会员已停用：${reason}` : messages.disabled,
+    );
+  }
+}
+
 function toNumber(value: Prisma.Decimal | number | null | undefined) {
   if (value == null) {
     return 0;
@@ -69,12 +116,55 @@ function toNumber(value: Prisma.Decimal | number | null | undefined) {
   return Number(value);
 }
 
+function configText(value: Prisma.JsonValue | undefined) {
+  return typeof value === "string" ? value : "";
+}
+
 function normalizeAddressSnapshot(value: Prisma.JsonValue) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
   }
 
   return value as Record<string, unknown>;
+}
+
+function formatFullAddress(address: {
+  city?: string | null;
+  detail?: string | null;
+  district?: string | null;
+  fullAddress?: string | null;
+  province?: string | null;
+}) {
+  const explicit = address.fullAddress?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  return [address.province, address.city, address.district, address.detail]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function addressSummaryView(address: {
+  city: string | null;
+  detail: string;
+  district: string | null;
+  id: string;
+  province: string | null;
+  receiverName: string;
+  receiverPhone: string;
+}) {
+  return {
+    city: address.city,
+    detail: address.detail,
+    district: address.district,
+    fullAddress: formatFullAddress(address),
+    id: address.id,
+    province: address.province,
+    receiverName: address.receiverName,
+    receiverPhone: address.receiverPhone,
+  };
 }
 
 function isFutureOrOpenEnded(value: Date | null, now: Date) {
@@ -110,13 +200,21 @@ function isMiniappStoreAvailable(
 }
 
 function packageView(item: {
+  benefits?: Array<{
+    id: string;
+    kind: string;
+    nameSnapshot: string;
+    sortOrder: number;
+    totalQuantity: Prisma.Decimal;
+    unitSnapshot: string;
+    usedQuantity: Prisma.Decimal;
+  }>;
   createdAt: Date;
   expiresAt: Date;
   frozenReason: string | null;
   id: string;
   lastUsedAt: Date | null;
   nameSnapshot: string;
-  nextOrderDate: Date | null;
   startsAt: Date;
   status: PackageStatus;
   storeId: string;
@@ -126,13 +224,26 @@ function packageView(item: {
   weightLimitJin: Prisma.Decimal;
 }) {
   return {
+    benefits:
+      item.benefits?.map((benefit) => ({
+        id: benefit.id,
+        kind: benefit.kind,
+        name: benefit.nameSnapshot,
+        remainingQuantity: Math.max(
+          toNumber(benefit.totalQuantity) - toNumber(benefit.usedQuantity),
+          0,
+        ),
+        sortOrder: benefit.sortOrder,
+        totalQuantity: toNumber(benefit.totalQuantity),
+        unit: benefit.unitSnapshot,
+        usedQuantity: toNumber(benefit.usedQuantity),
+      })) ?? [],
     createdAt: item.createdAt,
     expiresAt: item.expiresAt,
     frozenReason: item.frozenReason,
     id: item.id,
     lastUsedAt: item.lastUsedAt,
     nameSnapshot: item.nameSnapshot,
-    nextOrderDate: item.nextOrderDate,
     remainingTimes: Math.max(item.totalTimes - item.usedTimes, 0),
     startsAt: item.startsAt,
     status: item.status,
@@ -141,6 +252,30 @@ function packageView(item: {
     usedTimes: item.usedTimes,
     userId: item.userId,
     weightLimitJin: toNumber(item.weightLimitJin),
+  };
+}
+
+function memberStoreView(
+  binding: {
+    isDefault: boolean;
+    store: {
+      code: string;
+      customerServiceTel: string | null;
+      id: string;
+      name: string;
+      type: StoreType;
+    };
+  },
+  currentStoreId: string,
+) {
+  return {
+    code: binding.store.code,
+    customerServiceTel: binding.store.customerServiceTel,
+    id: binding.store.id,
+    isCurrent: binding.store.id === currentStoreId,
+    isDefault: binding.isDefault,
+    name: binding.store.name,
+    type: binding.store.type,
   };
 }
 
@@ -190,10 +325,172 @@ export async function findAvailableMiniappStore(input: MiniappStoreLookupInput =
   return stores.find((store) => isMiniappStoreAvailable(store, now)) ?? null;
 }
 
+export async function getMiniappStorePublicSettings(
+  input: MiniappStoreLookupInput = {},
+) {
+  const store = await findAvailableMiniappStore(input);
+  if (!store) {
+    throw new MiniappServiceError("STORE_NOT_FOUND", "当前门店不可用");
+  }
+
+  const configs = await prisma.systemConfig.findMany({
+    where: {
+      key: {
+        in: [
+          "about_text",
+          "login_image_url",
+          "login_subtitle",
+          "login_title",
+          "login_welcome",
+          "privacy_policy_url",
+          "user_agreement_url",
+        ],
+      },
+      storeId: store.id,
+    },
+    select: {
+      key: true,
+      value: true,
+    },
+  });
+  const configByKey = new Map(
+    configs.map((config) => [config.key, config.value]),
+  );
+
+  return {
+    aboutText: configText(configByKey.get("about_text")),
+    customerServiceTel: store.customerServiceTel,
+    loginImageUrl: configText(configByKey.get("login_image_url")),
+    loginSubtitle: configText(configByKey.get("login_subtitle")),
+    loginTitle: configText(configByKey.get("login_title")),
+    loginWelcome: configText(configByKey.get("login_welcome")),
+    privacyPolicyUrl: configText(configByKey.get("privacy_policy_url")),
+    store: {
+      code: store.code,
+      id: store.id,
+      name: store.name,
+    },
+    userAgreementUrl: configText(configByKey.get("user_agreement_url")),
+  };
+}
+
+export async function listMiniappMemberStores(input: MiniappStoreUserInput) {
+  const now = new Date();
+  const bindings = await prisma.memberStoreBinding.findMany({
+    where: {
+      status: "ACTIVE",
+      userId: input.userId,
+    },
+    include: {
+      store: {
+        include: {
+          franchisee: {
+            select: {
+              contractEndsAt: true,
+              id: true,
+              name: true,
+              status: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+  });
+
+  const stores = bindings
+    .filter((binding) => isMiniappStoreAvailable(binding.store, now))
+    .map((binding) => memberStoreView(binding, input.storeId))
+    .sort((left, right) => {
+      if (left.isCurrent !== right.isCurrent) {
+        return left.isCurrent ? -1 : 1;
+      }
+      if (left.isDefault !== right.isDefault) {
+        return left.isDefault ? -1 : 1;
+      }
+      return left.name.localeCompare(right.name, "zh-CN");
+    });
+
+  return {
+    currentStore: stores.find((store) => store.isCurrent) ?? null,
+    stores,
+  };
+}
+
+export async function switchMiniappStore(input: MiniappSwitchStoreInput) {
+  const now = input.now ?? new Date();
+
+  return prisma.$transaction(async (tx) => {
+    const binding = await tx.memberStoreBinding.findFirst({
+      where: {
+        storeId: input.storeId,
+        userId: input.userId,
+      },
+      include: {
+        store: {
+          include: {
+            franchisee: {
+              select: {
+                contractEndsAt: true,
+                id: true,
+                name: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!binding || binding.status !== "ACTIVE") {
+      throw new MiniappServiceError(
+        "STORE_BINDING_NOT_FOUND",
+        "当前会员未绑定该门店",
+      );
+    }
+
+    if (!isMiniappStoreAvailable(binding.store, now)) {
+      throw new MiniappServiceError("STORE_NOT_AVAILABLE", "当前门店不可用");
+    }
+
+    await Promise.all([
+      tx.memberStoreBinding.updateMany({
+        where: { userId: input.userId },
+        data: { isDefault: false },
+      }),
+      tx.user.update({
+        where: { id: input.userId },
+        data: { defaultStoreId: input.storeId },
+      }),
+    ]);
+    const updated = await tx.memberStoreBinding.update({
+      where: {
+        userId_storeId: {
+          storeId: input.storeId,
+          userId: input.userId,
+        },
+      },
+      data: { isDefault: true },
+      include: {
+        store: {
+          select: {
+            code: true,
+            customerServiceTel: true,
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+      },
+    });
+
+    return memberStoreView(updated, input.storeId);
+  });
+}
+
 async function getStoreAndMember(input: MiniappStoreUserInput) {
   return prisma.memberStoreBinding.findFirst({
     where: {
-      status: "ACTIVE",
       storeId: input.storeId,
       userId: input.userId,
     },
@@ -211,6 +508,7 @@ async function getStoreAndMember(input: MiniappStoreUserInput) {
         select: {
           avatarUrl: true,
           id: true,
+          disabledReason: true,
           nickname: true,
           phone: true,
           status: true,
@@ -221,6 +519,7 @@ async function getStoreAndMember(input: MiniappStoreUserInput) {
 }
 
 export async function listMiniappOrders(input: MiniappStoreUserInput) {
+  const now = new Date();
   const [orders, summaryRows] = await Promise.all([
     prisma.order.findMany({
       where: {
@@ -230,6 +529,9 @@ export async function listMiniappOrders(input: MiniappStoreUserInput) {
       },
       orderBy: { createdAt: "desc" },
       include: {
+        benefitItems: {
+          orderBy: { id: "asc" },
+        },
         items: {
           orderBy: { id: "asc" },
           select: {
@@ -244,6 +546,9 @@ export async function listMiniappOrders(input: MiniappStoreUserInput) {
             id: true,
             nameSnapshot: true,
           },
+        },
+        shipments: {
+          orderBy: { sortOrder: "asc" },
         },
       },
     }),
@@ -271,18 +576,36 @@ export async function listMiniappOrders(input: MiniappStoreUserInput) {
   return {
     items: sortedOrders.map((order) => ({
       addressSnapshot: normalizeAddressSnapshot(order.addressSnapshot),
-      canEdit: order.status === "PENDING_SHIPMENT",
+      canEdit:
+        order.status === "PENDING_SHIPMENT" &&
+        isInBusinessDay(order.createdAt, now),
       canceledAt: order.canceledAt,
       createdAt: order.createdAt,
-      id: order.id,
-      items: order.items.map((item) => ({
+	      id: order.id,
+	      benefits: order.benefitItems.map((benefit) => ({
+	        id: benefit.id,
+	        kind: benefit.kind,
+	        nameSnapshot: benefit.nameSnapshot,
+	        quantity: toNumber(benefit.quantity),
+	        unitSnapshot: benefit.unitSnapshot,
+	      })),
+	      items: order.items.map((item) => ({
         dishId: item.dishId,
         dishNameSnapshot: item.dishNameSnapshot,
         id: item.id,
         weightJin: toNumber(item.weightJin),
       })),
-      logisticsNo: order.logisticsNo,
-      modifiedAt: order.modifiedAt,
+	      logisticsNo: order.logisticsNo,
+	      shipments: order.shipments.map((shipment) => ({
+	        id: shipment.id,
+	        logisticsNo: shipment.logisticsNo,
+	        packageName: shipment.packageName,
+	        packageType: shipment.packageType,
+	        shippedAt: shipment.shippedAt,
+	        signedAt: shipment.signedAt,
+	        status: shipment.status,
+	      })),
+	      modifiedAt: order.modifiedAt,
       orderNo: order.orderNo,
       shippedAt: order.shippedAt,
       signedAt: order.signedAt,
@@ -303,12 +626,22 @@ export async function listMiniappPackages(input: MiniappStoreUserInput) {
         storeId: input.storeId,
         userId: input.userId,
       },
-      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      include: {
+        benefits: {
+          orderBy: { sortOrder: "asc" },
+        },
+      },
+      orderBy: [{ status: "asc" }, { createdAt: "asc" }],
     }),
     prisma.packageTemplate.findMany({
       where: {
         status: "ACTIVE",
         storeId: input.storeId,
+      },
+      include: {
+        benefits: {
+          orderBy: { sortOrder: "asc" },
+        },
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     }),
@@ -320,6 +653,13 @@ export async function listMiniappPackages(input: MiniappStoreUserInput) {
       enabled: false,
       status: "PAYMENT_NOT_ENABLED" as const,
       templates: templates.map((template) => ({
+        benefits: template.benefits.map((benefit) => ({
+          id: benefit.id,
+          kind: benefit.kind,
+          name: benefit.name,
+          totalQuantity: toNumber(benefit.totalQuantity),
+          unit: benefit.unit,
+        })),
         id: template.id,
         name: template.name,
         totalTimes: template.totalTimes,
@@ -331,17 +671,26 @@ export async function listMiniappPackages(input: MiniappStoreUserInput) {
 }
 
 export async function getMiniappCurrentPackage(input: MiniappCurrentPackageInput) {
-  const now = input.now ?? new Date();
   const items = await prisma.userPackage.findMany({
     where: {
-      expiresAt: { gte: now },
       status: { in: ["ACTIVE", "FROZEN"] },
       storeId: input.storeId,
       userId: input.userId,
     },
-    orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+    include: {
+      benefits: {
+        orderBy: { sortOrder: "asc" },
+      },
+    },
+    orderBy: [{ status: "asc" }, { createdAt: "asc" }],
   });
-  const current = items.find((item) => item.status === "ACTIVE") ?? items[0] ?? null;
+  const current =
+    items.find(
+      (item) => item.status === "ACTIVE" && item.usedTimes < item.totalTimes,
+    ) ??
+    items.find((item) => item.status === "ACTIVE") ??
+    items[0] ??
+    null;
 
   return current ? packageView(current) : null;
 }
@@ -349,6 +698,11 @@ export async function getMiniappCurrentPackage(input: MiniappCurrentPackageInput
 export async function createMiniappPackagePurchase(
   input: MiniappPackagePurchaseInput,
 ) {
+  await ensureActiveMiniappMember(input, {
+    disabled: "会员已停用，暂不能购买套餐",
+    storeRequired: "请先绑定当前门店后再购买套餐",
+  });
+
   const template = await prisma.packageTemplate.findFirst({
     where: {
       id: input.templateId,
@@ -378,6 +732,11 @@ export async function createMiniappPackagePurchase(
 }
 
 export async function reserveMiniappWechatPrepay(input: MiniappWechatPrepayInput) {
+  await ensureActiveMiniappMember(input, {
+    disabled: "会员已停用，暂不能支付套餐",
+    storeRequired: "请先绑定当前门店后再支付套餐",
+  });
+
   const purchaseOrder = await prisma.packagePurchaseOrder.findFirst({
     where: {
       id: input.purchaseOrderId,
@@ -401,6 +760,10 @@ export async function reserveMiniappWechatPrepay(input: MiniappWechatPrepayInput
 
 export async function cancelMiniappOrder(input: MiniappCancelOrderInput) {
   const reason = requireText(input.reason, "CANCEL_REASON_REQUIRED", "请选择取消原因");
+  await ensureActiveMiniappMember(input, {
+    disabled: "会员已停用，暂不能取消订单",
+    storeRequired: "请先绑定当前门店后再取消订单",
+  });
 
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findFirst({
@@ -411,6 +774,12 @@ export async function cancelMiniappOrder(input: MiniappCancelOrderInput) {
         userId: input.userId,
       },
       include: {
+        benefitItems: {
+          select: {
+            quantity: true,
+            userPackageBenefitId: true,
+          },
+        },
         items: {
           select: {
             dishId: true,
@@ -455,6 +824,19 @@ export async function cancelMiniappOrder(input: MiniappCancelOrderInput) {
       });
     }
 
+    for (const benefit of order.benefitItems) {
+      if (!benefit.userPackageBenefitId) {
+        continue;
+      }
+
+      await tx.userPackageBenefit.update({
+        where: { id: benefit.userPackageBenefitId },
+        data: {
+          usedQuantity: { decrement: benefit.quantity },
+        },
+      });
+    }
+
     return tx.order.update({
       where: { id: order.id },
       data: {
@@ -492,9 +874,66 @@ export async function hideMiniappOrder(input: MiniappOrderActionInput) {
   });
 }
 
+export async function cancelMiniappAccount(input: MiniappCancelAccountInput) {
+  const reason = requireText(
+    input.reason,
+    "CANCEL_ACCOUNT_REASON_REQUIRED",
+    "请填写注销原因",
+  );
+
+  return prisma.$transaction(async (tx) => {
+    const binding = await tx.memberStoreBinding.findFirst({
+      where: {
+        storeId: input.storeId,
+        userId: input.userId,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    if (!binding) {
+      throw new MiniappServiceError(
+        "STORE_REQUIRED",
+        "请先绑定当前门店后再注销账号",
+      );
+    }
+
+    const [user, updatedBinding] = await Promise.all([
+      tx.user.update({
+        where: { id: input.userId },
+        data: {
+          disabledReason: reason,
+          status: "DISABLED",
+        },
+      }),
+      tx.memberStoreBinding.update({
+        where: { id: binding.id },
+        data: {
+          status: "DISABLED",
+        },
+      }),
+    ]);
+
+    return {
+      bindingStatus: updatedBinding.status,
+      disabledReason: user.disabledReason,
+      status: user.status,
+      storeId: input.storeId,
+      userId: input.userId,
+    };
+  });
+}
+
 export async function getMiniappEditableOrder(input: MiniappEditableOrderInput) {
+  const { end, start } = getBusinessDayRange(input.now);
   const order = await prisma.order.findFirst({
     where: {
+      createdAt: { gte: start, lt: end },
       deletedByUserAt: null,
       ...(input.orderId ? { id: input.orderId } : {}),
       status: "PENDING_SHIPMENT",
@@ -502,9 +941,12 @@ export async function getMiniappEditableOrder(input: MiniappEditableOrderInput) 
       userId: input.userId,
     },
     orderBy: { createdAt: "desc" },
-    include: {
-      address: true,
-      items: {
+	    include: {
+	      address: true,
+	      benefitItems: {
+	        orderBy: { id: "asc" },
+	      },
+	      items: {
         orderBy: { id: "asc" },
         select: {
           dishId: true,
@@ -522,14 +964,18 @@ export async function getMiniappEditableOrder(input: MiniappEditableOrderInput) 
 
   return {
     address: order.address
-      ? {
-          detail: order.address.detail,
-          receiverName: order.address.receiverName,
-          receiverPhone: order.address.receiverPhone,
-        }
+      ? addressSummaryView(order.address)
       : normalizeAddressSnapshot(order.addressSnapshot),
-    addressId: order.addressId,
-    id: order.id,
+	    addressId: order.addressId,
+	    benefits: order.benefitItems.map((benefit) => ({
+	      id: benefit.id,
+	      kind: benefit.kind,
+	      nameSnapshot: benefit.nameSnapshot,
+	      quantity: toNumber(benefit.quantity),
+	      unitSnapshot: benefit.unitSnapshot,
+	      userPackageBenefitId: benefit.userPackageBenefitId,
+	    })),
+	    id: order.id,
     items: order.items.map((item) => ({
       dishId: item.dishId,
       id: item.id,
@@ -562,16 +1008,13 @@ export async function getMiniappProfile(input: MiniappStoreUserInput) {
   return {
     currentPackage,
     defaultAddress: defaultAddress
-      ? {
-          detail: defaultAddress.detail,
-          id: defaultAddress.id,
-          receiverName: defaultAddress.receiverName,
-          receiverPhone: defaultAddress.receiverPhone,
-        }
+      ? addressSummaryView(defaultAddress)
       : null,
     member: binding
       ? {
           avatarUrl: binding.user.avatarUrl,
+          bindingStatus: binding.status,
+          disabledReason: binding.user.disabledReason,
           id: binding.user.id,
           nickname: binding.user.nickname,
           phone: binding.user.phone,

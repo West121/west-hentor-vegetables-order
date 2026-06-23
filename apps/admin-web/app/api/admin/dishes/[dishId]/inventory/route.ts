@@ -6,13 +6,16 @@ import {
   type Dish,
 } from "@hentor/db";
 
-import { getStoreAccessFailure } from "@/app/lib/admin-access";
+import {
+  getPermissionFailure,
+  getStoreAccessFailure,
+} from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
 const inventorySchema = z.object({
-  changeJin: z.coerce.number(),
-  reason: z.string().min(1),
+  changeJin: z.coerce.number().finite(),
+  reason: z.string().trim().min(1),
   storeId: z.string().min(1),
 });
 
@@ -29,6 +32,23 @@ function serializeDish(dish: Dish) {
   };
 }
 
+function inventoryValidationMessage(
+  error: z.ZodError<z.infer<typeof inventorySchema>>,
+) {
+  const fields = error.flatten().fieldErrors;
+  if (fields.changeJin?.length) {
+    return "请输入有效的库存调整斤数";
+  }
+  if (fields.reason?.length) {
+    return "请输入库存调整原因";
+  }
+  if (fields.storeId?.length) {
+    return "库存调整参数不完整";
+  }
+
+  return "库存调整参数不完整";
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ dishId: string }> },
@@ -40,7 +60,15 @@ export async function POST(
 
   const parsed = inventorySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return fail("INVALID_PARAMS", "库存调整参数不完整");
+    return fail("INVALID_PARAMS", inventoryValidationMessage(parsed.error));
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "dishes.write",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const accessFailure = await getStoreAccessFailure(

@@ -1,12 +1,23 @@
-import { Text, View } from "@tarojs/components";
+import { Image, Text, View } from "@tarojs/components";
 import Taro from "@tarojs/taro";
 import { useEffect, useState } from "react";
 
+import loginVegetablesImage from "../../assets/login-vegetables.jpg";
+import {
+  buildPackagePrepayUrl,
+  buildPackagesUrl,
+  getCurrentPackageItem,
+  getPackageHeroView,
+  getPackagePurchaseAction,
+  getPackagePurchaseToast,
+} from "../../lib/packages";
+import { MiniCustomTop } from "../../components/mini-custom-top";
+import { ACTIVE_STORE_CODE_KEY, getActiveStoreCode } from "../../lib/stores";
 import "./index.scss";
 
 const API_BASE_URL =
-  process.env.TARO_APP_API_BASE_URL || "http://127.0.0.1:3000";
-const STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
+  process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
+const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 
 type ApiResponse<T> = {
   data?: T;
@@ -18,7 +29,6 @@ type ApiResponse<T> = {
 };
 
 type PackageItem = {
-  expiresAt: string;
   frozenReason: string | null;
   id: string;
   nameSnapshot: string;
@@ -38,25 +48,10 @@ type PackagesData = {
       id: string;
       name: string;
       totalTimes: number;
-      validDays: number;
       weightLimitJin: number;
     }>;
   };
 };
-
-const STATUS_LABELS: Record<string, string> = {
-  ACTIVE: "可预订",
-  EXPIRED: "已过期",
-  FROZEN: "已冻结",
-  USED_UP: "已用完",
-};
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-    date.getDate(),
-  ).padStart(2, "0")}`;
-}
 
 export default function PackagesPage() {
   const [data, setData] = useState<PackagesData | null>(null);
@@ -74,11 +69,18 @@ export default function PackagesPage() {
         Taro.navigateTo({ url: "/pages/login/index" });
         return;
       }
+      const storeCode = getActiveStoreCode(
+        Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+        DEFAULT_STORE_CODE,
+      );
 
       const response = await Taro.request<ApiResponse<PackagesData>>({
         header: { authorization: `Bearer ${token}` },
         method: "GET",
-        url: `${API_BASE_URL}/api/v1/packages?storeCode=${STORE_CODE}`,
+        url: buildPackagesUrl({
+          apiBaseUrl: API_BASE_URL,
+          storeCode,
+        }),
       });
       const payload = response.data;
 
@@ -106,6 +108,17 @@ export default function PackagesPage() {
     void loadPackages();
   }, []);
 
+  const currentPackage = getCurrentPackageItem(data?.items ?? []);
+  const hero = getPackageHeroView(currentPackage);
+  const purchaseTemplate = data?.purchaseReserve.templates[0] ?? null;
+  const purchaseAction = getPackagePurchaseAction({
+    enabled: data?.purchaseReserve.enabled ?? false,
+    purchaseStatus: data?.purchaseReserve.status ?? "PAYMENT_NOT_ENABLED",
+    templateId: purchaseTemplate?.id,
+  });
+  const purchaseLoading =
+    !!purchaseTemplate && purchasingTemplateId === purchaseTemplate.id;
+
   async function reservePurchase(templateId: string) {
     if (purchasingTemplateId) {
       return;
@@ -120,6 +133,10 @@ export default function PackagesPage() {
     setPurchasingTemplateId(templateId);
 
     try {
+      const storeCode = getActiveStoreCode(
+        Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+        DEFAULT_STORE_CODE,
+      );
       const purchaseResponse = await Taro.request<
         ApiResponse<{
           purchaseOrder: {
@@ -129,7 +146,7 @@ export default function PackagesPage() {
         }>
       >({
         data: {
-          storeCode: STORE_CODE,
+          storeCode,
           templateId,
         },
         header: { authorization: `Bearer ${token}` },
@@ -152,7 +169,11 @@ export default function PackagesPage() {
       >({
         header: { authorization: `Bearer ${token}` },
         method: "POST",
-        url: `${API_BASE_URL}/api/v1/package-purchases/${purchaseOrder.id}/wechat-prepay?storeCode=${STORE_CODE}`,
+        url: buildPackagePrepayUrl({
+          apiBaseUrl: API_BASE_URL,
+          purchaseOrderId: purchaseOrder.id,
+          storeCode,
+        }),
       });
       const prepayPayload = prepayResponse.data;
 
@@ -162,10 +183,7 @@ export default function PackagesPage() {
 
       Taro.showToast({
         icon: "none",
-        title:
-          prepayPayload.data?.prepay.status === "PAYMENT_NOT_ENABLED"
-            ? "微信支付暂未开放"
-            : "购买入口已预留",
+        title: getPackagePurchaseToast(prepayPayload.data?.prepay.status),
       });
     } catch (error) {
       Taro.showToast({
@@ -179,73 +197,120 @@ export default function PackagesPage() {
 
   return (
     <View className="packages">
-      <View className="header">
-        <View className="header__title">套餐</View>
-        <View className="header__meta">查看权益、剩余次数和购买预留</View>
-      </View>
+      <MiniCustomTop
+        back
+        className="packages__custom-top"
+        onBack={() => Taro.navigateBack()}
+        title="套餐"
+      />
 
       {loading && !data ? <View className="empty">正在加载套餐...</View> : null}
 
-      {data?.items.map((item) => (
-        <View className="package-card" key={item.id}>
-          <View className="package-card__top">
-            <View>
-              <View className="package-card__name">{item.nameSnapshot}</View>
-              <View className="package-card__meta">
-                {formatDate(item.expiresAt)} 到期
+      {!loading || data ? (
+        <>
+          <View className="hero-card">
+            <View className="hero-card__brand">Hentor Fresh</View>
+            <View className="hero-card__title">{hero.title}</View>
+            <View className="hero-card__subtitle">{hero.subtitle}</View>
+            <View className="hero-card__status-row">
+              <Text className="hero-card__status">{hero.statusLabel}</Text>
+              <Text className="hero-card__status-meta">{hero.statusMeta}</Text>
+            </View>
+            <Image
+              className="hero-card__photo"
+              mode="aspectFill"
+              src={loginVegetablesImage}
+            />
+          </View>
+
+          <View className="section-title">套餐权益</View>
+          <View className="benefit-grid">
+            <View className="benefit-card">
+              <View className="benefit-card__dot" />
+              <View>
+                <View className="benefit-card__title">
+                  {hero.weightBenefitLabel}
+                </View>
+                <View className="benefit-card__meta">
+                  {hero.weightBenefitMeta}
+                </View>
               </View>
             </View>
-            <Text className="package-card__status">
-              {STATUS_LABELS[item.status] ?? item.status}
-            </Text>
+            <View className="benefit-card">
+              <View className="benefit-card__dot" />
+              <View>
+                <View className="benefit-card__title">
+                  {hero.remainingTimesLabel}
+                </View>
+                <View className="benefit-card__meta">本周还可下单</View>
+              </View>
+            </View>
+            <View className="benefit-card">
+              <View className="benefit-card__dot benefit-card__dot--orange" />
+              <View>
+                <View className="benefit-card__title">可修改</View>
+                <View className="benefit-card__meta">截单前随时调整</View>
+              </View>
+            </View>
+            <View className="benefit-card">
+              <View className="benefit-card__dot" />
+              <View>
+                <View className="benefit-card__title">默认地址</View>
+                <View className="benefit-card__meta">下单自动带入</View>
+              </View>
+            </View>
           </View>
-          <View className="package-card__numbers">
-            <View>
-              <View className="number">{item.remainingTimes}</View>
-              <View className="number__label">剩余次数</View>
+
+          <View className="cycle-card">
+            <View className="cycle-card__title">本周期用量</View>
+            <View className="cycle-card__meta">{hero.cycleMeta}</View>
+            <View className="cycle-card__track">
+              <View
+                className="cycle-card__fill"
+                style={{ width: `${hero.cycleProgressPercent}%` }}
+              />
             </View>
-            <View>
-              <View className="number">{item.weightLimitJin}斤</View>
-              <View className="number__label">单次额度</View>
-            </View>
-            <View>
-              <View className="number">{item.usedTimes}/{item.totalTimes}</View>
-              <View className="number__label">已用/总数</View>
-            </View>
+            <View className="cycle-card__next">{hero.nextOrderLabel}</View>
+            {currentPackage?.frozenReason ? (
+              <View className="cycle-card__warn">{currentPackage.frozenReason}</View>
+            ) : null}
           </View>
-          {item.frozenReason ? (
-            <View className="package-card__warn">{item.frozenReason}</View>
-          ) : null}
-        </View>
-      ))}
 
-      {!loading && data?.items.length === 0 ? (
-        <View className="empty">暂无套餐，购买套餐入口已预留。</View>
-      ) : null}
+          <Text
+            className="primary-button"
+            onClick={() => Taro.switchTab({ url: "/pages/home/index" })}
+          >
+            去首页预订
+          </Text>
 
-      <View className="reserve">
-        <View className="reserve__title">购买套餐</View>
-        <View className="reserve__meta">微信支付暂未开放，当前仅展示可购买套餐。</View>
-        {data?.purchaseReserve.templates.map((template) => (
-          <View className="reserve__item" key={template.id}>
-            <View>
-              <View className="reserve__name">{template.name}</View>
-              <View className="reserve__desc">
-                {template.totalTimes} 次 · 每次 {template.weightLimitJin}斤 ·{" "}
-                {template.validDays} 天有效
+          <View className="payment-reserve">
+            <View className="payment-reserve__icon">¥</View>
+            <View className="payment-reserve__body">
+              <View className="payment-reserve__title">购买/续费套餐</View>
+              <View className="payment-reserve__meta">
+                {purchaseTemplate
+                  ? purchaseAction.meta
+                  : "暂无可购买套餐，请联系客服"}
               </View>
             </View>
             <Text
-              className={`reserve__button ${
-                purchasingTemplateId === template.id ? "reserve__button--loading" : ""
+              className={`payment-reserve__button ${
+                purchaseLoading || purchaseAction.disabled
+                  ? "payment-reserve__button--disabled"
+                  : ""
               }`}
-              onClick={() => void reservePurchase(template.id)}
+              onClick={() =>
+                !purchaseTemplate || purchaseAction.disabled || purchaseLoading
+                  ? null
+                  : void reservePurchase(purchaseTemplate.id)
+              }
             >
-              {purchasingTemplateId === template.id ? "处理中" : "预留"}
+              {purchaseLoading ? "处理中" : purchaseAction.label}
             </Text>
           </View>
-        ))}
-      </View>
+        </>
+      ) : null}
+
     </View>
   );
 }

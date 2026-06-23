@@ -1,0 +1,90 @@
+server:
+  port: ${SPRING_API_PORT:8080}
+
+spring:
+  application:
+    name: hentor-vegetables-spring-api
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/hentor_vegetables?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:root}
+    driver-class-name: ${SPRING_DATASOURCE_DRIVER:com.mysql.cj.jdbc.Driver}
+    hikari:
+      connection-init-sql: ${SPRING_DATASOURCE_INIT_SQL:SET SESSION sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES')}
+  sql:
+    init:
+      mode: ${SPRING_SQL_INIT_MODE:always}
+      schema-locations: ${SPRING_SQL_SCHEMA_LOCATIONS:classpath:schema-mysql.sql}
+      data-locations: ${SPRING_SQL_DATA_LOCATIONS:classpath:data-mysql.sql}
+      continue-on-error: ${SPRING_SQL_INIT_CONTINUE_ON_ERROR:false}
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: false
+  global-config:
+    banner: false
+    db-config:
+      id-type: input
+
+minio:
+  endpoint: ${SPRING_MINIO_ENDPOINT:http://localhost:9000}
+  public-url: ${SPRING_MINIO_PUBLIC_URL:${SPRING_MINIO_ENDPOINT:http://localhost:9000}}
+  access-key: ${SPRING_MINIO_ACCESS_KEY:hentor_minio}
+  secret-key: ${SPRING_MINIO_SECRET_KEY:hentor_minio_password}
+  bucket: ${SPRING_MINIO_BUCKET:hentor-assets}
+
+storage:
+  mode: ${SPRING_STORAGE_MODE:local}
+  local-root: ${SPRING_STORAGE_LOCAL_ROOT:./runtime/uploads}
+  public-base-url: ${SPRING_STORAGE_PUBLIC_BASE_URL:/uploads}
+
+wechat:
+  miniapp:
+    api-base-url: ${WECHAT_API_BASE_URL:https://api.weixin.qq.com}
+    app-id: ${WECHAT_APP_ID:}
+    app-secret: ${WECHAT_APP_SECRET:}
+
+kuaidi100:
+  key: ${KUAIDI100_KEY:}
+  secret: ${KUAIDI100_SECRET:}
+  partner-id: ${KUAIDI100_PARTNER_ID:}
+  partner-key: ${KUAIDI100_PARTNER_KEY:}
+  code: ${KUAIDI100_CODE:}
+  partner-secret: ${KUAIDI100_PARTNER_SECRET:}
+  partner-name: ${KUAIDI100_PARTNER_NAME:}
+  kuaidicom: ${KUAIDI100_KUAIDICOM:shunfeng}
+  net: ${KUAIDI100_NET:}
+  pay-type: ${KUAIDI100_PAY_TYPE:SHIPPER}
+  exp-type: ${KUAIDI100_EXP_TYPE:标准快递}
+  type: ${KUAIDI100_TYPE:10}
+  siid: ${KUAIDI100_SIID:}
+  temp-id: ${KUAIDI100_TEMP_ID:}
+  child-temp-id: ${KUAIDI100_CHILD_TEMP_ID:}
+  back-temp-id: ${KUAIDI100_BACK_TEMP_ID:}
+  width: ${KUAIDI100_WIDTH:75}
+  height: ${KUAIDI100_HEIGHT:100}
+  need-child: ${KUAIDI100_NEED_CHILD:0}
+  need-back: ${KUAIDI100_NEED_BACK:0}
+  need-logo: ${KUAIDI100_NEED_LOGO:true}
+  need-ocr: ${KUAIDI100_NEED_OCR:false}
+  need-desensitization: ${KUAIDI100_NEED_DESENSITIZATION:false}
+  callback-url: ${KUAIDI100_CALLBACK_URL:}
+  poll-callback-url: ${KUAIDI100_POLL_CALLBACK_URL:}
+  callback-salt: ${KUAIDI100_CALLBACK_SALT:}
+  sender-company: ${KUAIDI100_SENDER_COMPANY:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

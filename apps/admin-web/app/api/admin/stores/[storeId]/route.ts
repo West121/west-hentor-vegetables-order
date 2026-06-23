@@ -1,11 +1,16 @@
 import { z } from "zod";
 
 import {
+  CUTOFF_TIME_PATTERN,
+  getStore,
   StoreManagementServiceError,
   updateStore,
 } from "@hentor/db";
 
-import { getAllStoresAccessFailure } from "@/app/lib/admin-access";
+import {
+  getAllStoresAccessFailure,
+  getPermissionFailure,
+} from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -16,7 +21,7 @@ const storeSchema = z.object({
   contactName: z.string().min(1),
   contactPhone: z.string().min(1),
   customerServiceTel: z.string().nullable().optional(),
-  cutoffTime: z.string().min(1),
+  cutoffTime: z.string().regex(CUTOFF_TIME_PATTERN),
   district: z.string().nullable().optional(),
   franchiseEndsAt: z.coerce.date().nullable().optional(),
   franchiseeId: z.string().nullable().optional(),
@@ -38,6 +43,42 @@ function statusForStoreError(code: string) {
   return 400;
 }
 
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ storeId: string }> },
+) {
+  const session = await getAdminSession();
+  if (!session) {
+    return fail("UNAUTHORIZED", "请先登录", 401);
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "stores.manage",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
+  }
+
+  const accessFailure = await getAllStoresAccessFailure(session.adminUserId);
+  if (accessFailure) {
+    return accessFailure;
+  }
+
+  const { storeId } = await context.params;
+
+  try {
+    const store = await getStore({ storeId });
+    return ok({ store });
+  } catch (error) {
+    if (error instanceof StoreManagementServiceError) {
+      return fail(error.code, error.message, statusForStoreError(error.code));
+    }
+
+    throw error;
+  }
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ storeId: string }> },
@@ -45,6 +86,14 @@ export async function PATCH(
   const session = await getAdminSession();
   if (!session) {
     return fail("UNAUTHORIZED", "请先登录", 401);
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "stores.manage",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const accessFailure = await getAllStoresAccessFailure(session.adminUserId);
@@ -81,4 +130,11 @@ export async function PATCH(
 
     throw error;
   }
+}
+
+export async function PUT(
+  request: Request,
+  context: { params: Promise<{ storeId: string }> },
+) {
+  return PATCH(request, context);
 }

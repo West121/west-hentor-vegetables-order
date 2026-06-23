@@ -13,6 +13,6 @@ describe("store management modal affordances", () => {
     expect(source).toContain("cursor-move");
     expect(source).toContain("setFullscreen");
     expect(source).toContain("resize");
-    expect(source).toContain("右下角可伸缩");
+    expect(source).not.toContain(["右下角", "可伸缩"].join(""));
   });
 });

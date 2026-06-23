@@ -1,13 +1,18 @@
 import { z } from "zod";
 
 import {
+  CUTOFF_TIME_PATTERN,
   createStore,
   listAccessibleStores,
   listStores,
   StoreManagementServiceError,
 } from "@hentor/db";
 
-import { getAllStoresAccessFailure } from "@/app/lib/admin-access";
+import {
+  getAllStoresAccessFailure,
+  getPermissionFailure,
+} from "@/app/lib/admin-access";
+import { getAdminPaginationParams } from "@/app/lib/admin-pagination";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -24,7 +29,7 @@ const storeSchema = z.object({
   contactName: z.string().min(1),
   contactPhone: z.string().min(1),
   customerServiceTel: z.string().nullable().optional(),
-  cutoffTime: z.string().min(1),
+  cutoffTime: z.string().regex(CUTOFF_TIME_PATTERN),
   district: z.string().nullable().optional(),
   franchiseEndsAt: z.coerce.date().nullable().optional(),
   franchiseeId: z.string().nullable().optional(),
@@ -52,6 +57,14 @@ export async function GET(request: Request) {
     return fail("UNAUTHORIZED", "请先登录", 401);
   }
 
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "stores.manage",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
+  }
+
   const access = await listAccessibleStores(session.adminUserId);
   const url = new URL(request.url);
   const parsed = querySchema.safeParse({
@@ -66,6 +79,7 @@ export async function GET(request: Request) {
 
   const result = await listStores({
     ...parsed.data,
+    ...getAdminPaginationParams(url.searchParams),
     ...(access.scope === "ALL"
       ? {}
       : { storeIds: access.stores.map((store) => store.id) }),
@@ -97,6 +111,7 @@ export async function GET(request: Request) {
       type: store.type,
       updatedAt: store.updatedAt,
     })),
+    pagination: result.pagination,
     summary: result.summary,
   });
 }
@@ -105,6 +120,14 @@ export async function POST(request: Request) {
   const session = await getAdminSession();
   if (!session) {
     return fail("UNAUTHORIZED", "请先登录", 401);
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "stores.manage",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const accessFailure = await getAllStoresAccessFailure(session.adminUserId);

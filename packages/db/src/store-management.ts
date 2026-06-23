@@ -1,10 +1,20 @@
 import { prisma } from "./client";
+import { normalizeCutoffTimeValue } from "./cutoff-time";
 import {
   Prisma,
   type FranchiseeStatus,
   type StoreStatus,
   type StoreType,
 } from "./generated/prisma/client";
+import {
+  normalizeDeliveryRangeValues,
+  readDeliveryRangeValues,
+} from "./delivery-range";
+import {
+  buildPaginationMeta,
+  normalizePagination,
+  type ListPaginationInput,
+} from "./pagination";
 
 export class StoreManagementServiceError extends Error {
   constructor(
@@ -16,16 +26,24 @@ export class StoreManagementServiceError extends Error {
   }
 }
 
-export type ListStoresInput = {
+export type ListStoresInput = ListPaginationInput & {
   query?: string;
   status?: StoreStatus;
   storeIds?: string[];
   type?: StoreType;
 };
 
-export type ListFranchiseesInput = {
+export type GetStoreInput = {
+  storeId: string;
+};
+
+export type ListFranchiseesInput = ListPaginationInput & {
   query?: string;
   status?: FranchiseeStatus;
+};
+
+export type GetFranchiseeInput = {
+  franchiseeId: string;
 };
 
 export type CreateFranchiseeInput = {
@@ -50,6 +68,8 @@ export type CreateStoreInput = {
   contactPhone: string;
   customerServiceTel?: string | null;
   cutoffTime: string;
+  deliveryCities?: string[] | null;
+  deliveryProvinces?: string[] | null;
   district?: string | null;
   franchiseEndsAt?: Date | null;
   franchiseeId?: string | null;
@@ -93,6 +113,17 @@ function normalizeRequiredText(value: string, code: string, message: string) {
 function normalizeNullableText(value?: string | null) {
   const normalized = value?.trim();
   return normalized || null;
+}
+
+function normalizeCutoffTime(value: string) {
+  const normalized = normalizeCutoffTimeValue(value);
+  if (!normalized) {
+    throw new StoreManagementServiceError(
+      "CUTOFF_TIME_INVALID",
+      "截单时间不正确",
+    );
+  }
+  return normalized;
 }
 
 function normalizeFranchiseeInput(input: CreateFranchiseeInput) {
@@ -141,11 +172,9 @@ function normalizeStoreInput(input: CreateStoreInput) {
       "请输入门店电话",
     ),
     customerServiceTel: normalizeNullableText(input.customerServiceTel),
-    cutoffTime: normalizeRequiredText(
-      input.cutoffTime,
-      "CUTOFF_TIME_REQUIRED",
-      "请输入截单时间",
-    ),
+    cutoffTime: normalizeCutoffTime(input.cutoffTime),
+    deliveryCities: normalizeDeliveryRangeValues(input.deliveryCities),
+    deliveryProvinces: normalizeDeliveryRangeValues(input.deliveryProvinces),
     district: normalizeNullableText(input.district),
     franchiseEndsAt: input.franchiseEndsAt ?? null,
     franchiseeId,
@@ -176,6 +205,8 @@ function storeLogValue(input: ReturnType<typeof normalizeStoreInput>) {
     contactPhone: input.contactPhone,
     customerServiceTel: input.customerServiceTel,
     cutoffTime: input.cutoffTime,
+    deliveryCities: input.deliveryCities,
+    deliveryProvinces: input.deliveryProvinces,
     district: input.district,
     franchiseEndsAt: input.franchiseEndsAt?.toISOString() ?? null,
     franchiseeId: input.franchiseeId,
@@ -194,6 +225,8 @@ function storeSnapshot(store: {
   contactPhone: string;
   customerServiceTel: string | null;
   cutoffTime: string;
+  deliveryCities: unknown;
+  deliveryProvinces: unknown;
   district: string | null;
   franchiseEndsAt: Date | null;
   franchiseeId: string | null;
@@ -210,6 +243,8 @@ function storeSnapshot(store: {
     contactPhone: store.contactPhone,
     customerServiceTel: store.customerServiceTel,
     cutoffTime: store.cutoffTime,
+    deliveryCities: readDeliveryRangeValues(store.deliveryCities),
+    deliveryProvinces: readDeliveryRangeValues(store.deliveryProvinces),
     district: store.district,
     franchiseEndsAt: store.franchiseEndsAt,
     franchiseeId: store.franchiseeId,
@@ -265,13 +300,13 @@ function buildStoreWhere(input: ListStoresInput) {
     ...(query
       ? {
           OR: [
-            { code: { contains: query, mode: "insensitive" } },
-            { name: { contains: query, mode: "insensitive" } },
-            { contactName: { contains: query, mode: "insensitive" } },
-            { contactPhone: { contains: query, mode: "insensitive" } },
+            { code: { contains: query } },
+            { name: { contains: query } },
+            { contactName: { contains: query } },
+            { contactPhone: { contains: query } },
             {
               franchisee: {
-                name: { contains: query, mode: "insensitive" },
+                name: { contains: query },
               },
             },
           ],
@@ -284,9 +319,12 @@ function buildStoreWhere(input: ListStoresInput) {
 
 export async function listStores(input: ListStoresInput = {}) {
   const where = buildStoreWhere(input);
-  const [items, statusRows, typeRows] = await Promise.all([
+  const paginationInput = normalizePagination(input);
+  const [items, total, statusRows, typeRows] = await Promise.all([
     prisma.store.findMany({
       where,
+      skip: paginationInput.skip,
+      take: paginationInput.take,
       orderBy: [{ status: "asc" }, { type: "asc" }, { createdAt: "desc" }],
       include: {
         franchisee: true,
@@ -300,6 +338,7 @@ export async function listStores(input: ListStoresInput = {}) {
         },
       },
     }),
+    prisma.store.count({ where }),
     prisma.store.groupBy({
       by: ["status"],
       where,
@@ -353,6 +392,8 @@ export async function listStores(input: ListStoresInput = {}) {
       createdAt: item.createdAt,
       customerServiceTel: item.customerServiceTel,
       cutoffTime: item.cutoffTime,
+      deliveryCities: readDeliveryRangeValues(item.deliveryCities),
+      deliveryProvinces: readDeliveryRangeValues(item.deliveryProvinces),
       district: item.district,
       franchiseEndsAt: item.franchiseEndsAt,
       franchisee: item.franchisee,
@@ -369,7 +410,61 @@ export async function listStores(input: ListStoresInput = {}) {
       type: item.type,
       updatedAt: item.updatedAt,
     })),
+    pagination: buildPaginationMeta(paginationInput, total),
     summary,
+  };
+}
+
+export async function getStore(input: GetStoreInput) {
+  const store = await prisma.store.findUnique({
+    where: { id: input.storeId },
+    include: {
+      franchisee: true,
+      _count: {
+        select: {
+          adminUserStores: true,
+          memberBindings: true,
+          orders: true,
+          packageTemplates: true,
+        },
+      },
+    },
+  });
+
+  if (!store) {
+    throw new StoreManagementServiceError("STORE_NOT_FOUND", "门店不存在");
+  }
+
+  return {
+    address: [store.province, store.city, store.district, store.address]
+      .filter(Boolean)
+      .join(" "),
+    addressDetail: store.address,
+    adminUserCount: store._count.adminUserStores,
+    city: store.city,
+    code: store.code,
+    contactName: store.contactName,
+    contactPhone: store.contactPhone,
+    createdAt: store.createdAt,
+    customerServiceTel: store.customerServiceTel,
+    cutoffTime: store.cutoffTime,
+    deliveryCities: readDeliveryRangeValues(store.deliveryCities),
+    deliveryProvinces: readDeliveryRangeValues(store.deliveryProvinces),
+    district: store.district,
+    franchiseEndsAt: store.franchiseEndsAt,
+    franchisee: store.franchisee,
+    franchiseeId: store.franchiseeId,
+    franchiseeName: store.franchisee?.name ?? "总部直营",
+    id: store.id,
+    memberCount: store._count.memberBindings,
+    name: store.name,
+    operatorVisible: true,
+    orderCount: store._count.orders,
+    packageTemplateCount: store._count.packageTemplates,
+    province: store.province,
+    status: store.status,
+    type: store.type,
+    updatedAt: store.updatedAt,
   };
 }
 
@@ -380,17 +475,21 @@ export async function listFranchisees(input: ListFranchiseesInput = {}) {
     ...(query
       ? {
           OR: [
-            { name: { contains: query, mode: "insensitive" } },
-            { contactName: { contains: query, mode: "insensitive" } },
-            { contactPhone: { contains: query, mode: "insensitive" } },
+            { name: { contains: query } },
+            { contactName: { contains: query } },
+            { contactPhone: { contains: query } },
           ],
         }
       : {}),
   };
 
-  const [items, summaryRows] = await Promise.all([
+  const paginationInput = normalizePagination(input);
+
+  const [items, total, summaryRows] = await Promise.all([
     prisma.franchisee.findMany({
       where,
+      skip: paginationInput.skip,
+      take: paginationInput.take,
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
       include: {
         _count: {
@@ -398,6 +497,7 @@ export async function listFranchisees(input: ListFranchiseesInput = {}) {
         },
       },
     }),
+    prisma.franchisee.count({ where }),
     prisma.franchisee.groupBy({
       by: ["status"],
       where,
@@ -438,7 +538,46 @@ export async function listFranchisees(input: ListFranchiseesInput = {}) {
       storeCount: item._count.stores,
       updatedAt: item.updatedAt,
     })),
+    pagination: buildPaginationMeta(paginationInput, total),
     summary,
+  };
+}
+
+export async function getFranchisee(input: GetFranchiseeInput) {
+  const franchisee = await prisma.franchisee.findUnique({
+    where: { id: input.franchiseeId },
+    include: {
+      stores: {
+        orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+        select: {
+          code: true,
+          contactName: true,
+          contactPhone: true,
+          id: true,
+          name: true,
+          status: true,
+          type: true,
+        },
+      },
+    },
+  });
+
+  if (!franchisee) {
+    throw new StoreManagementServiceError("FRANCHISEE_NOT_FOUND", "加盟商不存在");
+  }
+
+  return {
+    contactName: franchisee.contactName,
+    contactPhone: franchisee.contactPhone,
+    contractEndsAt: franchisee.contractEndsAt,
+    createdAt: franchisee.createdAt,
+    id: franchisee.id,
+    name: franchisee.name,
+    remark: franchisee.remark,
+    status: franchisee.status,
+    storeCount: franchisee.stores.length,
+    stores: franchisee.stores,
+    updatedAt: franchisee.updatedAt,
   };
 }
 

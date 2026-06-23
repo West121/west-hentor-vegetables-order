@@ -19,6 +19,47 @@ function toNumber(value: Prisma.Decimal | number | null | undefined) {
   return Number(value);
 }
 
+function formatFullAddress(address: {
+  city?: string | null;
+  detail?: string | null;
+  district?: string | null;
+  fullAddress?: string | null;
+  province?: string | null;
+}) {
+  const explicit = address.fullAddress?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  return [address.province, address.city, address.district, address.detail]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function addressView(address: {
+  city: string | null;
+  detail: string;
+  district: string | null;
+  id: string;
+  isDefault?: boolean;
+  province: string | null;
+  receiverName: string;
+  receiverPhone: string;
+}) {
+  return {
+    city: address.city,
+    detail: address.detail,
+    district: address.district,
+    fullAddress: formatFullAddress(address),
+    id: address.id,
+    isDefault: address.isDefault,
+    province: address.province,
+    receiverName: address.receiverName,
+    receiverPhone: address.receiverPhone,
+  };
+}
+
 export async function GET(request: Request) {
   const auth = requireMiniSession(request);
   if (!auth.session) {
@@ -43,7 +84,7 @@ export async function GET(request: Request) {
     return fail("STORE_NOT_FOUND", "门店不存在或已停用", 404);
   }
 
-  const [userPackage, activeTask, fallbackDishes, order, member, defaultAddress] =
+  const [userPackage, activeTask, fallbackDishes, order, memberBinding, defaultAddress] =
     await Promise.all([
       getMiniappCurrentPackage({
         storeId: store.id,
@@ -63,12 +104,21 @@ export async function GET(request: Request) {
         storeId: store.id,
         userId: auth.session.userId,
       }),
-      prisma.user.findUnique({
-        where: { id: auth.session.userId },
-        select: {
-          id: true,
-          nickname: true,
-          phone: true,
+      prisma.memberStoreBinding.findFirst({
+        where: {
+          storeId: store.id,
+          userId: auth.session.userId,
+        },
+        include: {
+          user: {
+            select: {
+              disabledReason: true,
+              id: true,
+              nickname: true,
+              phone: true,
+              status: true,
+            },
+          },
         },
       }),
       prisma.address.findFirst({
@@ -119,25 +169,23 @@ export async function GET(request: Request) {
             0,
           ),
           status: userPackage.status,
-          frozenReason: userPackage.frozenReason,
-          weightLimitJin: toNumber(userPackage.weightLimitJin),
-          expiresAt: userPackage.expiresAt.toISOString(),
-        }
+	          frozenReason: userPackage.frozenReason,
+	          benefits: userPackage.benefits,
+	          weightLimitJin: toNumber(userPackage.weightLimitJin),
+	        }
       : null,
-    member: member
+    member: memberBinding
       ? {
-          id: member.id,
-          nickname: member.nickname,
-          phone: member.phone,
+          bindingStatus: memberBinding.status,
+          disabledReason: memberBinding.user.disabledReason,
+          id: memberBinding.user.id,
+          nickname: memberBinding.user.nickname,
+          phone: memberBinding.user.phone,
+          status: memberBinding.user.status,
         }
       : null,
     defaultAddress: defaultAddress
-      ? {
-          id: defaultAddress.id,
-          receiverName: defaultAddress.receiverName,
-          receiverPhone: defaultAddress.receiverPhone,
-          detail: defaultAddress.detail,
-        }
+      ? addressView(defaultAddress)
       : null,
     dishes: dishes.map((dish) => ({
       id: dish.id,
@@ -148,17 +196,18 @@ export async function GET(request: Request) {
       imageUrl: dish.imageUrl,
       description: dish.description,
     })),
-    currentOrder: order
-      ? {
-          id: order.id,
-          orderNo: order.orderNo,
-          addressId: order.addressId,
-          status: order.status,
-          totalWeightJin: order.totalWeightJin,
-          address: order.address,
-          items: selectedItems,
-          summary,
-        }
+	    currentOrder: order
+	      ? {
+	          id: order.id,
+	          orderNo: order.orderNo,
+	          addressId: order.addressId,
+	          status: order.status,
+	          totalWeightJin: order.totalWeightJin,
+	          address: order.address,
+	          benefits: order.benefits,
+	          items: selectedItems,
+	          summary,
+	        }
       : null,
   });
 }

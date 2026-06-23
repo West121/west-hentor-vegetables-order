@@ -1,12 +1,23 @@
 import { Text, View } from "@tarojs/components";
 import Taro from "@tarojs/taro";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import {
+  buildCancelOrderUrl,
+  buildHideOrderUrl,
+  buildOrdersListUrl,
+  CANCEL_REASONS,
+  filterOrdersByStatus,
+  ORDER_STATUS_TABS,
+  type OrderStatusFilter,
+} from "../../lib/orders";
+import { MiniCustomTop } from "../../components/mini-custom-top";
+import { ACTIVE_STORE_CODE_KEY, getActiveStoreCode } from "../../lib/stores";
 import "./index.scss";
 
 const API_BASE_URL =
-  process.env.TARO_APP_API_BASE_URL || "http://127.0.0.1:3000";
-const STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
+  process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
+const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 
 type ApiResponse<T> = {
   data?: T;
@@ -52,6 +63,14 @@ const STATUS_LABELS: Record<string, string> = {
   VOIDED: "已作废",
 };
 
+const STATUS_TONE_CLASSES: Record<string, string> = {
+  CANCELED: "order__status order__status--canceled",
+  PENDING_SHIPMENT: "order__status order__status--pending",
+  SHIPPED: "order__status order__status--shipped",
+  SIGNED: "order__status order__status--signed",
+  VOIDED: "order__status order__status--canceled",
+};
+
 function formatDate(value: string) {
   const date = new Date(value);
   return `${String(date.getMonth() + 1).padStart(2, "0")}-${String(
@@ -64,6 +83,8 @@ function formatDate(value: string) {
 export default function OrdersPage() {
   const [data, setData] = useState<OrdersData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeStatus, setActiveStatus] =
+    useState<OrderStatusFilter>("PENDING_SHIPMENT");
 
   async function loadOrders() {
     setLoading(true);
@@ -74,11 +95,18 @@ export default function OrdersPage() {
         Taro.navigateTo({ url: "/pages/login/index" });
         return;
       }
+      const storeCode = getActiveStoreCode(
+        Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+        DEFAULT_STORE_CODE,
+      );
 
       const response = await Taro.request<ApiResponse<OrdersData>>({
         header: { authorization: `Bearer ${token}` },
         method: "GET",
-        url: `${API_BASE_URL}/api/v1/orders?storeCode=${STORE_CODE}`,
+        url: buildOrdersListUrl({
+          apiBaseUrl: API_BASE_URL,
+          storeCode,
+        }),
       });
       const payload = response.data;
 
@@ -111,11 +139,48 @@ export default function OrdersPage() {
     Taro.switchTab({ url: "/pages/home/index" });
   }
 
+  function goBack() {
+    Taro.navigateBack({ delta: 1 });
+  }
+
+  async function openPendingActions(orderId: string) {
+    try {
+      const action = await Taro.showActionSheet({
+        itemList: ["取消预订", "修改预订"],
+      });
+      if (action.tapIndex === 0) {
+        await cancelOrder(orderId);
+        return;
+      }
+      if (action.tapIndex === 1) {
+        editOrder(orderId);
+      }
+    } catch {
+      // 用户关闭操作面板，无需反馈。
+    }
+  }
+
+  async function chooseCancelReason() {
+    try {
+      const action = await Taro.showActionSheet({
+        itemList: CANCEL_REASONS,
+      });
+      return CANCEL_REASONS[action.tapIndex] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async function cancelOrder(orderId: string) {
+    const reason = await chooseCancelReason();
+    if (!reason) {
+      return;
+    }
+
     const modal = await Taro.showModal({
       cancelText: "再想想",
       confirmText: "确认取消",
-      content: "取消后会返还本次套餐次数。",
+      content: `取消原因：${reason}\n取消后会返还本次套餐次数。`,
       title: "取消预订",
     });
 
@@ -125,14 +190,21 @@ export default function OrdersPage() {
 
     try {
       const token = Taro.getStorageSync("mini_session_token");
+      const storeCode = getActiveStoreCode(
+        Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+        DEFAULT_STORE_CODE,
+      );
       const response = await Taro.request<ApiResponse<unknown>>({
         data: {
-          reason: "用户取消",
-          storeCode: STORE_CODE,
+          reason,
+          storeCode,
         },
         header: { authorization: `Bearer ${token}` },
         method: "POST",
-        url: `${API_BASE_URL}/api/v1/orders/${orderId}/cancel`,
+        url: buildCancelOrderUrl({
+          apiBaseUrl: API_BASE_URL,
+          orderId,
+        }),
       });
 
       if (!response.data.success) {
@@ -152,10 +224,18 @@ export default function OrdersPage() {
   async function hideOrder(orderId: string) {
     try {
       const token = Taro.getStorageSync("mini_session_token");
+      const storeCode = getActiveStoreCode(
+        Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+        DEFAULT_STORE_CODE,
+      );
       const response = await Taro.request<ApiResponse<unknown>>({
         header: { authorization: `Bearer ${token}` },
         method: "DELETE",
-        url: `${API_BASE_URL}/api/v1/orders/${orderId}/user-visible?storeCode=${STORE_CODE}`,
+        url: buildHideOrderUrl({
+          apiBaseUrl: API_BASE_URL,
+          orderId,
+          storeCode,
+        }),
       });
 
       if (!response.data.success) {
@@ -183,47 +263,71 @@ export default function OrdersPage() {
     });
   }
 
+  const visibleOrders = useMemo(
+    () => filterOrdersByStatus(data?.items ?? [], activeStatus),
+    [activeStatus, data?.items],
+  );
+
   return (
     <View className="orders">
-      <View className="header">
-        <View>
-          <View className="header__title">订单</View>
-          <View className="header__meta">
-            待发货 {data?.summary.pendingShipment ?? 0} 单 · 共{" "}
-            {data?.summary.total ?? 0} 单
-          </View>
-        </View>
-        <Text className="header__refresh" onClick={loadOrders}>
-          刷新
-        </Text>
+      <MiniCustomTop
+        back
+        className="orders__custom-top"
+        onBack={goBack}
+        title="订单"
+      />
+
+      <View className="order-tabs">
+        {ORDER_STATUS_TABS.map((tab) => (
+          <Text
+            className={
+              activeStatus === tab.key
+                ? "order-tabs__item order-tabs__item--active"
+                : "order-tabs__item"
+            }
+            key={tab.key}
+            onClick={() => setActiveStatus(tab.key)}
+          >
+            {tab.label}
+          </Text>
+        ))}
       </View>
 
       {loading && !data ? (
         <View className="empty">正在加载订单...</View>
       ) : null}
 
-      {data?.items.map((order) => (
+      {!loading && data && !visibleOrders.length ? (
+        <View className="empty">当前分类暂无订单</View>
+      ) : null}
+
+      {visibleOrders.map((order) => (
         <View className="order" key={order.id}>
           <View className="order__top">
-            <View>
-              <View className="order__no">{order.orderNo}</View>
-              <View className="order__time">{formatDate(order.createdAt)}</View>
-            </View>
-            <Text className="order__status">
+            <View className="order__no">{order.orderNo}</View>
+            <Text className={STATUS_TONE_CLASSES[order.status] ?? "order__status"}>
               {STATUS_LABELS[order.status] ?? order.status}
             </Text>
           </View>
           <View className="order__items">
             {order.items
               .map((item) => `${item.dishNameSnapshot} ${item.weightJin}斤`)
-              .join(" / ")}
+              .join("、")}
           </View>
           <View className="order__bottom">
-            <View className="order__weight">{order.totalWeightJin}斤</View>
+            <View className="order__time">{formatDate(order.createdAt)}</View>
             <View className="order__actions">
+              {order.canEdit ? (
+                <Text
+                  className="order__button order__button--primary"
+                  onClick={() => void openPendingActions(order.id)}
+                >
+                  可取消
+                </Text>
+              ) : null}
               {order.status === "SHIPPED" && order.logisticsNo ? (
                 <Text
-                  className="order__edit order__edit--ghost"
+                  className="order__button order__button--primary"
                   onClick={() => copyLogisticsNo(order.logisticsNo)}
                 >
                   复制运单
@@ -231,27 +335,11 @@ export default function OrdersPage() {
               ) : null}
               {order.status === "CANCELED" || order.status === "VOIDED" ? (
                 <Text
-                  className="order__edit order__edit--ghost"
+                  className="order__button order__button--danger"
                   onClick={() => void hideOrder(order.id)}
                 >
-                  删除记录
+                  删除
                 </Text>
-              ) : null}
-              {order.canEdit ? (
-                <>
-                  <Text
-                    className="order__edit order__edit--ghost"
-                    onClick={() => void cancelOrder(order.id)}
-                  >
-                    取消预订
-                  </Text>
-                  <Text
-                    className="order__edit"
-                    onClick={() => editOrder(order.id)}
-                  >
-                    修改预订
-                  </Text>
-                </>
               ) : null}
             </View>
           </View>

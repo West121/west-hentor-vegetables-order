@@ -2,7 +2,10 @@ import { z } from "zod";
 
 import { freezeUserPackage, PackageServiceError } from "@hentor/db";
 
-import { getStoreAccessFailure } from "@/app/lib/admin-access";
+import {
+  getPermissionFailure,
+  getStoreAccessFailure,
+} from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -27,6 +30,14 @@ export async function POST(
   const parsed = operationSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return fail("INVALID_PARAMS", "冻结参数不完整");
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "members.write",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const accessFailure = await getStoreAccessFailure(

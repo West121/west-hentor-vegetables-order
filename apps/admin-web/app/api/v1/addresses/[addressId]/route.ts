@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   AddressServiceError,
+  createMiniappOperationLog,
   deleteMiniappAddress,
   findAvailableMiniappStore,
   updateMiniappAddress,
@@ -9,7 +10,14 @@ import {
 import { storeCodeSchema } from "@hentor/shared";
 
 import { fail, ok } from "@/app/lib/api";
+import {
+  addressAuditRequestParams,
+  addressAuditResponseData,
+  formatAddressAuditSnapshot,
+  maskAddressPhone,
+} from "@/app/lib/address-audit";
 import { requireMiniSession } from "@/app/lib/mini-auth";
+import { getRequestAuditMeta } from "@/app/lib/request-audit";
 
 const addressSchema = z.object({
   city: z.string().nullable().optional(),
@@ -22,8 +30,22 @@ const addressSchema = z.object({
   storeCode: storeCodeSchema.optional(),
 });
 
+type AddressResponseInput = {
+  city: string | null;
+  detail: string;
+  district: string | null;
+  province: string | null;
+};
+
 function statusForAddressError(code: string) {
   return code.endsWith("_NOT_FOUND") ? 404 : 400;
+}
+
+function addressResponse<T extends AddressResponseInput>(address: T) {
+  return {
+    ...address,
+    fullAddress: formatAddressAuditSnapshot(address),
+  };
 }
 
 async function getSessionStore(request: Request, storeCode?: string) {
@@ -56,6 +78,7 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ addressId: string }> },
 ) {
+  const startedAt = Date.now();
   const parsed = addressSchema.safeParse(await request.json().catch(() => null));
 
   if (!parsed.success) {
@@ -83,7 +106,29 @@ export async function PATCH(
       userId: sessionStore.session!.userId,
     });
 
-    return ok({ address });
+    await createMiniappOperationLog({
+      action: "MINIAPP_ADDRESS_UPDATED",
+      afterValue: {
+        address: formatAddressAuditSnapshot(address),
+        isDefault: address.isDefault,
+        receiverName: address.receiverName,
+        receiverPhone: maskAddressPhone(address.receiverPhone),
+      },
+      durationMs: Date.now() - startedAt,
+      requestParams: addressAuditRequestParams({
+        ...parsed.data,
+        addressId,
+      }),
+      resource: "address",
+      resourceId: address.id,
+      responseData: addressAuditResponseData(address),
+      storeId: sessionStore.storeId!,
+      statusCode: 200,
+      userId: sessionStore.session!.userId,
+      ...getRequestAuditMeta(request),
+    });
+
+    return ok({ address: addressResponse(address) });
   } catch (error) {
     if (error instanceof AddressServiceError) {
       return fail(error.code, error.message, statusForAddressError(error.code));
@@ -93,10 +138,18 @@ export async function PATCH(
   }
 }
 
+export async function PUT(
+  request: Request,
+  context: { params: Promise<{ addressId: string }> },
+) {
+  return PATCH(request, context);
+}
+
 export async function DELETE(
   request: Request,
   context: { params: Promise<{ addressId: string }> },
 ) {
+  const startedAt = Date.now();
   const { searchParams } = new URL(request.url);
   const storeCode = searchParams.get("storeCode") ?? "lotus-garden";
   const parsedStoreCode = storeCodeSchema.safeParse(storeCode);
@@ -113,13 +166,34 @@ export async function DELETE(
   const { addressId } = await context.params;
 
   try {
-    return ok({
-      address: await deleteMiniappAddress({
-        addressId,
-        storeId: sessionStore.storeId!,
-        userId: sessionStore.session!.userId,
-      }),
+    const address = await deleteMiniappAddress({
+      addressId,
+      storeId: sessionStore.storeId!,
+      userId: sessionStore.session!.userId,
     });
+
+    await createMiniappOperationLog({
+      action: "MINIAPP_ADDRESS_DELETED",
+      durationMs: Date.now() - startedAt,
+      requestParams: {
+        addressId,
+        storeCode: parsedStoreCode.data,
+      },
+      resource: "address",
+      resourceId: address.id,
+      responseData: {
+        address: {
+          id: address.id,
+        },
+        success: true,
+      },
+      storeId: sessionStore.storeId!,
+      statusCode: 200,
+      userId: sessionStore.session!.userId,
+      ...getRequestAuditMeta(request),
+    });
+
+    return ok({ address });
   } catch (error) {
     if (error instanceof AddressServiceError) {
       return fail(error.code, error.message, statusForAddressError(error.code));

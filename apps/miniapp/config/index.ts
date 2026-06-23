@@ -5,6 +5,7 @@ const config: UserConfigExport = {
   date: "2026-06-17",
   designWidth: 375,
   deviceRatio: {
+    375: 2,
     640: 2.34 / 2,
     750: 1,
     828: 1.81 / 2,

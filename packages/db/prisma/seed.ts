@@ -81,12 +81,18 @@ async function main() {
   });
 
   const permissions = [
+    ["dishes.read", "查看菜品"],
+    ["dishes.write", "管理菜品"],
     ["orders.read", "查看订单"],
     ["orders.write", "处理订单"],
     ["members.read", "查看会员"],
     ["members.write", "管理会员"],
+    ["packages.read", "查看套餐"],
+    ["packages.write", "管理套餐"],
     ["stores.manage", "管理门店"],
     ["system.manage", "系统管理"],
+    ["tasks.read", "查看任务"],
+    ["tasks.write", "管理任务"],
   ] as const;
 
   for (const [code, name] of permissions) {
@@ -219,7 +225,7 @@ async function main() {
     },
   });
 
-  const packageTemplate = await prisma.packageTemplate.upsert({
+	  const packageTemplate = await prisma.packageTemplate.upsert({
     where: { id: "seed-package-8jin-weekly" },
     update: {
       name: "8斤周套餐",
@@ -235,7 +241,28 @@ async function main() {
       validDays: 90,
       sortOrder: 1,
     },
-  });
+	  });
+
+	  const eggTemplateBenefit = await prisma.packageTemplateBenefit.upsert({
+	    where: { id: "seed-package-8jin-weekly-egg" },
+	    update: {
+	      kind: "EGG",
+	      name: "鸡蛋",
+	      sortOrder: 1,
+	      totalQuantity: new Prisma.Decimal("1.00"),
+	      unit: "箱",
+	    },
+	    create: {
+	      id: "seed-package-8jin-weekly-egg",
+	      templateId: packageTemplate.id,
+	      kind: "EGG",
+	      name: "鸡蛋",
+	      sortOrder: 1,
+	      totalQuantity: new Prisma.Decimal("1.00"),
+	      unit: "箱",
+	      shipmentGroup: "鸡蛋包裹",
+	    },
+	  });
 
   await prisma.packageTemplate.upsert({
     where: { id: "seed-package-6jin-weekly-osmanthus" },
@@ -255,7 +282,7 @@ async function main() {
     },
   });
 
-  const userPackage = await prisma.userPackage.upsert({
+	  const userPackage = await prisma.userPackage.upsert({
     where: { id: "seed-user-package-lotus-001" },
     update: {
       status: "ACTIVE",
@@ -275,7 +302,29 @@ async function main() {
       expiresAt: new Date("2026-09-01T23:59:59+08:00"),
       nextOrderDate: new Date("2026-06-24T00:00:00+08:00"),
     },
-  });
+	  });
+
+	  await prisma.userPackageBenefit.upsert({
+	    where: { id: "seed-user-package-lotus-001-egg" },
+	    update: {
+	      kind: "EGG",
+	      nameSnapshot: "鸡蛋",
+	      sortOrder: 1,
+	      totalQuantity: new Prisma.Decimal("1.00"),
+	      unitSnapshot: "箱",
+	    },
+	    create: {
+	      id: "seed-user-package-lotus-001-egg",
+	      userPackageId: userPackage.id,
+	      templateBenefitId: eggTemplateBenefit.id,
+	      kind: "EGG",
+	      nameSnapshot: "鸡蛋",
+	      sortOrder: 1,
+	      totalQuantity: new Prisma.Decimal("1.00"),
+	      unitSnapshot: "箱",
+	      shipmentGroup: "鸡蛋包裹",
+	    },
+	  });
 
   const dishSeed = [
     ["seed-dish-spinach", "菠菜", "LEAFY", "0.50", "82.00"],

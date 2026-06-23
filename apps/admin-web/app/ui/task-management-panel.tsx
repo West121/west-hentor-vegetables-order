@@ -2,13 +2,27 @@
 
 import {
   Copy,
+  Eye,
   FileClock,
   Maximize2,
   Minimize2,
   Pencil,
   X,
 } from "lucide-react";
-import { useMemo, useRef, useState, type PointerEvent } from "react";
+import { useRef, useState, type PointerEvent } from "react";
+
+import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  buildStoreScopedDetailPath,
+  loadDetailResource,
+  replaceItemById,
+} from "./detail-loaders";
+import { canCloseAdminModal } from "./admin-modal-close-guard";
+import { hasAdminFormChanges } from "./admin-form-dirty";
+import {
+  AdminDateTimePicker,
+  AdminTimePicker,
+} from "./admin-date-time-picker";
 
 type StoreOption = {
   id: string;
@@ -56,6 +70,13 @@ export type TaskDishOption = {
 type TaskManagementPanelProps = {
   dishOptions: TaskDishOption[];
   initialItems: TaskPanelItem[];
+  initialPagination: AdminPaginationMeta;
+  initialSummary: {
+    active: number;
+    disabled: number;
+    draft: number;
+    total: number;
+  };
   store: StoreOption | null;
 };
 
@@ -66,7 +87,7 @@ type ModalState =
     }
   | {
       item: TaskPanelItem;
-      mode: "copy";
+      mode: "copy" | "detail";
     };
 
 type FormState = {
@@ -112,6 +133,20 @@ function defaultEndsAt() {
   return toDateTimeLocal(end);
 }
 
+function nextDayTaskRange() {
+  const startsAt = new Date();
+  startsAt.setDate(startsAt.getDate() + 1);
+  startsAt.setHours(0, 0, 0, 0);
+
+  const endsAt = new Date(startsAt);
+  endsAt.setHours(23, 59, 0, 0);
+
+  return {
+    endsAt: toDateTimeLocal(endsAt),
+    startsAt: toDateTimeLocal(startsAt),
+  };
+}
+
 function buildForm(item?: TaskPanelItem | null): FormState {
   return {
     cutoffTime: item?.cutoffTime ?? "18:00",
@@ -121,6 +156,15 @@ function buildForm(item?: TaskPanelItem | null): FormState {
     startsAt: item ? toDateTimeLocal(item.startsAt) : defaultStartsAt(),
     status: item?.status ?? "DRAFT",
     tag: item?.tag ?? "",
+  };
+}
+
+function buildCopyForm(item: TaskPanelItem): FormState {
+  return {
+    ...buildForm(item),
+    ...nextDayTaskRange(),
+    name: `${item.name} 次日`,
+    status: "DRAFT" as TaskStatus,
   };
 }
 
@@ -136,15 +180,24 @@ function formatDateTime(value: string) {
 export function TaskManagementPanel({
   dishOptions,
   initialItems,
+  initialPagination,
+  initialSummary,
   store,
 }: TaskManagementPanelProps) {
   const [items, setItems] = useState(initialItems);
+  const [pagination, setPagination] = useState(initialPagination);
+  const [summary, setSummary] = useState(initialSummary);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [form, setForm] = useState<FormState>(buildForm());
+  const [initialForm, setInitialForm] = useState<FormState>(buildForm());
   const [fullscreen, setFullscreen] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<TaskStatus | "ALL">("ALL");
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -153,27 +206,6 @@ export function TaskManagementPanel({
     y: number;
   } | null>(null);
 
-  const summary = useMemo(
-    () =>
-      items.reduce(
-        (value, item) => {
-          value.total += 1;
-          if (item.status === "ACTIVE") {
-            value.active += 1;
-          }
-          if (item.status === "DISABLED") {
-            value.disabled += 1;
-          }
-          if (item.status === "DRAFT") {
-            value.draft += 1;
-          }
-          return value;
-        },
-        { active: 0, disabled: 0, draft: 0, total: 0 },
-      ),
-    [items],
-  );
-
   function resetModal() {
     setFullscreen(false);
     setOffset({ x: 0, y: 0 });
@@ -181,25 +213,70 @@ export function TaskManagementPanel({
   }
 
   function openCreateModal() {
+    const nextForm = buildForm();
     setModal({ item: null, mode: "create" });
-    setForm(buildForm());
+    setForm(nextForm);
+    setInitialForm(nextForm);
     resetModal();
   }
 
   function openEditModal(item: TaskPanelItem) {
+    const nextForm = buildForm(item);
     setModal({ item, mode: "edit" });
-    setForm(buildForm(item));
+    setForm(nextForm);
+    setInitialForm(nextForm);
     resetModal();
+    void hydrateTaskDetail(item, "edit");
+  }
+
+  function openDetailModal(item: TaskPanelItem) {
+    const nextForm = buildForm(item);
+    setModal({ item, mode: "detail" });
+    setForm(nextForm);
+    setInitialForm(nextForm);
+    resetModal();
+    void hydrateTaskDetail(item, "detail");
   }
 
   function openCopyModal(item: TaskPanelItem) {
+    const nextForm = buildCopyForm(item);
     setModal({ item, mode: "copy" });
-    setForm({
-      ...buildForm(item),
-      name: `${item.name} 副本`,
-      status: "DRAFT",
-    });
+    setForm(nextForm);
+    setInitialForm(nextForm);
     resetModal();
+    void hydrateTaskDetail(item, "copy");
+  }
+
+  async function hydrateTaskDetail(
+    item: TaskPanelItem,
+    mode: "copy" | "detail" | "edit",
+  ) {
+    if (!store) {
+      return;
+    }
+
+    setLoadingDetail(true);
+
+    try {
+      const detail = await loadDetailResource<TaskPanelItem>(
+        buildStoreScopedDetailPath("tasks", item.id, store.id),
+        "task",
+      );
+
+      setItems((value) => replaceItemById(value, detail));
+      setModal((current) =>
+        current?.item?.id === item.id ? { ...current, item: detail } : current,
+      );
+      const nextForm = mode === "copy" ? buildCopyForm(detail) : buildForm(detail);
+      setForm(nextForm);
+      setInitialForm(nextForm);
+    } catch (detailError) {
+      setError(
+        detailError instanceof Error ? detailError.message : "任务详情加载失败",
+      );
+    } finally {
+      setLoadingDetail(false);
+    }
   }
 
   function closeModal() {
@@ -207,24 +284,77 @@ export function TaskManagementPanel({
       return;
     }
 
+    if (
+      modal &&
+      modal.mode !== "detail" &&
+      !canCloseAdminModal({
+        hasUnsavedChanges: hasAdminFormChanges({
+          current: form,
+          initial: initialForm,
+        }),
+      })
+    ) {
+      return;
+    }
+
     setModal(null);
     setError(null);
   }
 
-  async function refreshTasks() {
+  async function refreshTasks(
+    page = pagination.page,
+    filters = { query, statusFilter },
+  ) {
     if (!store) {
       return;
     }
 
-    const response = await fetch(`/api/admin/tasks?storeId=${store.id}`);
-    const result = (await response.json()) as {
-      data?: { items: TaskPanelItem[] };
-      success: boolean;
-    };
-
-    if (response.ok && result.success && result.data?.items) {
-      setItems(result.data.items);
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pagination.pageSize),
+      storeId: store.id,
+    });
+    const nextQuery = filters.query.trim();
+    if (nextQuery) {
+      params.set("query", nextQuery);
     }
+    if (filters.statusFilter !== "ALL") {
+      params.set("status", filters.statusFilter);
+    }
+
+    setLoadingList(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/admin/tasks?${params.toString()}`);
+      const result = (await response.json()) as {
+        data?: {
+          items: TaskPanelItem[];
+          pagination: AdminPaginationMeta;
+          summary: typeof initialSummary;
+        };
+        error?: { message: string };
+        success: boolean;
+      };
+
+      if (!response.ok || !result.success || !result.data) {
+        throw new Error(result.error?.message ?? "加载任务失败");
+      }
+
+      setItems(result.data.items);
+      setPagination(result.data.pagination);
+      setSummary(result.data.summary);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "加载任务失败");
+    } finally {
+      setLoadingList(false);
+    }
+  }
+
+  function resetFilters() {
+    setQuery("");
+    setStatusFilter("ALL");
+    void refreshTasks(1, { query: "", statusFilter: "ALL" });
   }
 
   function handleHeaderPointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -282,6 +412,9 @@ export function TaskManagementPanel({
     if (!modal || !store) {
       return;
     }
+    if (modal.mode === "detail") {
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -290,8 +423,13 @@ export function TaskManagementPanel({
       if (modal.mode === "copy") {
         const response = await fetch(`/api/admin/tasks/${modal.item.id}/copy`, {
           body: JSON.stringify({
+            cutoffTime: form.cutoffTime,
+            dishIds: form.dishIds,
+            endsAt: form.endsAt,
             name: form.name,
+            startsAt: form.startsAt,
             storeId: store.id,
+            tag: form.tag || null,
           }),
           headers: { "content-type": "application/json" },
           method: "POST",
@@ -334,7 +472,9 @@ export function TaskManagementPanel({
         }
       }
 
-      await refreshTasks();
+      await refreshTasks(
+        modal.mode === "create" || modal.mode === "copy" ? 1 : pagination.page,
+      );
       setModal(null);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "保存失败");
@@ -348,9 +488,11 @@ export function TaskManagementPanel({
       ? "新建任务"
       : modal?.mode === "copy"
         ? `复制 · ${modal.item.name}`
-        : modal
-          ? `编辑 · ${modal.item?.name}`
-          : "";
+        : modal?.mode === "detail"
+          ? `任务详情 · ${modal.item.name}`
+          : modal
+            ? `编辑 · ${modal.item?.name}`
+            : "";
 
   return (
     <section className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
@@ -361,7 +503,7 @@ export function TaskManagementPanel({
             任务配置
           </div>
           <h2 className="mt-2 text-xl font-semibold tracking-normal">
-            {store?.name ?? "未选择门店"}
+            任务配置
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#66756d]">
             启用中的任务决定小程序首页今日可预订菜品和截单时间。
@@ -391,6 +533,56 @@ export function TaskManagementPanel({
             新建任务
           </button>
         </div>
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-end gap-3 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-3">
+        <label className="flex min-w-[260px] flex-1 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+          关键字
+          <input
+            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                void refreshTasks(1);
+              }
+            }}
+            placeholder="任务名称 / 标签"
+            value={query}
+          />
+        </label>
+        <label className="flex w-40 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+          状态
+          <select
+            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+            onChange={(event) =>
+              setStatusFilter(event.target.value as TaskStatus | "ALL")
+            }
+            value={statusFilter}
+          >
+            <option value="ALL">全部状态</option>
+            {Object.entries(STATUS_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
+          disabled={loadingList || !store}
+          onClick={() => void refreshTasks(1)}
+          type="button"
+        >
+          查询
+        </button>
+        <button
+          className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-5 text-sm font-semibold text-[#66756d] hover:bg-[#f3f7f1]"
+          disabled={loadingList}
+          onClick={resetFilters}
+          type="button"
+        >
+          重置
+        </button>
       </div>
 
       <div className="mt-5 overflow-hidden rounded-xl border border-[#dbe6dc]">
@@ -436,6 +628,14 @@ export function TaskManagementPanel({
                   <div className="flex justify-end gap-2">
                     <button
                       className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                      onClick={() => openDetailModal(item)}
+                      title="查看详情"
+                      type="button"
+                    >
+                      <Eye size={16} />
+                    </button>
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                       onClick={() => openCopyModal(item)}
                       title="复制任务"
                       type="button"
@@ -443,9 +643,19 @@ export function TaskManagementPanel({
                       <Copy size={16} />
                     </button>
                     <button
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                      className={[
+                        "grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]",
+                        item.status === "ACTIVE"
+                          ? "cursor-not-allowed opacity-45 hover:bg-white"
+                          : "",
+                      ].join(" ")}
+                      disabled={item.status === "ACTIVE"}
                       onClick={() => openEditModal(item)}
-                      title="编辑任务"
+                      title={
+                        item.status === "ACTIVE"
+                          ? "已生效任务不可编辑"
+                          : "编辑任务"
+                      }
                       type="button"
                     >
                       <Pencil size={16} />
@@ -457,23 +667,30 @@ export function TaskManagementPanel({
             {items.length === 0 ? (
               <tr>
                 <td className="px-4 py-10 text-center text-[#66756d]" colSpan={6}>
-                  当前门店还没有任务
+                  暂无任务
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+        <AdminPagination
+          disabled={loadingList}
+          onPageChange={(nextPage) => void refreshTasks(nextPage)}
+          pagination={pagination}
+        />
       </div>
 
       {modal ? (
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
+            aria-modal="true"
             className={[
               "mx-auto flex min-h-[520px] flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
               fullscreen
                 ? "h-full w-full"
                 : "h-[70vh] w-[820px] max-w-full resize",
             ].join(" ")}
+            role="dialog"
             style={
               fullscreen
                 ? undefined
@@ -484,15 +701,19 @@ export function TaskManagementPanel({
               className="flex cursor-move items-center justify-between border-b border-[#dbe6dc] px-6 py-4"
               onPointerDown={handleHeaderPointerDown}
               onPointerMove={handleHeaderPointerMove}
+              onPointerCancel={handleHeaderPointerUp}
               onPointerUp={handleHeaderPointerUp}
             >
               <div className="min-w-0">
                 <div className="truncate text-lg font-semibold">{modalTitle}</div>
                 <div className="mt-1 truncate text-sm text-[#66756d]">
-                  {store?.name ?? "未选择门店"}
+                  {loadingDetail ? "正在加载最新任务详情" : "任务配置"}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-2"
+                onPointerDown={(event) => event.stopPropagation()}
+              >
                 <button
                   className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f]"
                   onClick={() => setFullscreen((value) => !value)}
@@ -519,111 +740,99 @@ export function TaskManagementPanel({
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     onChange={(event) => updateForm("name", event.target.value)}
+                    readOnly={modal.mode === "detail"}
                     value={form.name}
                   />
                 </label>
 
-                {modal.mode !== "copy" ? (
-                  <>
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                      开始时间
-                      <input
-                        className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                        onChange={(event) =>
-                          updateForm("startsAt", event.target.value)
-                        }
-                        type="datetime-local"
-                        value={form.startsAt}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                      结束时间
-                      <input
-                        className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                        onChange={(event) => updateForm("endsAt", event.target.value)}
-                        type="datetime-local"
-                        value={form.endsAt}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                      截单时间
-                      <input
-                        className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                        onChange={(event) =>
-                          updateForm("cutoffTime", event.target.value)
-                        }
-                        type="time"
-                        value={form.cutoffTime}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                      状态
-                      <select
-                        className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
-                        onChange={(event) =>
-                          updateForm("status", event.target.value as TaskStatus)
-                        }
-                        value={form.status}
-                      >
-                        <option value="DRAFT">草稿</option>
-                        <option value="ACTIVE">启用</option>
-                        <option value="DISABLED">停用</option>
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-                      活动标签
-                      <input
-                        className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                        onChange={(event) => updateForm("tag", event.target.value)}
-                        value={form.tag}
-                      />
-                    </label>
-                  </>
-                ) : null}
+                <AdminDateTimePicker
+                  buttonClassName="h-11 w-full"
+                  label="开始时间"
+                  onChange={(value) => updateForm("startsAt", value)}
+                  readOnly={modal.mode === "detail"}
+                  value={form.startsAt}
+                />
+                <AdminDateTimePicker
+                  buttonClassName="h-11 w-full"
+                  label="结束时间"
+                  onChange={(value) => updateForm("endsAt", value)}
+                  readOnly={modal.mode === "detail"}
+                  value={form.endsAt}
+                />
+                <AdminTimePicker
+                  buttonClassName="h-11 w-full"
+                  label="截单时间"
+                  onChange={(value) => updateForm("cutoffTime", value)}
+                  readOnly={modal.mode === "detail"}
+                  value={form.cutoffTime}
+                />
+                <label className="flex flex-col gap-2 text-sm font-medium">
+                  状态
+                  <select
+                    className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
+                    disabled={modal.mode === "detail" || modal.mode === "copy"}
+                    onChange={(event) =>
+                      updateForm("status", event.target.value as TaskStatus)
+                    }
+                    value={form.status}
+                  >
+                    <option value="DRAFT">草稿</option>
+                    <option value="ACTIVE">启用</option>
+                    <option value="DISABLED">停用</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
+                  活动标签
+                  <input
+                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    readOnly={modal.mode === "detail"}
+                    onChange={(event) => updateForm("tag", event.target.value)}
+                    value={form.tag}
+                  />
+                </label>
               </div>
 
-              {modal.mode !== "copy" ? (
-                <div className="mt-5">
-                  <div className="mb-3 text-sm font-medium">关联菜品</div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {dishOptions.map((dish) => {
-                      const selected = form.dishIds.includes(dish.id);
-                      return (
-                        <button
+              <div className="mt-5">
+                <div className="mb-3 text-sm font-medium">关联菜品</div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {dishOptions.map((dish) => {
+                    const selected = form.dishIds.includes(dish.id);
+                    return (
+                      <button
+                        className={[
+                          "flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left",
+                          selected
+                            ? "border-[#1f8f4f] bg-[#eff8f1]"
+                            : "border-[#dbe6dc] bg-white",
+                        ].join(" ")}
+                        disabled={modal.mode === "detail"}
+                        key={dish.id}
+                        onClick={() => toggleDish(dish.id)}
+                        type="button"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-semibold">
+                            {dish.name}
+                          </span>
+                          <span className="mt-1 block text-xs text-[#66756d]">
+                            {CATEGORY_LABELS[dish.category]} · 库存 {dish.stockJin}斤
+                          </span>
+                        </span>
+                        <span
                           className={[
-                            "flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left",
+                            "grid h-5 w-5 shrink-0 place-items-center rounded-full border text-xs",
                             selected
-                              ? "border-[#1f8f4f] bg-[#eff8f1]"
-                              : "border-[#dbe6dc] bg-white",
+                              ? "border-[#1f8f4f] bg-[#1f8f4f] text-white"
+                              : "border-[#b8c9bd]",
                           ].join(" ")}
-                          key={dish.id}
-                          onClick={() => toggleDish(dish.id)}
-                          type="button"
                         >
-                          <span className="min-w-0">
-                            <span className="block truncate font-semibold">
-                              {dish.name}
-                            </span>
-                            <span className="mt-1 block text-xs text-[#66756d]">
-                              {CATEGORY_LABELS[dish.category]} · 库存 {dish.stockJin}斤
-                            </span>
-                          </span>
-                          <span
-                            className={[
-                              "grid h-5 w-5 shrink-0 place-items-center rounded-full border text-xs",
-                              selected
-                                ? "border-[#1f8f4f] bg-[#1f8f4f] text-white"
-                                : "border-[#b8c9bd]",
-                            ].join(" ")}
-                          >
-                            {selected ? "✓" : ""}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                          {selected ? "✓" : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
-              ) : null}
+              </div>
 
               {error ? (
                 <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -639,16 +848,18 @@ export function TaskManagementPanel({
                 onClick={closeModal}
                 type="button"
               >
-                取消
+                {modal.mode === "detail" ? "关闭" : "取消"}
               </button>
-              <button
-                className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
-                disabled={saving || !store}
-                onClick={submitModal}
-                type="button"
-              >
-                {saving ? "保存中" : "保存"}
-              </button>
+              {modal.mode !== "detail" ? (
+                <button
+                  className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
+                  disabled={saving || loadingDetail || !store}
+                  onClick={submitModal}
+                  type="button"
+                >
+                  {saving ? "保存中" : "保存"}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

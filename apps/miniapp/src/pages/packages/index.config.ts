@@ -1,3 +1,3 @@
 export default definePageConfig({
-  navigationBarTitleText: "套餐",
+  navigationStyle: "custom",
 });

@@ -1,11 +1,15 @@
 import { z } from "zod";
 
 import {
+  getFranchisee,
   StoreManagementServiceError,
   updateFranchisee,
 } from "@hentor/db";
 
-import { getAllStoresAccessFailure } from "@/app/lib/admin-access";
+import {
+  getAllStoresAccessFailure,
+  getPermissionFailure,
+} from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
@@ -22,6 +26,42 @@ function statusForStoreError(code: string) {
   return code.endsWith("_NOT_FOUND") ? 404 : 400;
 }
 
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ franchiseeId: string }> },
+) {
+  const session = await getAdminSession();
+  if (!session) {
+    return fail("UNAUTHORIZED", "请先登录", 401);
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "stores.manage",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
+  }
+
+  const accessFailure = await getAllStoresAccessFailure(session.adminUserId);
+  if (accessFailure) {
+    return accessFailure;
+  }
+
+  const { franchiseeId } = await context.params;
+
+  try {
+    const franchisee = await getFranchisee({ franchiseeId });
+    return ok({ franchisee });
+  } catch (error) {
+    if (error instanceof StoreManagementServiceError) {
+      return fail(error.code, error.message, statusForStoreError(error.code));
+    }
+
+    throw error;
+  }
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ franchiseeId: string }> },
@@ -29,6 +69,14 @@ export async function PATCH(
   const session = await getAdminSession();
   if (!session) {
     return fail("UNAUTHORIZED", "请先登录", 401);
+  }
+
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "stores.manage",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
   }
 
   const accessFailure = await getAllStoresAccessFailure(session.adminUserId);
@@ -66,4 +114,11 @@ export async function PATCH(
 
     throw error;
   }
+}
+
+export async function PUT(
+  request: Request,
+  context: { params: Promise<{ franchiseeId: string }> },
+) {
+  return PATCH(request, context);
 }

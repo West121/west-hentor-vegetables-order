@@ -5,7 +5,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
 }
 
 enum StoreType {
@@ -116,6 +116,8 @@ model Store {
   city               String?
   district           String?
   address            String?
+  deliveryProvinces  Json?
+  deliveryCities     Json?
   customerServiceTel String?
   cutoffTime         String                @default("18:00")
   franchiseEndsAt    DateTime?
@@ -154,6 +156,7 @@ model User {
   packages        UserPackage[]
   orders          Order[]
   purchaseOrders  PackagePurchaseOrder[]
+  operationLogs   AdminOperationLog[]
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
 }
@@ -204,12 +207,30 @@ model PackageTemplate {
   status          StoreStatus    @default(ACTIVE)
   sortOrder       Int           @default(0)
   store           Store?         @relation(fields: [storeId], references: [id])
+  benefits        PackageTemplateBenefit[]
   userPackages    UserPackage[]
   purchaseOrders  PackagePurchaseOrder[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   @@index([storeId])
+}
+
+model PackageTemplateBenefit {
+  id                  String        @id @default(cuid())
+  templateId          String
+  kind                String        @default("EGG")
+  name                String
+  unit                String
+  totalQuantity       Decimal       @db.Decimal(10, 2)
+  sortOrder           Int           @default(0)
+  shipmentGroup       String?
+  template            PackageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  userPackageBenefits UserPackageBenefit[]
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@index([templateId, sortOrder])
 }
 
 model UserPackage {
@@ -230,12 +251,33 @@ model UserPackage {
   user           User          @relation(fields: [userId], references: [id])
   store          Store         @relation(fields: [storeId], references: [id])
   template       PackageTemplate @relation(fields: [templateId], references: [id])
+  benefits       UserPackageBenefit[]
   orders         Order[]
   operationLogs  PackageOperationLog[]
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
   @@index([userId, storeId, status])
+}
+
+model UserPackageBenefit {
+  id                String        @id @default(cuid())
+  userPackageId     String
+  templateBenefitId String?
+  kind              String
+  nameSnapshot      String
+  unitSnapshot      String
+  totalQuantity     Decimal       @db.Decimal(10, 2)
+  usedQuantity      Decimal       @default(0) @db.Decimal(10, 2)
+  sortOrder         Int           @default(0)
+  shipmentGroup     String?
+  userPackage       UserPackage   @relation(fields: [userPackageId], references: [id], onDelete: Cascade)
+  templateBenefit   PackageTemplateBenefit? @relation(fields: [templateBenefitId], references: [id], onDelete: SetNull)
+  orderBenefitItems OrderBenefitItem[]
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([userPackageId, sortOrder])
 }
 
 model Dish {
@@ -329,6 +371,8 @@ model Order {
   userPackage         UserPackage  @relation(fields: [userPackageId], references: [id])
   address             Address?     @relation(fields: [addressId], references: [id])
   items               OrderItem[]
+  benefitItems        OrderBenefitItem[]
+  shipments           OrderShipment[]
   changeLogs          OrderChangeLog[]
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
@@ -348,6 +392,40 @@ model OrderItem {
   dish             Dish     @relation(fields: [dishId], references: [id])
 
   @@index([dishId])
+}
+
+model OrderBenefitItem {
+  id                   String   @id @default(cuid())
+  orderId              String
+  userPackageBenefitId String?
+  kind                 String
+  nameSnapshot         String
+  unitSnapshot         String
+  quantity             Decimal  @db.Decimal(10, 2)
+  shipmentGroup        String?
+  order                Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userPackageBenefit   UserPackageBenefit? @relation(fields: [userPackageBenefitId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([userPackageBenefitId])
+}
+
+model OrderShipment {
+  id          String   @id @default(cuid())
+  orderId     String
+  packageType String
+  packageName String
+  logisticsNo String?
+  status      String   @default("PENDING")
+  shippedAt   DateTime?
+  signedAt    DateTime?
+  remark      String?
+  sortOrder   Int      @default(0)
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([orderId, sortOrder])
 }
 
 model OrderChangeLog {
@@ -442,19 +520,28 @@ model AdminUserStore {
 model AdminOperationLog {
   id          String    @id @default(cuid())
   storeId     String?
-  operatorId  String
+  operatorId  String?
+  userId      String?
   resource    String
   resourceId  String?
   action      String
   beforeValue Json?
   afterValue  Json?
+  requestMethod String?
+  requestPath   String?
+  requestParams Json?
+  statusCode    Int?
+  responseData  Json?
+  durationMs    Int?
   ip          String?
   userAgent   String?
   store       Store?    @relation(fields: [storeId], references: [id])
-  operator    AdminUser @relation(fields: [operatorId], references: [id])
+  operator    AdminUser? @relation(fields: [operatorId], references: [id])
+  user        User?     @relation(fields: [userId], references: [id])
   createdAt   DateTime  @default(now())
 
   @@index([storeId, resource, createdAt])
+  @@index([userId, resource, createdAt])
 }
 
 model SystemConfig {

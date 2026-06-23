@@ -2,14 +2,29 @@
 
 import {
   Ban,
+  Eye,
   Maximize2,
   Minimize2,
   Pencil,
   RotateCcw,
+  Upload,
   UserRound,
   X,
 } from "lucide-react";
-import { useMemo, useRef, useState, type PointerEvent } from "react";
+import { useRef, useState, type ChangeEvent, type PointerEvent } from "react";
+
+import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  buildStoreScopedDetailPath,
+  loadDetailResource,
+  replaceItemById,
+} from "./detail-loaders";
+import { canCloseAdminModal } from "./admin-modal-close-guard";
+import {
+  buildMemberFormState,
+  hasUnsavedMemberModalChanges,
+  type MemberFormState,
+} from "./member-modal-state";
 
 type StoreOption = {
   id: string;
@@ -20,13 +35,26 @@ type BindingStatus = "ACTIVE" | "DISABLED";
 
 export type MemberPanelItem = {
   activePackageCount: number;
+  addresses?: Array<{
+    city: string | null;
+    detail: string;
+    district: string | null;
+    id: string;
+    isDefault: boolean;
+    province: string | null;
+    receiverName: string;
+    receiverPhone: string;
+  }>;
   avatarUrl: string | null;
   bindingId: string;
   bindingStatus: BindingStatus;
   createdAt: string;
   defaultAddress: {
+    city: string | null;
     detail: string;
+    district: string | null;
     id: string;
+    province: string | null;
     receiverName: string;
     receiverPhone: string;
   } | null;
@@ -43,7 +71,26 @@ export type MemberPanelItem = {
   } | null;
   nickname: string | null;
   orderCount: number;
+  packages?: Array<{
+    id: string;
+    nameSnapshot: string;
+    remainingTimes: number;
+    status: string;
+    totalTimes: number;
+    usedTimes: number;
+    weightLimitJin: number;
+  }>;
   phone: string | null;
+  recentOrders?: Array<{
+    id: string;
+    items: Array<{
+      dishNameSnapshot: string;
+      weightJin: number;
+    }>;
+    orderNo: string;
+    status: string;
+    totalWeightJin: number;
+  }>;
   remark: string | null;
   source: string | null;
   status: string;
@@ -57,14 +104,57 @@ export type MemberPanelItem = {
 
 type MemberManagementPanelProps = {
   initialItems: MemberPanelItem[];
+  initialPagination: AdminPaginationMeta;
+  initialSummary: {
+    active: number;
+    disabled: number;
+    total: number;
+  };
   store: StoreOption | null;
 };
 
-type FormState = {
-  disabledReason: string;
-  remark: string;
-  status: BindingStatus;
+type MemberModalMode = "detail" | "edit";
+
+type MemberImportResult = {
+  createdBindings: number;
+  createdUsers: number;
+  failedRows: number;
+  failures: Array<{
+    phone: string | null;
+    reason: string;
+    rowNumber: number;
+  }>;
+  importedRows: number;
+  totalRows: number;
+  updatedBindings: number;
+  updatedUsers: number;
 };
+
+type UserPackageImportResult = {
+  createdPackages: number;
+  failedRows: number;
+  failures: Array<{
+    phone: string | null;
+    reason: string;
+    rowNumber: number;
+    templateName: string | null;
+  }>;
+  importedRows: number;
+  totalRows: number;
+  updatedPackages: number;
+};
+
+type ImportMode = "members" | "packages";
+type ImportResult = MemberImportResult | UserPackageImportResult;
+
+const IMPORT_FILE_ACCEPT =
+  ".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv";
+
+function isPackageImportResult(
+  result: ImportResult,
+): result is UserPackageImportResult {
+  return "createdPackages" in result;
+}
 
 const STATUS_LABELS: Record<BindingStatus, string> = {
   ACTIVE: "可服务",
@@ -87,25 +177,61 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function buildFormState(member: MemberPanelItem): FormState {
-  return {
-    disabledReason: member.disabledReason ?? "",
-    remark: member.remark ?? "",
-    status: member.bindingStatus,
-  };
+function formatJin(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function formatAddress(
+  address: MemberPanelItem["defaultAddress"] | null | undefined,
+) {
+  if (!address) {
+    return "未设置";
+  }
+
+  return (
+    [address.province, address.city, address.district, address.detail]
+      .filter(Boolean)
+      .join(" ") || "未设置"
+  );
+}
+
+function formatRecentOrder(order: NonNullable<MemberPanelItem["recentOrders"]>[number]) {
+  const itemSummary = order.items.length
+    ? order.items
+        .map((item) => `${item.dishNameSnapshot}${formatJin(item.weightJin)}斤`)
+        .join("、")
+    : `合计${formatJin(order.totalWeightJin)}斤`;
+
+  return `${order.orderNo} · ${itemSummary}`;
 }
 
 export function MemberManagementPanel({
   initialItems,
+  initialPagination,
+  initialSummary,
   store,
 }: MemberManagementPanelProps) {
   const [items, setItems] = useState(initialItems);
+  const [pagination, setPagination] = useState(initialPagination);
+  const [summary, setSummary] = useState(initialSummary);
   const [modalMember, setModalMember] = useState<MemberPanelItem | null>(null);
-  const [form, setForm] = useState<FormState | null>(null);
+  const [modalMode, setModalMode] = useState<MemberModalMode>("edit");
+  const [form, setForm] = useState<MemberFormState | null>(null);
+  const [initialForm, setInitialForm] = useState<MemberFormState | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<BindingStatus | "ALL">("ALL");
+  const [importOpen, setImportOpen] = useState(false);
+  const [importMode, setImportMode] = useState<ImportMode>("members");
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -114,41 +240,140 @@ export function MemberManagementPanel({
     y: number;
   } | null>(null);
 
-  const summary = useMemo(
-    () =>
-      items.reduce(
-        (value, item) => {
-          value.total += 1;
-          if (item.bindingStatus === "ACTIVE") {
-            value.active += 1;
-          }
-          if (item.bindingStatus === "DISABLED") {
-            value.disabled += 1;
-          }
-          return value;
-        },
-        { active: 0, disabled: 0, total: 0 },
-      ),
-    [items],
-  );
+  async function reloadMembers(
+    page = pagination.page,
+    filters = { query, statusFilter },
+  ) {
+    if (!store) {
+      return;
+    }
+
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pagination.pageSize),
+      storeId: store.id,
+    });
+    const nextQuery = filters.query.trim();
+    if (nextQuery) {
+      params.set("query", nextQuery);
+    }
+    if (filters.statusFilter !== "ALL") {
+      params.set("status", filters.statusFilter);
+    }
+
+    setLoadingList(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/admin/members?${params.toString()}`);
+      const result = (await response.json()) as {
+        data?: {
+          items: MemberPanelItem[];
+          pagination: AdminPaginationMeta;
+          summary: typeof initialSummary;
+        };
+        error?: { message: string };
+        success: boolean;
+      };
+
+      if (!response.ok || !result.success || !result.data) {
+        throw new Error(result.error?.message ?? "加载会员失败");
+      }
+
+      setItems(result.data.items);
+      setPagination(result.data.pagination);
+      setSummary(result.data.summary);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "加载会员失败");
+    } finally {
+      setLoadingList(false);
+    }
+  }
+
+  function resetFilters() {
+    setQuery("");
+    setStatusFilter("ALL");
+    void reloadMembers(1, { query: "", statusFilter: "ALL" });
+  }
 
   function openModal(member: MemberPanelItem) {
+    const nextForm = buildMemberFormState(member);
+
+    setModalMode("edit");
     setModalMember(member);
-    setForm(buildFormState(member));
+    setForm(nextForm);
+    setInitialForm(nextForm);
     setFullscreen(false);
     setOffset({ x: 0, y: 0 });
     setError(null);
+    void hydrateMemberDetail(member);
+  }
+
+  function openDetailModal(member: MemberPanelItem) {
+    const nextForm = buildMemberFormState(member);
+
+    setModalMode("detail");
+    setModalMember(member);
+    setForm(nextForm);
+    setInitialForm(nextForm);
+    setFullscreen(false);
+    setOffset({ x: 0, y: 0 });
+    setError(null);
+    void hydrateMemberDetail(member);
   }
 
   function openModalWithStatus(member: MemberPanelItem, status: BindingStatus) {
+    const nextInitialForm = buildMemberFormState(member);
+
+    setModalMode("edit");
     setModalMember(member);
     setForm({
-      ...buildFormState(member),
+      ...nextInitialForm,
       status,
     });
+    setInitialForm(nextInitialForm);
     setFullscreen(false);
     setOffset({ x: 0, y: 0 });
     setError(null);
+    void hydrateMemberDetail(member, status);
+  }
+
+  async function hydrateMemberDetail(
+    member: MemberPanelItem,
+    statusOverride?: BindingStatus,
+  ) {
+    if (!store) {
+      return;
+    }
+
+    setLoadingDetail(true);
+
+    try {
+      const detail = await loadDetailResource<MemberPanelItem>(
+        buildStoreScopedDetailPath("members", member.id, store.id),
+        "member",
+      );
+
+      setItems((value) => replaceItemById(value, detail));
+      setModalMember((current) =>
+        current?.id === member.id ? { ...current, ...detail } : current,
+      );
+      setForm((current) =>
+        current
+          ? {
+              ...buildMemberFormState(detail),
+              status: statusOverride ?? detail.bindingStatus,
+            }
+          : current,
+      );
+      setInitialForm(buildMemberFormState(detail));
+    } catch (detailError) {
+      setError(
+        detailError instanceof Error ? detailError.message : "会员详情加载失败",
+      );
+    } finally {
+      setLoadingDetail(false);
+    }
   }
 
   function closeModal() {
@@ -156,8 +381,24 @@ export function MemberManagementPanel({
       return;
     }
 
+    if (
+      modalMode !== "detail" &&
+      form &&
+      initialForm &&
+      !canCloseAdminModal({
+        hasUnsavedChanges: hasUnsavedMemberModalChanges({
+          current: form,
+          initial: initialForm,
+        }),
+      })
+    ) {
+      return;
+    }
+
     setModalMember(null);
+    setModalMode("edit");
     setForm(null);
+    setInitialForm(null);
     setError(null);
   }
 
@@ -196,7 +437,7 @@ export function MemberManagementPanel({
   }
 
   async function submitModal() {
-    if (!modalMember || !form || !store) {
+    if (modalMode === "detail" || !modalMember || !form || !store) {
       return;
     }
 
@@ -204,8 +445,17 @@ export function MemberManagementPanel({
     setError(null);
 
     try {
+      const shouldSubmitAddress =
+        Boolean(form.defaultAddress.id) ||
+        [
+          form.defaultAddress.province,
+          form.defaultAddress.city,
+          form.defaultAddress.district,
+          form.defaultAddress.detail,
+        ].some((value) => Boolean(value.trim()));
       const response = await fetch(`/api/admin/members/${modalMember.id}`, {
         body: JSON.stringify({
+          defaultAddress: shouldSubmitAddress ? form.defaultAddress : null,
           disabledReason: form.disabledReason,
           remark: form.remark,
           status: form.status,
@@ -218,6 +468,7 @@ export function MemberManagementPanel({
         data?: {
           member: {
             bindingStatus: BindingStatus;
+            defaultAddress: MemberPanelItem["defaultAddress"];
             disabledReason: string | null;
             id: string;
             remark: string | null;
@@ -238,20 +489,145 @@ export function MemberManagementPanel({
             ? {
                 ...item,
                 bindingStatus: updatedMember.bindingStatus,
+                defaultAddress: updatedMember.defaultAddress,
                 disabledReason: updatedMember.disabledReason,
                 remark: updatedMember.remark,
               }
             : item,
-        ),
+          ),
       );
+      await reloadMembers(pagination.page);
       setModalMember(null);
+      setModalMode("edit");
       setForm(null);
+      setInitialForm(null);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "保存失败");
     } finally {
       setSaving(false);
     }
   }
+
+  function openImportModal(mode: ImportMode) {
+    setImportMode(mode);
+    setImportOpen(true);
+    setImportFile(null);
+    setImportError(null);
+    setImportResult(null);
+  }
+
+  function closeImportModal() {
+    if (importing) {
+      return;
+    }
+
+    setImportOpen(false);
+    setImportFile(null);
+    setImportError(null);
+    setImportResult(null);
+  }
+
+  function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setImportFile(file);
+    setImportError(null);
+    setImportResult(null);
+    event.target.value = "";
+  }
+
+  async function submitImport() {
+    if (!store) {
+      return;
+    }
+
+    if (!importFile) {
+      setImportError("请先选择 .xlsx、.xls 或 .csv 文件");
+      return;
+    }
+
+    setImporting(true);
+    setImportError(null);
+    setImportResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.set("storeId", store.id);
+      formData.set("file", importFile);
+
+      const response = await fetch(
+        importMode === "members"
+          ? "/api/admin/members/import"
+          : "/api/admin/user-packages/import",
+        {
+        body: formData,
+        method: "POST",
+        },
+      );
+      const result = (await response.json()) as {
+        data?: { result: ImportResult };
+        error?: { message: string };
+        success: boolean;
+      };
+
+      if (!response.ok || !result.success || !result.data?.result) {
+        throw new Error(result.error?.message ?? "导入失败");
+      }
+
+      setImportResult(result.data.result);
+      if (result.data.result.importedRows > 0) {
+        await reloadMembers(1);
+      }
+    } catch (submitError) {
+      setImportError(
+        submitError instanceof Error ? submitError.message : "导入失败",
+      );
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  const isPackageImport = importMode === "packages";
+  const importTitle = isPackageImport ? "导入会员套餐" : "导入会员";
+  const importDescription = isPackageImport
+    ? "上传 Excel 或 CSV 后，按手机号匹配会员，按套餐名称匹配模板。"
+    : "上传 Excel 或 CSV 后，按手机号创建或更新会员资料。";
+  const importRecommendedHeaders = isPackageImport
+    ? "推荐表头：手机号、套餐名称、总次数、已用次数、单次斤数、状态、备注"
+    : "推荐表头：手机号、姓名、备注、状态、停用原因";
+  const importRules = isPackageImport
+    ? [
+        "手机号和套餐名称必填，会员必须已存在并绑定当前数据范围。",
+        "套餐名称优先精确匹配，匹配多个模板时会标记失败。",
+        "导入会新增用户套餐，不覆盖旧套餐；总次数、已用次数、单次斤数可留空，留空时使用模板值。",
+        "状态可填：正常、冻结、已用完、过期。",
+      ]
+    : [
+        "手机号必填，支持 11 位大陆手机号。",
+        "状态可填：正常、启用、停用、禁用。",
+        "已存在手机号会更新备注并保留原有数据归属。",
+        "失败行会列出原因，其它合法行继续导入。",
+      ];
+  const importResultCards = importResult
+    ? isPackageImportResult(importResult)
+      ? [
+          ["总行数", importResult.totalRows],
+          ["成功", importResult.importedRows],
+          ["开通套餐", importResult.createdPackages],
+          ["更新套餐", importResult.updatedPackages],
+          ["失败", importResult.failedRows],
+        ]
+      : [
+          ["总行数", importResult.totalRows],
+          ["成功", importResult.importedRows],
+          ["新建会员", importResult.createdUsers],
+          ["更新会员", importResult.updatedUsers],
+          ["失败", importResult.failedRows],
+        ]
+    : [];
 
   return (
     <section className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
@@ -262,27 +638,97 @@ export function MemberManagementPanel({
             会员用户管理
           </div>
           <h2 className="mt-2 text-xl font-semibold tracking-normal">
-            {store?.name ?? "未选择门店"}
+            会员用户
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#66756d]">
             会员用户来自小程序登录，与系统后台用户分开管理。
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {[
-            ["全部", summary.total],
-            ["可服务", summary.active],
-            ["已停用", summary.disabled],
-          ].map(([label, value]) => (
-            <div
-              className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-2"
-              key={label}
-            >
-              <div className="text-xs text-[#66756d]">{label}</div>
-              <div className="mt-1 text-lg font-semibold">{value}</div>
-            </div>
-          ))}
+        <div className="flex flex-wrap items-start justify-end gap-3">
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#1f8f4f] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!store}
+            onClick={() => openImportModal("members")}
+            type="button"
+          >
+            <Upload size={16} />
+            导入会员
+          </button>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#cfe3d3] bg-[#edf7ef] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!store}
+            onClick={() => openImportModal("packages")}
+            type="button"
+          >
+            <Upload size={16} />
+            导入会员套餐
+          </button>
+          <div className="flex flex-wrap gap-2">
+            {[
+              ["全部", summary.total],
+              ["可服务", summary.active],
+              ["已停用", summary.disabled],
+            ].map(([label, value]) => (
+              <div
+                className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-2"
+                key={label}
+              >
+                <div className="text-xs text-[#66756d]">{label}</div>
+                <div className="mt-1 text-lg font-semibold">{value}</div>
+              </div>
+            ))}
+          </div>
         </div>
+      </div>
+
+      <div className="mb-5 flex flex-wrap items-end gap-3 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-3">
+        <label className="flex min-w-[260px] flex-1 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+          关键字
+          <input
+            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                void reloadMembers(1);
+              }
+            }}
+            placeholder="会员昵称 / 手机号 / 备注"
+            value={query}
+          />
+        </label>
+        <label className="flex w-40 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+          状态
+          <select
+            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+            onChange={(event) =>
+              setStatusFilter(event.target.value as BindingStatus | "ALL")
+            }
+            value={statusFilter}
+          >
+            <option value="ALL">全部状态</option>
+            {Object.entries(STATUS_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
+          disabled={loadingList || !store}
+          onClick={() => void reloadMembers(1)}
+          type="button"
+        >
+          查询
+        </button>
+        <button
+          className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-5 text-sm font-semibold text-[#66756d] hover:bg-[#f3f7f1]"
+          disabled={loadingList}
+          onClick={resetFilters}
+          type="button"
+        >
+          重置
+        </button>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-[#dbe6dc]">
@@ -310,12 +756,12 @@ export function MemberManagementPanel({
                 </td>
                 <td className="px-4 py-4">
                   <div className="font-semibold">
-                    {member.latestActivePackage
-                      ? `${member.latestActivePackage.remainingTimes}/${member.latestActivePackage.totalTimes} 次`
-                      : "无有效套餐"}
-                  </div>
-                  <div className="mt-1 text-xs text-[#66756d]">
-                    有效套餐 {member.activePackageCount} 个
+	                    {member.latestActivePackage
+	                      ? `${member.latestActivePackage.remainingTimes}/${member.latestActivePackage.totalTimes} 次`
+	                      : "无可用套餐"}
+	                  </div>
+	                  <div className="mt-1 text-xs text-[#66756d]">
+	                    可用套餐 {member.activePackageCount} 个
                   </div>
                 </td>
                 <td className="px-4 py-4">
@@ -326,7 +772,7 @@ export function MemberManagementPanel({
                 </td>
                 <td className="px-4 py-4">
                   <div className="max-w-52 truncate">
-                    {member.defaultAddress?.detail ?? "未设置"}
+                    {formatAddress(member.defaultAddress)}
                   </div>
                   <div className="mt-1 text-xs text-[#66756d]">
                     {member.defaultAddress?.receiverName ?? "-"} ·{" "}
@@ -345,6 +791,14 @@ export function MemberManagementPanel({
                 </td>
                 <td className="px-4 py-4">
                   <div className="flex justify-end gap-2">
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                      onClick={() => openDetailModal(member)}
+                      title="查看详情"
+                      type="button"
+                    >
+                      <Eye size={16} />
+                    </button>
                     <button
                       className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                       onClick={() => openModal(member)}
@@ -379,23 +833,155 @@ export function MemberManagementPanel({
             {items.length === 0 ? (
               <tr>
                 <td className="px-4 py-10 text-center text-[#66756d]" colSpan={6}>
-                  当前门店还没有会员用户
+                  暂无会员用户
                 </td>
               </tr>
             ) : null}
-          </tbody>
-        </table>
+        </tbody>
+      </table>
+      <AdminPagination
+        disabled={loadingList}
+        onPageChange={(nextPage) => void reloadMembers(nextPage)}
+        pagination={pagination}
+      />
       </div>
+
+      {importOpen ? (
+        <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
+          <div
+            aria-modal="true"
+            className="mx-auto flex max-h-full min-h-[560px] w-[760px] max-w-full flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl"
+            role="dialog"
+          >
+            <div className="flex items-start justify-between border-b border-[#dbe6dc] px-6 py-4">
+              <div>
+                <div className="text-lg font-semibold">{importTitle}</div>
+                <div className="mt-1 text-sm text-[#66756d]">
+                  {importDescription}
+                </div>
+              </div>
+              <button
+                className="rounded-full bg-[#edf7ef] px-4 py-2 text-sm font-semibold text-[#1f8f4f]"
+                disabled={importing}
+                onClick={closeImportModal}
+                type="button"
+              >
+                关闭
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto p-6">
+              <div className="grid gap-4 md:grid-cols-[1fr_240px]">
+                <div>
+                  <div className="rounded-2xl border border-dashed border-[#cfe3d3] bg-[#f8fbf7] p-5">
+                    <div className="text-sm font-semibold">导入文件</div>
+                    <div className="mt-2 text-sm leading-6 text-[#66756d]">
+                      支持 .xlsx、.xls、.csv，单个文件不超过 5MB。
+                    </div>
+                    <div className="mt-4 rounded-xl bg-white px-4 py-3 text-sm">
+                      {importFile ? (
+                        <span className="font-semibold text-[#15261d]">
+                          {importFile.name}
+                        </span>
+                      ) : (
+                        <span className="text-[#8a9a90]">尚未选择文件</span>
+                      )}
+                    </div>
+                    <label className="mt-4 inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-[#cfe3d3] px-4 text-sm font-semibold text-[#1f8f4f]">
+                      <Upload size={16} />
+                      选择文件
+                      <input
+                        accept={IMPORT_FILE_ACCEPT}
+                        className="hidden"
+                        onChange={handleImportFile}
+                        type="file"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-3 text-xs leading-5 text-[#66756d]">
+                    {importRecommendedHeaders}
+                  </div>
+                </div>
+
+                <aside className="rounded-2xl border border-[#dbe6dc] bg-[#f8fbf7] p-4">
+                  <div className="text-sm font-semibold">导入规则</div>
+                  <ul className="mt-3 space-y-2 text-sm leading-6 text-[#66756d]">
+                    {importRules.map((rule) => (
+                      <li key={rule}>{rule}</li>
+                    ))}
+                  </ul>
+                </aside>
+              </div>
+
+              {importError ? (
+                <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {importError}
+                </div>
+              ) : null}
+
+              {importResult ? (
+                <div className="mt-4 rounded-2xl border border-[#dbe6dc] p-4">
+                  <div className="flex flex-wrap gap-3 text-sm">
+                    {importResultCards.map(([label, value]) => (
+                      <div
+                        className="rounded-xl bg-[#f8fbf7] px-4 py-2"
+                        key={label}
+                      >
+                        <div className="text-xs text-[#66756d]">{label}</div>
+                        <div className="mt-1 text-lg font-semibold">{value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {importResult.failures.length > 0 ? (
+                    <div className="mt-4 max-h-40 overflow-auto rounded-xl bg-[#fffaf0] p-3 text-sm text-[#9a6a18]">
+                      {importResult.failures.map((failure) => (
+                        <div key={`${failure.rowNumber}-${failure.phone}`}>
+                          第 {failure.rowNumber} 行：{failure.reason}
+                          {failure.phone ? `（${failure.phone}）` : ""}
+                          {"templateName" in failure && failure.templateName
+                            ? `，套餐：${failure.templateName}`
+                            : ""}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
+              <button
+                className="h-10 rounded-xl border border-[#dbe6dc] px-5"
+                disabled={importing}
+                onClick={closeImportModal}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
+                disabled={importing}
+                onClick={() => void submitImport()}
+                type="button"
+              >
+                {importing ? "导入中" : "开始导入"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {modalMember && form ? (
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
+            aria-modal="true"
             className={[
               "mx-auto flex min-h-[500px] flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
               fullscreen
                 ? "h-full w-full"
                 : "h-[64vh] w-[720px] max-w-full resize",
             ].join(" ")}
+            role="dialog"
             style={
               fullscreen
                 ? undefined
@@ -406,17 +992,24 @@ export function MemberManagementPanel({
               className="flex cursor-move items-center justify-between border-b border-[#dbe6dc] px-6 py-4"
               onPointerDown={handleHeaderPointerDown}
               onPointerMove={handleHeaderPointerMove}
+              onPointerCancel={handleHeaderPointerUp}
               onPointerUp={handleHeaderPointerUp}
             >
               <div className="min-w-0">
                 <div className="truncate text-lg font-semibold">
-                  会员详情 · {modalMember.nickname ?? modalMember.phone}
+                  {modalMode === "detail" ? "会员详情" : "编辑会员"} ·{" "}
+                  {modalMember.nickname ?? modalMember.phone}
                 </div>
-                <div className="mt-1 text-sm text-[#66756d]">
-                  标题栏可拖拽，右下角可伸缩，右上角支持全屏
-                </div>
+                {loadingDetail ? (
+                  <div className="mt-1 text-sm text-[#66756d]">
+                    正在加载最新会员详情
+                  </div>
+                ) : null}
               </div>
-              <div className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-2"
+                onPointerDown={(event) => event.stopPropagation()}
+              >
                 <button
                   className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f]"
                   onClick={() => setFullscreen((value) => !value)}
@@ -448,8 +1041,10 @@ export function MemberManagementPanel({
                       </div>
                     </div>
                     <div>
-                      <div className="text-[#66756d]">所属门店</div>
-                      <div className="mt-1 font-medium">{modalMember.store.name}</div>
+                      <div className="text-[#66756d]">会员状态</div>
+                      <div className="mt-1 font-medium">
+                        {STATUS_LABELS[modalMember.bindingStatus]}
+                      </div>
                     </div>
                     <div>
                       <div className="text-[#66756d]">订单数</div>
@@ -458,7 +1053,7 @@ export function MemberManagementPanel({
                       </div>
                     </div>
                     <div>
-                      <div className="text-[#66756d]">有效套餐</div>
+	                      <div className="text-[#66756d]">可用套餐</div>
                       <div className="mt-1 font-medium">
                         {modalMember.activePackageCount} 个
                       </div>
@@ -468,15 +1063,174 @@ export function MemberManagementPanel({
 
                 <section className="rounded-xl border border-[#dbe6dc] p-4">
                   <h3 className="font-semibold">默认地址</h3>
-                  <div className="mt-3 text-sm leading-7">
-                    {modalMember.defaultAddress?.detail ?? "未设置"}
+                  <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
+                    <label className="flex flex-col gap-2 font-medium">
+                      收货人
+                      <input
+                        className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                        onChange={(event) =>
+                          setForm((value) =>
+                            value
+                              ? {
+                                  ...value,
+                                  defaultAddress: {
+                                    ...value.defaultAddress,
+                                    receiverName: event.target.value,
+                                  },
+                                }
+                              : value,
+                          )
+                        }
+                        readOnly={modalMode === "detail"}
+                        value={form.defaultAddress.receiverName}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 font-medium">
+                      联系电话
+                      <input
+                        className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                        onChange={(event) =>
+                          setForm((value) =>
+                            value
+                              ? {
+                                  ...value,
+                                  defaultAddress: {
+                                    ...value.defaultAddress,
+                                    receiverPhone: event.target.value,
+                                  },
+                                }
+                              : value,
+                          )
+                        }
+                        readOnly={modalMode === "detail"}
+                        value={form.defaultAddress.receiverPhone}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 font-medium">
+                      省
+                      <input
+                        className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                        onChange={(event) =>
+                          setForm((value) =>
+                            value
+                              ? {
+                                  ...value,
+                                  defaultAddress: {
+                                    ...value.defaultAddress,
+                                    province: event.target.value,
+                                  },
+                                }
+                              : value,
+                          )
+                        }
+                        placeholder="例如 江苏省"
+                        readOnly={modalMode === "detail"}
+                        value={form.defaultAddress.province}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 font-medium">
+                      市
+                      <input
+                        className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                        onChange={(event) =>
+                          setForm((value) =>
+                            value
+                              ? {
+                                  ...value,
+                                  defaultAddress: {
+                                    ...value.defaultAddress,
+                                    city: event.target.value,
+                                  },
+                                }
+                              : value,
+                          )
+                        }
+                        placeholder="例如 南京市"
+                        readOnly={modalMode === "detail"}
+                        value={form.defaultAddress.city}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 font-medium">
+                      区
+                      <input
+                        className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                        onChange={(event) =>
+                          setForm((value) =>
+                            value
+                              ? {
+                                  ...value,
+                                  defaultAddress: {
+                                    ...value.defaultAddress,
+                                    district: event.target.value,
+                                  },
+                                }
+                              : value,
+                          )
+                        }
+                        placeholder="例如 六合区"
+                        readOnly={modalMode === "detail"}
+                        value={form.defaultAddress.district}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 font-medium md:col-span-2">
+                      详细地址
+                      <input
+                        className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                        onChange={(event) =>
+                          setForm((value) =>
+                            value
+                              ? {
+                                  ...value,
+                                  defaultAddress: {
+                                    ...value.defaultAddress,
+                                    detail: event.target.value,
+                                  },
+                                }
+                              : value,
+                          )
+                        }
+                        placeholder="街道、小区、楼栋、门牌号"
+                        readOnly={modalMode === "detail"}
+                        value={form.defaultAddress.detail}
+                      />
+                    </label>
                   </div>
+                </section>
+
+                <section className="rounded-xl border border-[#dbe6dc] p-4">
+                  <h3 className="font-semibold">套餐与订单</h3>
+                  <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
+                    <div>
+                      <div className="text-[#66756d]">全部套餐</div>
+                      <div className="mt-1 font-medium">
+                        {modalMember.packages?.length ?? modalMember.activePackageCount} 个
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[#66756d]">最近订单</div>
+                      <div className="mt-1 font-medium">
+                        {modalMember.recentOrders?.length ?? modalMember.orderCount} 条
+                      </div>
+                    </div>
+                  </div>
+                  {modalMember.packages?.[0] ? (
+                    <div className="mt-4 rounded-xl bg-[#f8fbf7] px-3 py-2 text-sm">
+                      {modalMember.packages[0].nameSnapshot} · 剩余{" "}
+                      {modalMember.packages[0].remainingTimes}/
+                      {modalMember.packages[0].totalTimes} 次
+                    </div>
+                  ) : null}
+                  {modalMember.recentOrders?.[0] ? (
+                    <div className="mt-2 rounded-xl bg-[#f8fbf7] px-3 py-2 text-sm">
+                      {formatRecentOrder(modalMember.recentOrders[0])}
+                    </div>
+                  ) : null}
                 </section>
               </div>
 
               <aside className="flex flex-col gap-4">
                 <div className="rounded-xl border border-[#cfe3d3] bg-[#f8fff8] p-4">
-                  <h3 className="font-semibold">门店服务状态</h3>
+                  <h3 className="font-semibold">服务状态</h3>
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     {(["ACTIVE", "DISABLED"] as const).map((status) => (
                       <button
@@ -486,6 +1240,7 @@ export function MemberManagementPanel({
                             ? "border-[#1f8f4f] bg-[#e8f6ed] text-[#1f8f4f]"
                             : "border-[#dbe6dc] text-[#66756d]",
                         ].join(" ")}
+                        disabled={modalMode === "detail"}
                         key={status}
                         onClick={() =>
                           setForm((value) =>
@@ -507,6 +1262,7 @@ export function MemberManagementPanel({
                           value ? { ...value, remark: event.target.value } : value,
                         )
                       }
+                      readOnly={modalMode === "detail"}
                       value={form.remark}
                     />
                   </label>
@@ -514,7 +1270,7 @@ export function MemberManagementPanel({
                     停用原因
                     <textarea
                       className="min-h-20 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
-                      disabled={form.status === "ACTIVE"}
+                      disabled={modalMode === "detail" || form.status === "ACTIVE"}
                       onChange={(event) =>
                         setForm((value) =>
                           value
@@ -522,6 +1278,7 @@ export function MemberManagementPanel({
                             : value,
                         )
                       }
+                      readOnly={modalMode === "detail"}
                       value={form.disabledReason}
                     />
                   </label>
@@ -542,16 +1299,18 @@ export function MemberManagementPanel({
                 onClick={closeModal}
                 type="button"
               >
-                取消
+                {modalMode === "detail" ? "关闭" : "取消"}
               </button>
-              <button
-                className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
-                disabled={saving}
-                onClick={submitModal}
-                type="button"
-              >
-                {saving ? "保存中" : "保存"}
-              </button>
+              {modalMode !== "detail" ? (
+                <button
+                  className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
+                  disabled={saving || loadingDetail}
+                  onClick={submitModal}
+                  type="button"
+                >
+                  {saving ? "保存中" : "保存"}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

@@ -193,11 +193,151 @@ describe("miniapp address management", () => {
     expect(list.defaultAddress?.id).toBe(first.id);
   });
 
+  it("sets an existing address as default without requiring full address fields", async () => {
+    const fixture = await createFixture();
+
+    const first = await addressOperations.createMiniappAddress({
+      detail: "莲花小区 3 栋 602",
+      receiverName: "张建国",
+      receiverPhone: "13800007777",
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+    const second = await addressOperations.createMiniappAddress({
+      detail: "望京街道 10 号院 1 栋 101",
+      receiverName: "张建国",
+      receiverPhone: "13800007777",
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    const updated = await (
+      addressOperations as typeof addressOperations & {
+        setDefaultMiniappAddress: (input: {
+          addressId: string;
+          storeId: string;
+          userId: string;
+        }) => Promise<Address>;
+      }
+    ).setDefaultMiniappAddress({
+      addressId: second.id,
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(updated).toMatchObject({
+      detail: "望京街道 10 号院 1 栋 101",
+      id: second.id,
+      isDefault: true,
+    });
+    await expect(
+      prisma.address.findUniqueOrThrow({ where: { id: first.id } }),
+    ).resolves.toMatchObject({ isDefault: false });
+
+    await expect(
+      (
+        addressOperations as typeof addressOperations & {
+          setDefaultMiniappAddress: (input: {
+            addressId: string;
+            storeId: string;
+            userId: string;
+          }) => Promise<Address>;
+        }
+      ).setDefaultMiniappAddress({
+        addressId: second.id,
+        storeId: fixture.otherStore.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "MEMBER_STORE_NOT_FOUND",
+    });
+  });
+
+  it("rejects addresses outside the store delivery province or city", async () => {
+    const fixture = await createFixture();
+
+    const legacyAddress = await addressOperations.createMiniappAddress({
+      city: "杭州市",
+      detail: "西湖区文三路 88 号 1 栋 101",
+      district: "西湖区",
+      province: "浙江省",
+      receiverName: "张建国",
+      receiverPhone: "13800007777",
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    await prisma.store.update({
+      where: { id: fixture.store.id },
+      data: {
+        deliveryCities: ["南京市"],
+        deliveryProvinces: ["江苏省"],
+      },
+    });
+
+    await expect(
+      addressOperations.createMiniappAddress({
+        city: "杭州市",
+        detail: "西湖区文三路 99 号 1 栋 101",
+        district: "西湖区",
+        province: "浙江省",
+        receiverName: "张建国",
+        receiverPhone: "13800007777",
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "ADDRESS_OUT_OF_DELIVERY_RANGE",
+      message: "当前门店仅配送：江苏省",
+    });
+
+    const allowedAddress = await addressOperations.createMiniappAddress({
+      city: "南京市",
+      detail: "六合区龙池街道 1 号 3 栋 602",
+      district: "六合区",
+      isDefault: true,
+      province: "江苏省",
+      receiverName: "张建国",
+      receiverPhone: "13800007777",
+      storeId: fixture.store.id,
+      userId: fixture.user.id,
+    });
+
+    expect(allowedAddress.isDefault).toBe(true);
+
+    await expect(
+      addressOperations.updateMiniappAddress({
+        addressId: allowedAddress.id,
+        city: "苏州市",
+        detail: "姑苏区平江路 10 号 1 栋 101",
+        district: "姑苏区",
+        province: "江苏省",
+        receiverName: "张建国",
+        receiverPhone: "13800007777",
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "ADDRESS_OUT_OF_DELIVERY_RANGE",
+      message: "当前门店仅配送城市：南京市",
+    });
+
+    await expect(
+      addressOperations.setDefaultMiniappAddress({
+        addressId: legacyAddress.id,
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "ADDRESS_OUT_OF_DELIVERY_RANGE",
+    });
+  });
+
   it("keeps address operations scoped to a member store binding", async () => {
     const fixture = await createFixture();
 
     const address = await addressOperations.createMiniappAddress({
-      detail: "本店地址",
+      detail: "莲花小区 3 栋 602",
       receiverName: "张建国",
       receiverPhone: "13800007777",
       storeId: fixture.store.id,
@@ -207,7 +347,7 @@ describe("miniapp address management", () => {
     await expect(
       addressOperations.updateMiniappAddress({
         addressId: address.id,
-        detail: "跨门店修改",
+        detail: "跨门店修改地址 1 栋 101",
         receiverName: "张建国",
         receiverPhone: "13800007777",
         storeId: fixture.otherStore.id,
@@ -228,8 +368,64 @@ describe("miniapp address management", () => {
     });
   });
 
+  it("returns a disabled-member error with reason for address operations", async () => {
+    const fixture = await createFixture();
+    await prisma.user.update({
+      where: { id: fixture.user.id },
+      data: { disabledReason: "暂停配送" },
+    });
+    await prisma.memberStoreBinding.updateMany({
+      where: {
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      },
+      data: { status: "DISABLED" },
+    });
+
+    await expect(
+      addressOperations.createMiniappAddress({
+        detail: "停用后新增配送地址",
+        receiverName: "张建国",
+        receiverPhone: "13800007777",
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "MEMBER_DISABLED",
+      message: "会员已停用：暂停配送",
+    });
+
+    await expect(
+      addressOperations.listMiniappAddresses({
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "MEMBER_DISABLED",
+      message: "会员已停用：暂停配送",
+    });
+  });
+
   it("validates phone, enforces address limit and deletes addresses safely", async () => {
     const fixture = await createFixture();
+
+    await expect(
+      addressOperations.createMiniappAddress({
+        detail: "3栋602",
+        receiverName: "张建国",
+        receiverPhone: "13800007777",
+        storeId: fixture.store.id,
+        userId: fixture.user.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "DETAIL_TOO_SHORT",
+      message: "详细地址至少 8 个字",
+    });
+    await expect(
+      prisma.address.count({
+        where: { storeId: fixture.store.id, userId: fixture.user.id },
+      }),
+    ).resolves.toBe(0);
 
     await expect(
       addressOperations.createMiniappAddress({
@@ -260,7 +456,7 @@ describe("miniapp address management", () => {
 
     await expect(
       addressOperations.createMiniappAddress({
-        detail: "第 11 个地址",
+        detail: "第 11 个测试地址 101",
         receiverName: "张建国",
         receiverPhone: "13800007777",
         storeId: fixture.store.id,

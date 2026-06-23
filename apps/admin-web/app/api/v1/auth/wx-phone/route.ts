@@ -1,10 +1,15 @@
 import { z } from "zod";
 
-import { findAvailableMiniappStore, prisma } from "@hentor/db";
+import {
+  createMiniappOperationLog,
+  findAvailableMiniappStore,
+  prisma,
+} from "@hentor/db";
 import { storeCodeSchema } from "@hentor/shared";
 
 import { fail, ok } from "@/app/lib/api";
 import { createMiniToken } from "@/app/lib/mini-auth";
+import { getRequestAuditMeta } from "@/app/lib/request-audit";
 import {
   exchangeWechatLoginCode,
   exchangeWechatPhoneCode,
@@ -16,7 +21,63 @@ const wxPhoneLoginSchema = z.object({
   storeCode: storeCodeSchema.optional(),
 });
 
+function maskPhone(phone: string | null | undefined) {
+  return phone ? phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2") : null;
+}
+
+async function upsertWechatPhoneUser(input: {
+  defaultStoreId: string;
+  openid: string;
+  phone: string;
+  unionid?: string | null;
+}) {
+  const existingWechatUser = await prisma.user.findUnique({
+    where: { openid: input.openid },
+  });
+
+  if (existingWechatUser) {
+    return prisma.user.update({
+      data: {
+        defaultStoreId: input.defaultStoreId,
+        phone: input.phone,
+        unionid: input.unionid,
+      },
+      where: { id: existingWechatUser.id },
+    });
+  }
+
+  const importedUser = await prisma.user.findFirst({
+    orderBy: { createdAt: "asc" },
+    where: {
+      openid: { startsWith: "imported-phone:" },
+      phone: input.phone,
+    },
+  });
+
+  if (importedUser) {
+    return prisma.user.update({
+      data: {
+        defaultStoreId: input.defaultStoreId,
+        openid: input.openid,
+        phone: input.phone,
+        unionid: input.unionid,
+      },
+      where: { id: importedUser.id },
+    });
+  }
+
+  return prisma.user.create({
+    data: {
+      defaultStoreId: input.defaultStoreId,
+      openid: input.openid,
+      phone: input.phone,
+      unionid: input.unionid,
+    },
+  });
+}
+
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   const parsed = wxPhoneLoginSchema.safeParse(
     await request.json().catch(() => null),
   );
@@ -39,19 +100,11 @@ export async function POST(request: Request) {
       return fail("STORE_NOT_FOUND", "当前门店不可用", 404);
     }
 
-    const user = await prisma.user.upsert({
-      where: { openid: wechatSession.openid },
-      update: {
-        unionid: wechatSession.unionid,
-        phone: phoneInfo.phone,
-        defaultStoreId: store.id,
-      },
-      create: {
-        openid: wechatSession.openid,
-        unionid: wechatSession.unionid,
-        phone: phoneInfo.phone,
-        defaultStoreId: store.id,
-      },
+    const user = await upsertWechatPhoneUser({
+      defaultStoreId: store.id,
+      openid: wechatSession.openid,
+      phone: phoneInfo.phone,
+      unionid: wechatSession.unionid,
     });
 
     await prisma.memberStoreBinding.upsert({
@@ -62,16 +115,53 @@ export async function POST(request: Request) {
         },
       },
       update: {
-        status: "ACTIVE",
+        status: user.status === "DISABLED" ? "DISABLED" : "ACTIVE",
         isDefault: true,
       },
       create: {
         userId: user.id,
         storeId: store.id,
-        status: "ACTIVE",
+        status: user.status === "DISABLED" ? "DISABLED" : "ACTIVE",
         isDefault: true,
         source: "wechat_login",
       },
+    });
+
+    const responseData = {
+      store: {
+        code: store.code,
+        id: store.id,
+        name: store.name,
+      },
+      success: true,
+      token: "[issued]",
+      user: {
+        defaultStoreId: store.id,
+        id: user.id,
+        nickname: user.nickname,
+        phone: maskPhone(user.phone),
+      },
+    };
+
+    await createMiniappOperationLog({
+      action: "MINIAPP_PHONE_LOGIN",
+      afterValue: {
+        phone: maskPhone(user.phone),
+        storeCode: store.code,
+      },
+      durationMs: Date.now() - startedAt,
+      resource: "miniapp_session",
+      resourceId: user.id,
+      requestParams: {
+        loginCode: parsed.data.loginCode ? "[provided]" : "[missing]",
+        phoneCode: parsed.data.phoneCode ? "[provided]" : "[missing]",
+        storeCode: parsed.data.storeCode ?? null,
+      },
+      responseData,
+      storeId: store.id,
+      statusCode: 200,
+      userId: user.id,
+      ...getRequestAuditMeta(request),
     });
 
     return ok({

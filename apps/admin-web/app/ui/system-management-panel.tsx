@@ -1,16 +1,25 @@
 "use client";
 
 import {
+  Eye,
   KeyRound,
   Maximize2,
   Minimize2,
   Pencil,
-  RefreshCcw,
   ShieldCheck,
   UserPlus,
   X,
 } from "lucide-react";
-import { useMemo, useRef, useState, type PointerEvent } from "react";
+import { useRef, useState, type PointerEvent } from "react";
+
+import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  buildDetailPath,
+  loadDetailResource,
+  replaceItemById,
+} from "./detail-loaders";
+import { canCloseAdminModal } from "./admin-modal-close-guard";
+import { hasAdminFormChanges } from "./admin-form-dirty";
 
 type AdminStatus = "ACTIVE" | "DISABLED";
 
@@ -35,31 +44,22 @@ export type AdminUserPanelItem = {
   status: AdminStatus;
   storeIds: string[];
   storeNames: string[];
+  stores?: Array<{
+    id: string;
+    name: string;
+  }>;
   updatedAt: string;
   username: string;
 };
 
-export type OperationLogPanelItem = {
-  action: string;
-  createdAt: string;
-  id: string;
-  operator: {
-    id: string;
-    name: string;
-    username: string;
-  };
-  resource: string;
-  resourceId: string | null;
-  store: {
-    id: string;
-    name: string;
-  } | null;
-};
-
 type SystemManagementPanelProps = {
   initialAdminUsers: AdminUserPanelItem[];
-  initialLogs: OperationLogPanelItem[];
-  logStoreId: string | null;
+  initialPagination: AdminPaginationMeta;
+  initialSummary: {
+    active: number;
+    disabled: number;
+    total: number;
+  };
   roles: RoleOption[];
   stores: StoreOption[];
 };
@@ -68,6 +68,10 @@ type ModalState =
   | {
       item: null;
       mode: "create";
+    }
+  | {
+      item: AdminUserPanelItem;
+      mode: "detail";
     }
   | {
       item: AdminUserPanelItem;
@@ -91,24 +95,6 @@ type FormState = {
 const STATUS_LABELS: Record<AdminStatus, string> = {
   ACTIVE: "启用",
   DISABLED: "停用",
-};
-
-const ACTION_LABELS: Record<string, string> = {
-  ADMIN_USER_CREATED: "新建后台用户",
-  ADMIN_USER_PASSWORD_RESET: "重置密码",
-  ADMIN_USER_UPDATED: "编辑后台用户",
-  DISH_CREATED: "新建菜品",
-  DISH_DELETED: "删除菜品",
-  DISH_INVENTORY_ADJUSTED: "调整库存",
-  DISH_UPDATED: "编辑菜品",
-  MEMBER_UPDATED: "编辑会员",
-  ORDER_REMARK_UPDATED: "编辑订单备注",
-  ORDER_SHIPPED: "订单发货",
-  PACKAGE_TEMPLATE_CREATED: "新建套餐模板",
-  PACKAGE_TEMPLATE_UPDATED: "编辑套餐模板",
-  TASK_COPIED: "复制任务",
-  TASK_CREATED: "新建任务",
-  TASK_UPDATED: "编辑任务",
 };
 
 function buildFormState(
@@ -155,19 +141,28 @@ function toggleValue(values: string[], value: string) {
 
 export function SystemManagementPanel({
   initialAdminUsers,
-  initialLogs,
-  logStoreId,
+  initialPagination,
+  initialSummary,
   roles,
   stores,
 }: SystemManagementPanelProps) {
   const [adminUsers, setAdminUsers] = useState(initialAdminUsers);
-  const [logs, setLogs] = useState(initialLogs);
+  const [pagination, setPagination] = useState(initialPagination);
+  const [summary, setSummary] = useState(initialSummary);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [form, setForm] = useState<FormState>(() => buildFormState(null, roles));
+  const [initialForm, setInitialForm] = useState<FormState>(() =>
+    buildFormState(null, roles),
+  );
   const [fullscreen, setFullscreen] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<AdminStatus | "ALL">("ALL");
+  const [storeFilter, setStoreFilter] = useState("ALL");
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -176,24 +171,6 @@ export function SystemManagementPanel({
     y: number;
   } | null>(null);
 
-  const summary = useMemo(
-    () =>
-      adminUsers.reduce(
-        (value, item) => {
-          value.total += 1;
-          if (item.status === "ACTIVE") {
-            value.active += 1;
-          }
-          if (item.status === "DISABLED") {
-            value.disabled += 1;
-          }
-          return value;
-        },
-        { active: 0, disabled: 0, total: 0 },
-      ),
-    [adminUsers],
-  );
-
   function resetModalPosition() {
     setFullscreen(false);
     setOffset({ x: 0, y: 0 });
@@ -201,25 +178,98 @@ export function SystemManagementPanel({
   }
 
   function openCreateModal() {
+    const nextForm = buildFormState(null, roles);
     setModal({ item: null, mode: "create" });
-    setForm(buildFormState(null, roles));
+    setForm(nextForm);
+    setInitialForm(nextForm);
     resetModalPosition();
   }
 
   function openEditModal(item: AdminUserPanelItem) {
+    const nextForm = buildFormState(item, roles);
     setModal({ item, mode: "edit" });
-    setForm(buildFormState(item, roles));
+    setForm(nextForm);
+    setInitialForm(nextForm);
     resetModalPosition();
+    void hydrateAdminUserDetail(item);
+  }
+
+  function openDetailModal(item: AdminUserPanelItem) {
+    const nextForm = buildFormState(item, roles);
+    setModal({ item, mode: "detail" });
+    setForm(nextForm);
+    setInitialForm(nextForm);
+    resetModalPosition();
+    void hydrateAdminUserDetail(item);
   }
 
   function openPasswordModal(item: AdminUserPanelItem) {
+    const nextForm = { ...buildFormState(item, roles), password: "" };
     setModal({ item, mode: "password" });
-    setForm({ ...buildFormState(item, roles), password: "" });
+    setForm(nextForm);
+    setInitialForm(nextForm);
     resetModalPosition();
+    void hydrateAdminUserDetail(item);
+  }
+
+  async function hydrateAdminUserDetail(item: AdminUserPanelItem) {
+    setLoadingDetail(true);
+
+    try {
+      const detail = await loadDetailResource<AdminUserPanelItem>(
+        buildDetailPath("admin-users", item.id),
+        "adminUser",
+      );
+
+      setAdminUsers((value) => replaceItemById(value, detail));
+      setModal((current) => {
+        if (
+          (current?.mode === "detail" ||
+            current?.mode === "edit" ||
+            current?.mode === "password") &&
+          current.item.id === item.id
+        ) {
+          return { ...current, item: detail };
+        }
+
+        return current;
+      });
+      const detailForm = buildFormState(detail, roles);
+      setInitialForm({ ...detailForm, password: "" });
+      setForm((current) =>
+        current
+          ? {
+              ...detailForm,
+              password: current.password,
+            }
+          : current,
+      );
+    } catch (detailError) {
+      setError(
+        detailError instanceof Error
+          ? detailError.message
+          : "后台用户详情加载失败",
+      );
+    } finally {
+      setLoadingDetail(false);
+    }
   }
 
   function closeModal() {
     if (saving) {
+      return;
+    }
+
+    if (
+      modal &&
+      modal.mode !== "detail" &&
+      !canCloseAdminModal({
+        hasUnsavedChanges: hasAdminFormChanges({
+          current: form,
+          initial: initialForm,
+        }),
+      })
+    ) {
       return;
     }
 
@@ -265,36 +315,59 @@ export function SystemManagementPanel({
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  async function reloadAdminUsers() {
-    const response = await fetch("/api/admin/admin-users");
+  async function reloadAdminUsers(
+    page = pagination.page,
+    filters = { query, statusFilter, storeFilter },
+  ) {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pagination.pageSize),
+    });
+    const nextQuery = filters.query.trim();
+    if (nextQuery) {
+      params.set("query", nextQuery);
+    }
+    if (filters.statusFilter !== "ALL") {
+      params.set("status", filters.statusFilter);
+    }
+    if (filters.storeFilter !== "ALL") {
+      params.set("storeId", filters.storeFilter);
+    }
+
+    setLoadingList(true);
+    setError(null);
+
+    const response = await fetch(`/api/admin/admin-users?${params.toString()}`);
     const result = (await response.json()) as {
-      data?: { items: AdminUserPanelItem[] };
+      data?: {
+        items: AdminUserPanelItem[];
+        pagination: AdminPaginationMeta;
+        summary: typeof initialSummary;
+      };
       success: boolean;
     };
 
     if (response.ok && result.success && result.data?.items) {
       setAdminUsers(result.data.items);
+      setPagination(result.data.pagination);
+      setSummary(result.data.summary);
     }
+    setLoadingList(false);
   }
 
-  async function reloadLogs() {
-    const params = new URLSearchParams({ resource: "admin_user" });
-    if (logStoreId) {
-      params.set("storeId", logStoreId);
-    }
-    const response = await fetch(`/api/admin/operation-logs?${params.toString()}`);
-    const result = (await response.json()) as {
-      data?: { items: OperationLogPanelItem[] };
-      success: boolean;
-    };
-
-    if (response.ok && result.success && result.data?.items) {
-      setLogs(result.data.items);
-    }
+  function resetFilters() {
+    setQuery("");
+    setStatusFilter("ALL");
+    setStoreFilter("ALL");
+    void reloadAdminUsers(1, {
+      query: "",
+      statusFilter: "ALL",
+      storeFilter: "ALL",
+    });
   }
 
   async function submitModal() {
-    if (!modal) {
+    if (!modal || modal.mode === "detail") {
       return;
     }
 
@@ -335,7 +408,7 @@ export function SystemManagementPanel({
         throw new Error(result.error?.message ?? "保存失败");
       }
 
-      await Promise.all([reloadAdminUsers(), reloadLogs()]);
+      await reloadAdminUsers(modal.mode === "create" ? 1 : pagination.page);
       setModal(null);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "保存失败");
@@ -345,7 +418,7 @@ export function SystemManagementPanel({
   }
 
   return (
-    <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+    <section className="grid gap-5">
       <div className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -357,7 +430,7 @@ export function SystemManagementPanel({
               后台用户
             </h2>
             <p className="mt-2 text-sm leading-6 text-[#66756d]">
-              总部账号可管理全部门店，加盟门店账号按授权门店进入。
+              后台用户用于运营管理，角色权限决定可访问的功能范围。
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -385,13 +458,62 @@ export function SystemManagementPanel({
           </div>
         </div>
 
+        <div className="mt-5 flex flex-wrap items-end gap-3 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-3">
+          <label className="flex min-w-[240px] flex-1 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+            关键字
+            <input
+              className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void reloadAdminUsers(1);
+                }
+              }}
+              placeholder="姓名 / 登录账号 / 手机号"
+              value={query}
+            />
+          </label>
+          <label className="flex w-36 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+            状态
+            <select
+              className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+              onChange={(event) =>
+                setStatusFilter(event.target.value as AdminStatus | "ALL")
+              }
+              value={statusFilter}
+            >
+              <option value="ALL">全部状态</option>
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
+            disabled={loadingList}
+            onClick={() => void reloadAdminUsers(1)}
+            type="button"
+          >
+            查询
+          </button>
+          <button
+            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-5 text-sm font-semibold text-[#66756d] hover:bg-[#f3f7f1]"
+            disabled={loadingList}
+            onClick={resetFilters}
+            type="button"
+          >
+            重置
+          </button>
+        </div>
+
         <div className="mt-5 overflow-hidden rounded-xl border border-[#dbe6dc]">
           <table className="w-full border-collapse text-left text-sm">
             <thead className="bg-[#f5f8f3] text-[#66756d]">
               <tr>
                 <th className="px-4 py-3 font-medium">账号</th>
                 <th className="px-4 py-3 font-medium">角色</th>
-                <th className="px-4 py-3 font-medium">授权门店</th>
                 <th className="px-4 py-3 font-medium">状态</th>
                 <th className="px-4 py-3 font-medium">最近登录</th>
                 <th className="px-4 py-3 text-right font-medium">操作</th>
@@ -414,11 +536,6 @@ export function SystemManagementPanel({
                     </div>
                   </td>
                   <td className="px-4 py-4">
-                    <div className="max-w-52 truncate">
-                      {item.storeNames.length ? item.storeNames.join("、") : "全部门店"}
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
                     <span className="rounded-full bg-[#e8f6ed] px-3 py-1 text-xs font-semibold text-[#1f8f4f]">
                       {STATUS_LABELS[item.status]}
                     </span>
@@ -428,6 +545,14 @@ export function SystemManagementPanel({
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex justify-end gap-2">
+                      <button
+                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                        onClick={() => openDetailModal(item)}
+                        title="查看详情"
+                        type="button"
+                      >
+                        <Eye size={16} />
+                      </button>
                       <button
                         className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                         onClick={() => openEditModal(item)}
@@ -450,69 +575,32 @@ export function SystemManagementPanel({
               ))}
               {adminUsers.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-[#66756d]" colSpan={6}>
+                  <td className="px-4 py-10 text-center text-[#66756d]" colSpan={5}>
                     暂无后台用户
                   </td>
                 </tr>
               ) : null}
             </tbody>
           </table>
+          <AdminPagination
+            disabled={loadingList}
+            onPageChange={(nextPage) => void reloadAdminUsers(nextPage)}
+            pagination={pagination}
+          />
         </div>
       </div>
-
-      <aside className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-semibold tracking-normal">操作日志</h2>
-            <p className="mt-2 text-sm leading-6 text-[#66756d]">
-              记录关键后台变更和操作账号。
-            </p>
-          </div>
-          <button
-            className="grid h-10 w-10 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-            onClick={reloadLogs}
-            title="刷新日志"
-            type="button"
-          >
-            <RefreshCcw size={17} />
-          </button>
-        </div>
-
-        <div className="mt-5 space-y-3">
-          {logs.slice(0, 10).map((log) => (
-            <div className="rounded-xl border border-[#edf2ed] p-4" key={log.id}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate font-semibold">
-                    {ACTION_LABELS[log.action] ?? log.action}
-                  </div>
-                  <div className="mt-1 truncate text-xs text-[#66756d]">
-                    {log.operator.name} · {log.store?.name ?? "全局"}
-                  </div>
-                </div>
-                <div className="shrink-0 text-xs text-[#66756d]">
-                  {formatDateTime(log.createdAt)}
-                </div>
-              </div>
-            </div>
-          ))}
-          {logs.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-[#dbe6dc] p-8 text-center text-sm text-[#66756d]">
-              暂无操作日志
-            </div>
-          ) : null}
-        </div>
-      </aside>
 
       {modal ? (
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
+            aria-modal="true"
             className={[
               "mx-auto flex min-h-[520px] flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
               fullscreen
                 ? "h-full w-full"
                 : "h-[66vh] w-[820px] max-w-full resize",
             ].join(" ")}
+            role="dialog"
             style={
               fullscreen
                 ? undefined
@@ -523,21 +611,29 @@ export function SystemManagementPanel({
               className="flex cursor-move items-center justify-between border-b border-[#dbe6dc] px-6 py-4"
               onPointerDown={handleHeaderPointerDown}
               onPointerMove={handleHeaderPointerMove}
+              onPointerCancel={handleHeaderPointerUp}
               onPointerUp={handleHeaderPointerUp}
             >
               <div className="min-w-0">
                 <div className="truncate text-lg font-semibold">
                   {modal.mode === "create"
                     ? "新建后台用户"
+                    : modal.mode === "detail"
+                      ? `后台用户详情 · ${modal.item.name}`
                     : modal.mode === "edit"
                       ? `编辑 · ${modal.item.name}`
                       : `重置密码 · ${modal.item.name}`}
                 </div>
                 <div className="mt-1 truncate text-sm text-[#66756d]">
-                  后台用户与会员用户独立管理
+                  {loadingDetail
+                    ? "正在加载最新后台用户详情"
+                    : "后台用户与会员用户独立管理"}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-2"
+                onPointerDown={(event) => event.stopPropagation()}
+              >
                 <button
                   className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f]"
                   onClick={() => setFullscreen((value) => !value)}
@@ -559,6 +655,14 @@ export function SystemManagementPanel({
 
             <div className="flex-1 overflow-auto p-6">
               {modal.mode === "password" ? (
+                <div className="space-y-4">
+                <div className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4 text-sm">
+                  <div className="font-semibold">{modal.item.name}</div>
+                  <div className="mt-1 text-[#66756d]">
+                    {modal.item.roleNames.join("、") || "未分配角色"} ·{" "}
+                    数据范围已按当前系统配置保留
+                  </div>
+                </div>
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   新密码
                   <input
@@ -569,14 +673,16 @@ export function SystemManagementPanel({
                     value={form.password}
                   />
                 </label>
+                </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="flex flex-col gap-2 text-sm font-medium">
                     登录账号
                     <input
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f] disabled:bg-[#f5f8f3]"
-                      disabled={modal.mode === "edit"}
+                      disabled={modal.mode !== "create"}
                       onChange={(event) => updateForm("username", event.target.value)}
+                      readOnly={modal.mode === "detail"}
                       value={form.username}
                     />
                   </label>
@@ -585,6 +691,7 @@ export function SystemManagementPanel({
                     <input
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) => updateForm("name", event.target.value)}
+                      readOnly={modal.mode === "detail"}
                       value={form.name}
                     />
                   </label>
@@ -607,6 +714,7 @@ export function SystemManagementPanel({
                     <input
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) => updateForm("phone", event.target.value)}
+                      readOnly={modal.mode === "detail"}
                       value={form.phone}
                     />
                   </label>
@@ -614,6 +722,7 @@ export function SystemManagementPanel({
                     状态
                     <select
                       className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
+                      disabled={modal.mode === "detail"}
                       onChange={(event) =>
                         updateForm("status", event.target.value as AdminStatus)
                       }
@@ -633,35 +742,13 @@ export function SystemManagementPanel({
                         >
                           <input
                             checked={form.roleIds.includes(role.id)}
+                            disabled={modal.mode === "detail"}
                             onChange={() =>
                               updateForm("roleIds", toggleValue(form.roleIds, role.id))
                             }
                             type="checkbox"
                           />
                           {role.name}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="md:col-span-2">
-                    <div className="mb-2 text-sm font-medium">授权门店</div>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {stores.map((store) => (
-                        <label
-                          className="flex h-11 items-center gap-3 rounded-xl border border-[#dbe6dc] px-3 text-sm"
-                          key={store.id}
-                        >
-                          <input
-                            checked={form.storeIds.includes(store.id)}
-                            onChange={() =>
-                              updateForm(
-                                "storeIds",
-                                toggleValue(form.storeIds, store.id),
-                              )
-                            }
-                            type="checkbox"
-                          />
-                          <span className="truncate">{store.name}</span>
                         </label>
                       ))}
                     </div>
@@ -679,20 +766,22 @@ export function SystemManagementPanel({
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
               <button
                 className="h-10 rounded-xl border border-[#dbe6dc] px-5"
-                disabled={saving}
+                disabled={saving || loadingDetail}
                 onClick={closeModal}
                 type="button"
               >
-                取消
+                {modal.mode === "detail" ? "关闭" : "取消"}
               </button>
-              <button
-                className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
-                disabled={saving}
-                onClick={submitModal}
-                type="button"
-              >
-                {saving ? "保存中" : "保存"}
-              </button>
+              {modal.mode !== "detail" ? (
+                <button
+                  className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
+                  disabled={saving}
+                  onClick={submitModal}
+                  type="button"
+                >
+                  {saving ? "保存中" : "保存"}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

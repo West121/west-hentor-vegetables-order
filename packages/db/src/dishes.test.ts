@@ -105,14 +105,22 @@ describe("dish management", () => {
             stepJin: number;
             stockJin: number;
           }>;
-          summary: { offSale: number; onSale: number; total: number };
+          summary: {
+            lowStock: number;
+            offSale: number;
+            onSale: number;
+            stock: number;
+            total: number;
+          };
         }>;
       }
     ).listDishes({ storeId: fixture.store.id });
 
     expect(result.summary).toEqual({
+      lowStock: 0,
       offSale: 0,
       onSale: 1,
+      stock: 20,
       total: 1,
     });
     expect(result.items).toHaveLength(1);
@@ -123,6 +131,70 @@ describe("dish management", () => {
       stockJin: 20,
     });
     expect(result.items[0]?.id).not.toBe(otherFixture.dish.id);
+  });
+
+  it("gets a dish detail with recent inventory logs", async () => {
+    const fixture = await createFixture();
+
+    await prisma.inventoryLog.create({
+      data: {
+        afterJin: new Prisma.Decimal("18.50"),
+        beforeJin: fixture.dish.stockJin,
+        changeJin: new Prisma.Decimal("-1.50"),
+        dishId: fixture.dish.id,
+        operatorId: fixture.admin.id,
+        reason: "预定扣减",
+        storeId: fixture.store.id,
+      },
+    });
+
+    const detail = await (
+      dishOperations as typeof dishOperations & {
+        getDish: (input: {
+          dishId: string;
+          storeId: string;
+        }) => Promise<{
+          id: string;
+          inventoryLogs: Array<{
+            afterJin: number;
+            beforeJin: number;
+            changeJin: number;
+            operator: { id: string; name: string } | null;
+            reason: string;
+          }>;
+          name: string;
+          stepJin: number;
+          stockJin: number;
+          store: { id: string; name: string };
+        }>;
+      }
+    ).getDish({
+      dishId: fixture.dish.id,
+      storeId: fixture.store.id,
+    });
+
+    expect(detail).toMatchObject({
+      id: fixture.dish.id,
+      name: fixture.dish.name,
+      stepJin: 0.5,
+      stockJin: 20,
+      store: {
+        id: fixture.store.id,
+        name: fixture.store.name,
+      },
+    });
+    expect(detail.inventoryLogs).toEqual([
+      expect.objectContaining({
+        afterJin: 18.5,
+        beforeJin: 20,
+        changeJin: -1.5,
+        operator: expect.objectContaining({
+          id: fixture.admin.id,
+          name: fixture.admin.name,
+        }),
+        reason: "预定扣减",
+      }),
+    ]);
   });
 
   it("creates updates and adjusts inventory with operation logs", async () => {

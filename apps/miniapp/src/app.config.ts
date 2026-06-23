@@ -6,12 +6,13 @@ export default defineAppConfig({
     "pages/orders/index",
     "pages/packages/index",
     "pages/login/index",
+    "pages/webview/index",
   ],
   window: {
     backgroundTextStyle: "light",
     navigationBarBackgroundColor: "#F4F8F1",
-    navigationBarTitleText: "Hentor Fresh",
     navigationBarTextStyle: "black",
+    navigationStyle: "custom",
   },
   tabBar: {
     color: "#8A9A90",
@@ -20,11 +21,15 @@ export default defineAppConfig({
     borderStyle: "white",
     list: [
       {
+        iconPath: "assets/tabbar/home-default.png",
         pagePath: "pages/home/index",
+        selectedIconPath: "assets/tabbar/home-active.png",
         text: "首页",
       },
       {
+        iconPath: "assets/tabbar/me-default.png",
         pagePath: "pages/me/index",
+        selectedIconPath: "assets/tabbar/me-active.png",
         text: "我的",
       },
     ],

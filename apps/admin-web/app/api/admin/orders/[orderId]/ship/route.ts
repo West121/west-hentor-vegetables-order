@@ -2,12 +2,24 @@ import { z } from "zod";
 
 import { OrderServiceError, shipOrder } from "@hentor/db";
 
-import { getStoreAccessFailure } from "@/app/lib/admin-access";
+import {
+  getPermissionFailure,
+  getStoreAccessFailure,
+} from "@/app/lib/admin-access";
 import { fail, ok } from "@/app/lib/api";
 import { getAdminSession } from "@/app/lib/session";
 
 const shipOrderSchema = z.object({
-  logisticsNo: z.string().min(1, "请输入运单号"),
+  logisticsNo: z.string().optional(),
+  shipments: z
+    .array(
+      z.object({
+        logisticsNo: z.string().min(1, "请输入运单号"),
+        packageName: z.string().min(1, "请输入包裹名称"),
+        packageType: z.string().optional(),
+      }),
+    )
+    .optional(),
   storeId: z.string().min(1),
 });
 
@@ -37,6 +49,14 @@ export async function POST(
     return fail("INVALID_PARAMS", "发货参数不完整");
   }
 
+  const permissionFailure = await getPermissionFailure(
+    session.adminUserId,
+    "orders.write",
+  );
+  if (permissionFailure) {
+    return permissionFailure;
+  }
+
   const accessFailure = await getStoreAccessFailure(
     session.adminUserId,
     parsed.data.storeId,
@@ -52,17 +72,37 @@ export async function POST(
       logisticsNo: parsed.data.logisticsNo,
       operatorId: session.adminUserId,
       orderId,
+      shipments: parsed.data.shipments,
       storeId: parsed.data.storeId,
     });
 
-    return ok({
-      order: {
-        id: order.id,
-        logisticsNo: order.logisticsNo,
-        shippedAt: order.shippedAt?.toISOString(),
-        status: order.status,
-      },
-    });
+	    return ok({
+	      order: {
+	        id: order.id,
+	        logisticsNo: order.logisticsNo,
+	        shippedAt: order.shippedAt?.toISOString(),
+	        shipments:
+	          parsed.data.shipments?.map((shipment) => ({
+	            logisticsNo: shipment.logisticsNo,
+	            packageName: shipment.packageName,
+	            packageType: shipment.packageType ?? "EXTRA",
+	            shippedAt: order.shippedAt?.toISOString(),
+	            status: "SHIPPED",
+	          })) ??
+	          (order.logisticsNo
+	            ? [
+	                {
+	                  logisticsNo: order.logisticsNo,
+	                  packageName: "蔬菜包裹",
+	                  packageType: "VEGETABLE",
+	                  shippedAt: order.shippedAt?.toISOString(),
+	                  status: "SHIPPED",
+	                },
+	              ]
+	            : []),
+	        status: order.status,
+	      },
+	    });
   } catch (error) {
     if (error instanceof OrderServiceError) {
       return fail(error.code, error.message, statusForOrderError(error.code));

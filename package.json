@@ -6,9 +6,11 @@
   "scripts": {
     "dev:admin": "pnpm --filter @hentor/admin-web dev",
     "dev:mini": "pnpm --filter @hentor/miniapp dev:weapp",
+    "dev:spring": "sh scripts/dev-spring.sh",
+    "build:spring": "mvn -f apps/spring-api/pom.xml test",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
-    "test": "pnpm -r test",
+    "test": "pnpm -r test && node --test scripts/*.test.mjs",
     "typecheck": "pnpm -r typecheck",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
@@ -17,9 +19,18 @@
     "db:migrate:init": "pnpm --filter @hentor/db prisma migrate dev --name init",
     "db:migrate": "pnpm --filter @hentor/db prisma migrate dev",
     "db:seed": "pnpm --filter @hentor/db prisma db seed",
-    "db:studio": "pnpm --filter @hentor/db prisma studio"
+    "db:studio": "pnpm --filter @hentor/db prisma studio",
+    "smoke:admin-artifacts": "node scripts/admin-artifact-smoke.mjs",
+    "smoke:admin-runtime-visual": "pnpm --filter @hentor/admin-web build && node scripts/admin-runtime-visual-smoke.mjs",
+    "smoke:miniapp-artifacts": "node scripts/miniapp-artifact-smoke.mjs",
+    "smoke:miniapp-runtime-visual": "pnpm --filter @hentor/miniapp build:dev && node scripts/miniapp-runtime-visual-smoke.mjs",
+    "smoke:spring-api": "node scripts/spring-api-smoke.mjs",
+    "smoke:real": "node scripts/real-data-smoke.mjs",
+    "audit:completion": "node scripts/completion-audit.mjs"
   },
   "devDependencies": {
+    "miniprogram-automator": "0.12.1",
+    "playwright-core": "^1.61.0",
     "typescript": "^5.9.3"
   },
   "pnpm": {

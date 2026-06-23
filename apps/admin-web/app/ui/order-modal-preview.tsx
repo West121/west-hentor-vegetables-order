@@ -27,9 +27,6 @@ export function OrderModalPreview() {
             <div className="flex cursor-move items-center justify-between border-b border-[#dbe6dc] px-6 py-4">
               <div>
                 <div className="text-lg font-semibold">订单详情 · OD202606170042</div>
-                <div className="mt-1 text-sm text-[#66756d]">
-                  拖拽标题栏移动，右上角支持全屏
-                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -57,14 +54,12 @@ export function OrderModalPreview() {
                 </button>
               </div>
             </div>
-            <div className="grid flex-1 gap-6 overflow-auto p-6 md:grid-cols-[1fr_300px]">
+            <div className="flex-1 overflow-auto p-6">
               <div className="space-y-6">
                 <section>
                   <h3 className="font-semibold">基础信息</h3>
                   <div className="mt-4 rounded-xl border border-[#dbe6dc] p-4 text-sm leading-8">
                     会员：张建国 138****5678
-                    <br />
-                    门店：莲花小区加盟店
                     <br />
                     地址：莲花小区 3 栋 602
                   </div>
@@ -78,12 +73,6 @@ export function OrderModalPreview() {
                   </div>
                 </section>
               </div>
-              <aside className="rounded-xl border border-[#cfe3d3] bg-[#f8fff8] p-5">
-                <h3 className="font-semibold">弹窗工作模式</h3>
-                <p className="mt-3 text-sm leading-6 text-[#66756d]">
-                  详情、编辑、新建统一使用弹窗，保留列表上下文。右下角可伸缩，右上角可全屏。
-                </p>
-              </aside>
             </div>
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
               <button
