@@ -70,6 +70,8 @@ type SpringListPayload<TItem, TSummary = Record<string, number>> = {
   totalPages?: number;
 };
 
+type SpringWrappedPayload<T> = T | { settings: T };
+
 type DashboardData = {
   activePackages: number;
   activeStore: StoreOption | null;
@@ -243,6 +245,12 @@ async function readList<TItem, TSummary extends Record<string, number>>(
   }
 }
 
+function unwrapSystemSettings(
+  payload: SpringWrappedPayload<SystemSettingsPanelItem>,
+): SystemSettingsPanelItem {
+  return "settings" in payload ? payload.settings : payload;
+}
+
 function countFromSummary(summary: Record<string, number>) {
   return Number(summary.total ?? summary.active ?? 0);
 }
@@ -367,7 +375,11 @@ async function loadDashboardData(
         )
       : Promise.resolve(emptyList<OperationLogPanelItem, Record<string, number>>({ total: 0 }, ADMIN_LOG_PAGE_SIZE)),
     canManageSystem && activeStore
-      ? readApi<SystemSettingsPanelItem>(`/api/admin/system-settings?${storeParam}`).catch(() => null)
+      ? readApi<SpringWrappedPayload<SystemSettingsPanelItem>>(
+          `/api/admin/system-settings?${storeParam}`,
+        )
+          .then(unwrapSystemSettings)
+          .catch(() => null)
       : Promise.resolve(null),
   ]);
 

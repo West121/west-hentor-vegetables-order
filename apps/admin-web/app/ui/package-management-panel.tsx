@@ -30,49 +30,17 @@ import {
 } from "./detail-loaders";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import { hasAdminFormChanges } from "./admin-form-dirty";
+import {
+  normalizePackagePanelItem,
+  normalizePackagePanelItems,
+  type PackagePanelItem,
+} from "./package-management-model";
+
+export type { PackagePanelItem } from "./package-management-model";
 
 type StoreOption = {
   id: string;
   name: string;
-};
-
-export type PackagePanelItem = {
-  createdAt: string;
-  expiresAt: string;
-  frozenReason: string | null;
-  id: string;
-  lastUsedAt: string | null;
-  nameSnapshot: string;
-  operationLogs?: Array<{
-    id: string;
-    operator: { id: string; name: string } | null;
-    reason: string;
-  }>;
-  recentOrders?: Array<{
-    id: string;
-    orderNo: string;
-    status: string;
-    totalWeightJin: number;
-  }>;
-  remainingTimes: number;
-  startsAt: string;
-  status: "ACTIVE" | "FROZEN" | "EXPIRED" | "USED_UP";
-  store: StoreOption;
-  template: {
-    id: string;
-    name: string;
-  };
-  totalTimes: number;
-  updatedAt: string;
-  usedTimes: number;
-  usagePercent: number;
-  user: {
-    id: string;
-    nickname: string | null;
-    phone: string | null;
-    status: string;
-  };
-  weightLimitJin: number;
 };
 
 type PackageManagementPanelProps = {
@@ -184,7 +152,7 @@ export function PackageManagementPanel({
   packageTemplateOptions,
   store,
 }: PackageManagementPanelProps) {
-  const [items, setItems] = useState(initialItems);
+  const [items, setItems] = useState(() => normalizePackagePanelItems(initialItems));
   const [pagination, setPagination] = useState(initialPagination);
   const [summary, setSummary] = useState(initialSummary);
   const [modal, setModal] = useState<ModalState | null>(null);
@@ -252,7 +220,7 @@ export function PackageManagementPanel({
         throw new Error(result.error?.message ?? "加载套餐失败");
       }
 
-      setItems(result.data.items);
+      setItems(normalizePackagePanelItems(result.data.items));
       setPagination(result.data.pagination);
       setSummary(result.data.summary);
     } catch (loadError) {
@@ -319,11 +287,14 @@ export function PackageManagementPanel({
         "userPackage",
       );
 
-      setItems((value) => replaceItemById(value, detail));
+      const normalizedDetail = normalizePackagePanelItem(detail);
+      setItems((value) => replaceItemById(value, normalizedDetail));
       setModal((current) =>
-        current?.item.id === item.id ? { ...current, item: detail } : current,
+        current?.item.id === item.id
+          ? { ...current, item: normalizedDetail }
+          : current,
       );
-      const nextForm = buildFormState(detail);
+      const nextForm = buildFormState(normalizedDetail);
       setForm((current) => (current ? nextForm : current));
       setInitialForm(nextForm);
     } catch (detailError) {
@@ -487,10 +458,10 @@ export function PackageManagementPanel({
           ? value.filter((item) => item.id !== modal.item.id)
           : value.map((item) =>
               item.id === modal.item.id
-                ? {
+                ? normalizePackagePanelItem({
                     ...item,
                     ...result.data?.userPackage,
-                  }
+                  })
                 : item,
             ),
       );
