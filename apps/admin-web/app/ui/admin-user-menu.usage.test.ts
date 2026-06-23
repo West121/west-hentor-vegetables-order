@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 
 describe("admin header user menu usage", () => {
   it("uses the designed dropdown user menu instead of a bare logout button", () => {
-    const pageSource = readFileSync(join(process.cwd(), "app/page.tsx"), "utf8");
+    const pageSource = readFileSync(
+      join(process.cwd(), "app/dashboard-client.tsx"),
+      "utf8",
+    );
 
     expect(pageSource).toContain("AdminUserMenu");
     expect(pageSource).not.toContain("<LogoutButton />");

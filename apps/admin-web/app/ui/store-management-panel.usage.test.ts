@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 describe("store management detail modal usage", () => {
   it("keeps reserved store and franchisee panels hidden from the admin page", () => {
     const pageSource = readFileSync(
-      join(process.cwd(), "app/page.tsx"),
+      join(process.cwd(), "app/dashboard-client.tsx"),
       "utf8",
     );
     const panelSource = readFileSync(

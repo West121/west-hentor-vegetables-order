@@ -33,28 +33,6 @@ export function LoginForm() {
       return;
     }
 
-    const token = payload?.data?.token;
-    if (typeof token !== "string" || !token) {
-      setError("登录成功但登录态同步失败");
-      setSubmitting(false);
-      return;
-    }
-
-    const syncResponse = await fetch("/api/local-admin/auth/sync", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ token }),
-    });
-    const syncPayload = await syncResponse.json().catch(() => null);
-
-    if (!syncResponse.ok || !syncPayload?.success) {
-      setError(syncPayload?.error?.message ?? "登录态同步失败");
-      setSubmitting(false);
-      return;
-    }
-
     router.replace("/");
     router.refresh();
   }

@@ -9,7 +9,7 @@ function readAppFile(path: string) {
 
 describe("admin operation log coverage", () => {
   it("loads operation logs across resources by default instead of only admin users", () => {
-    const pageSource = readAppFile("page.tsx");
+    const pageSource = readAppFile("dashboard-client.tsx");
     const panelSource = readAppFile("ui/operation-logs-panel.tsx");
 
     expect(pageSource).not.toContain('resource: "admin_user"');
@@ -33,19 +33,18 @@ describe("admin operation log coverage", () => {
 
   it("renders detailed audit metadata in operation logs", () => {
     const panelSource = readAppFile("ui/operation-logs-panel.tsx");
-    const pageSource = readAppFile("page.tsx");
+    const pageSource = readAppFile("dashboard-client.tsx");
 
     expect(panelSource).toContain("requestParams");
     expect(panelSource).toContain("responseData");
     expect(panelSource).toContain("durationMs");
     expect(panelSource).toContain("statusCode");
     expect(panelSource).toContain('`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`');
-    expect(pageSource).toContain("requestParams: item.requestParams");
-    expect(pageSource).toContain("responseData: item.responseData");
+    expect(pageSource).toContain("initialLogs={data.operationLogs}");
   });
 
   it("keeps admin users and operation logs as separate section panels", () => {
-    const pageSource = readAppFile("page.tsx");
+    const pageSource = readAppFile("dashboard-client.tsx");
     const adminUserPanelSource = readAppFile("ui/system-management-panel.tsx");
     const operationLogPanelSource = readAppFile("ui/operation-logs-panel.tsx");
 

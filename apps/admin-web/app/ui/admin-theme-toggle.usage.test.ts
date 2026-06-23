@@ -20,7 +20,10 @@ describe("admin theme toggle", () => {
   });
 
   it("renders the toggle in the admin header next to the menu search", () => {
-    const source = readFileSync(join(process.cwd(), "app/page.tsx"), "utf8");
+    const source = readFileSync(
+      join(process.cwd(), "app/dashboard-client.tsx"),
+      "utf8",
+    );
 
     expect(source).toContain("AdminThemeToggle");
     expect(source).toMatch(/<AdminMenuSearch[\s\S]*?<AdminThemeToggle[\s\S]*?<AdminUserMenu/);

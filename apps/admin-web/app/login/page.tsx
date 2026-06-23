@@ -1,16 +1,6 @@
-import { redirect } from "next/navigation";
-
-import { getAdminSession } from "@/app/lib/session";
-
 import { LoginForm } from "./login-form";
 
-export default async function LoginPage() {
-  const session = await getAdminSession();
-
-  if (session) {
-    redirect("/");
-  }
-
+export default function LoginPage() {
   return (
     <main className="grid min-h-screen bg-[#f3f7f1] p-4 text-[#14231a] lg:grid-cols-[1.05fr_0.95fr] lg:p-6">
       <section

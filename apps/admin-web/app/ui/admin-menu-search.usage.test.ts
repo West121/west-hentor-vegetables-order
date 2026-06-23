@@ -21,7 +21,10 @@ describe("admin menu search", () => {
   });
 
   it("replaces the order-specific top search placeholder", () => {
-    const source = readFileSync(join(process.cwd(), "app/page.tsx"), "utf8");
+    const source = readFileSync(
+      join(process.cwd(), "app/dashboard-client.tsx"),
+      "utf8",
+    );
 
     expect(source).toContain("<AdminMenuSearch groups={navGroups} />");
     expect(source).not.toContain("搜索订单号 / 手机号 / 菜品");

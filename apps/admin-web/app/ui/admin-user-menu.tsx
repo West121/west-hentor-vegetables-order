@@ -61,10 +61,7 @@ export function AdminUserMenu({
   }
 
   async function logout() {
-    await Promise.allSettled([
-      fetch("/api/admin/auth/logout", { method: "POST" }),
-      fetch("/api/local-admin/auth/logout", { method: "POST" }),
-    ]);
+    await fetch("/api/admin/auth/logout", { method: "POST" }).catch(() => null);
     router.replace("/login");
     router.refresh();
   }
