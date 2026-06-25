@@ -187,6 +187,11 @@
   line-height: 18px;
 }
 
+.field__hint--range {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
 .field__input {
   background: #f8fbf7;
   border: 1px solid #dbe6dc;

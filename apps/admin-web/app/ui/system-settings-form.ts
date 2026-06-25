@@ -1,9 +1,9 @@
 export type SystemSettingsFormState = {
   aboutText: string;
-  cutoffTime: string;
   customerServiceTel: string;
-  deliveryCities: string;
-  deliveryProvinces: string;
+  deliveryCities: string[];
+  deliveryProvinces: string[];
+  homeDishColumns: number;
   loginImageUrl: string;
   loginSubtitle: string;
   loginTitle: string;
@@ -12,10 +12,9 @@ export type SystemSettingsFormState = {
   userAgreementUrl: string;
 };
 
-function parseRangeValues(value: string) {
+function normalizeRangeValues(values: string[]) {
   const seen = new Set<string>();
-  return value
-    .split(/[,，、\n]/)
+  return values
     .map((item) => item.trim())
     .filter((item) => {
       if (!item || seen.has(item)) {
@@ -26,16 +25,20 @@ function parseRangeValues(value: string) {
     });
 }
 
+function normalizeHomeDishColumns(value: number) {
+  return value === 2 || value === 3 || value === 4 ? value : 3;
+}
+
 export function buildSystemSettingsPayload(
   storeId: string,
   form: SystemSettingsFormState,
 ) {
   return {
     aboutText: form.aboutText.trim(),
-    cutoffTime: form.cutoffTime.trim(),
     customerServiceTel: form.customerServiceTel.trim(),
-    deliveryCities: parseRangeValues(form.deliveryCities),
-    deliveryProvinces: parseRangeValues(form.deliveryProvinces),
+    deliveryCities: normalizeRangeValues(form.deliveryCities),
+    deliveryProvinces: normalizeRangeValues(form.deliveryProvinces),
+    homeDishColumns: normalizeHomeDishColumns(form.homeDishColumns),
     loginImageUrl: form.loginImageUrl.trim(),
     loginSubtitle: form.loginSubtitle.trim(),
     loginTitle: form.loginTitle.trim(),

@@ -1,9 +1,15 @@
 "use client";
 
-import { BadgeCheck, Pencil, Plus, RefreshCcw, X } from "lucide-react";
+import { BadgeCheck, Pencil, Plus, RefreshCcw, Trash2, X } from "lucide-react";
 import { useState } from "react";
 
-import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  AdminPagination,
+  normalizeAdminListPayload,
+  type AdminPaginationMeta,
+} from "./admin-pagination";
+import { AdminConfirmDialog } from "./admin-confirm-dialog";
+import { RequiredLabel } from "./required-mark";
 
 export type RolePermissionOption = {
   code: string;
@@ -110,6 +116,9 @@ export function RoleManagementPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState<RolePanelItem | null>(
+    null,
+  );
 
   function openCreateModal() {
     setModal({ item: null, mode: "create" });
@@ -148,9 +157,15 @@ export function RoleManagementPanel({
         throw new Error(result.error?.message ?? "角色列表加载失败");
       }
 
-      setRoles(result.data.items);
-      setPagination(result.data.pagination);
-      setSummary(result.data.summary);
+      const nextList = normalizeAdminListPayload(
+        result.data,
+        initialSummary,
+        pagination.pageSize,
+      );
+      setRoles(nextList.items);
+      setPagination(nextList.pagination);
+      setSummary(nextList.summary);
+      setDeleteCandidate(null);
     } catch (reloadError) {
       setError(reloadError instanceof Error ? reloadError.message : "角色列表加载失败");
     } finally {
@@ -198,6 +213,42 @@ export function RoleManagementPanel({
       setError(submitError instanceof Error ? submitError.message : "角色保存失败");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openDeleteConfirm(role: RolePanelItem) {
+    if (role.code === "super_admin") {
+      setError("超级管理员角色不能删除");
+      return;
+    }
+    if (role.userCount > 0) {
+      setError("该角色已分配给后台用户，不能删除");
+      return;
+    }
+    setError(null);
+    setDeleteCandidate(role);
+  }
+
+  async function deleteRole(role: RolePanelItem) {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/admin/roles/${role.id}`, {
+        method: "DELETE",
+      });
+      const result = (await response.json()) as ApiResponse<unknown>;
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error?.message ?? "删除角色失败");
+      }
+
+      setDeleteCandidate(null);
+      await reloadRoles(pagination.page);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "删除角色失败");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -314,7 +365,7 @@ export function RoleManagementPanel({
                   </td>
                   <td className="px-4 py-4 text-[#66756d]">{role.userCount}</td>
                   <td className="px-4 py-4">
-                    <div className="flex justify-end">
+                    <div className="flex justify-end gap-2">
                       <button
                         className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                         onClick={() => openEditModal(role)}
@@ -322,6 +373,19 @@ export function RoleManagementPanel({
                         type="button"
                       >
                         <Pencil size={16} />
+                      </button>
+                      <button
+                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-red-600 transition hover:bg-red-50"
+                        disabled={loading || saving}
+                        onClick={() => openDeleteConfirm(role)}
+                        title={
+                          role.userCount > 0
+                            ? "该角色已分配给后台用户，不能删除"
+                            : "删除角色"
+                        }
+                        type="button"
+                      >
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   </td>
@@ -347,9 +411,11 @@ export function RoleManagementPanel({
                 </p>
               </div>
               <button
+                aria-label="关闭"
                 className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#66756d] hover:bg-[#f3f7f1]"
                 disabled={saving}
                 onClick={() => setModal(null)}
+                title="关闭"
                 type="button"
               >
                 <X size={17} />
@@ -358,7 +424,7 @@ export function RoleManagementPanel({
 
             <div className="grid max-h-[72vh] gap-4 overflow-y-auto p-5">
               <label className="grid gap-2 text-sm font-semibold">
-                角色名称
+                <RequiredLabel>角色名称</RequiredLabel>
                 <input
                   className="h-10 rounded-xl border border-[#dbe6dc] px-3 font-normal outline-none focus:border-[#1f8f4f]"
                   onChange={(event) =>
@@ -369,7 +435,7 @@ export function RoleManagementPanel({
               </label>
 
               <label className="grid gap-2 text-sm font-semibold">
-                角色编码
+                <RequiredLabel>角色编码</RequiredLabel>
                 <input
                   className="h-10 rounded-xl border border-[#dbe6dc] px-3 font-normal outline-none disabled:bg-[#f5f8f3] disabled:text-[#8a9a90]"
                   disabled={modal.mode === "edit"}
@@ -382,7 +448,9 @@ export function RoleManagementPanel({
               </label>
 
               <div>
-                <div className="text-sm font-semibold">角色权限</div>
+                <div className="text-sm font-semibold">
+                  <RequiredLabel>角色权限</RequiredLabel>
+                </div>
                 <div className="mt-3 grid gap-3">
                   {permissionGroups.map(([group, items]) => (
                     <div
@@ -451,6 +519,21 @@ export function RoleManagementPanel({
             </div>
           </div>
         </div>
+      ) : null}
+      {deleteCandidate ? (
+        <AdminConfirmDialog
+          busy={loading}
+          confirmLabel="删除"
+          message={
+            <>
+              确认删除角色「{deleteCandidate.name}」吗？删除后无法恢复。
+            </>
+          }
+          onCancel={() => setDeleteCandidate(null)}
+          onConfirm={() => void deleteRole(deleteCandidate)}
+          title="删除角色"
+          variant="danger"
+        />
       ) : null}
     </section>
   );

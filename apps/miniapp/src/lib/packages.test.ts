@@ -3,10 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildPackagePrepayUrl,
   buildPackagesUrl,
+  formatPackageUsageDate,
   getCurrentPackageItem,
+  getFirstPackageItem,
   getPackageHeroView,
   getPackagePurchaseAction,
   getPackagePurchaseToast,
+  getPackageSlidePosition,
+  getPackageUsageDetailText,
+  getPackageUsageStatusLabel,
+  getPackageUsageWeightLabel,
 } from "./packages";
 
 describe("miniapp package helpers", () => {
@@ -90,6 +96,37 @@ describe("miniapp package helpers", () => {
     });
   });
 
+  it("keeps the first created package available for profile summary and carousel defaults", () => {
+    const items = [
+      {
+        nameSnapshot: "最早开通套餐",
+        remainingTimes: 0,
+        status: "USED_UP",
+        totalTimes: 4,
+        usedTimes: 4,
+        weightLimitJin: 4,
+      },
+      {
+        nameSnapshot: "后开通套餐",
+        remainingTimes: 8,
+        status: "ACTIVE",
+        totalTimes: 8,
+        usedTimes: 0,
+        weightLimitJin: 8,
+      },
+    ];
+
+    expect(getFirstPackageItem(items)).toMatchObject({
+      nameSnapshot: "最早开通套餐",
+    });
+    expect(getCurrentPackageItem(items)).toMatchObject({
+      nameSnapshot: "后开通套餐",
+    });
+    expect(getPackageSlidePosition(0, items.length)).toBe("1 / 2");
+    expect(getPackageSlidePosition(9, items.length)).toBe("2 / 2");
+    expect(getPackageSlidePosition(0, 0)).toBe("");
+  });
+
   it("formats the package page hero and cycle view from real package fields", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-10T10:00:00.000Z"));
@@ -117,5 +154,32 @@ describe("miniapp package helpers", () => {
     });
 
     vi.useRealTimers();
+  });
+
+  it("formats package usage detail fields for the package page", () => {
+    expect(formatPackageUsageDate("2026-06-23T16:09:12")).toBe(
+      "2026-06-23 16:09",
+    );
+    expect(getPackageUsageStatusLabel("PENDING_SHIPMENT")).toBe("待配送");
+    expect(getPackageUsageWeightLabel(4.5)).toBe("4.5斤");
+    expect(getPackageUsageWeightLabel(0)).toBe("附加权益");
+    expect(
+      getPackageUsageDetailText({
+        benefits: [
+          {
+            id: "benefit-1",
+            nameSnapshot: "鸡蛋",
+            quantity: 1,
+            unitSnapshot: "箱",
+          },
+        ],
+        id: "order-1",
+        items: [
+          { dishNameSnapshot: "菠菜", id: "item-1", weightJin: 2 },
+          { dishNameSnapshot: "黄瓜", id: "item-2", weightJin: 0.5 },
+        ],
+        status: "PENDING_SHIPMENT",
+      }),
+    ).toBe("菠菜 2斤、黄瓜 0.5斤、鸡蛋 1箱");
   });
 });

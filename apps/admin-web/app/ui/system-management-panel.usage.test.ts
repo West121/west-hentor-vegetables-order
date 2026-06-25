@@ -19,4 +19,27 @@ describe("system management user modal usage", () => {
     expect(source).toContain('readOnly={modal.mode === "detail"}');
     expect(source).toContain('disabled={modal.mode === "detail"}');
   });
+
+  it("uses styled status and role controls inside the admin user modal", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/system-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("grid h-11 grid-cols-2");
+    expect(source).toContain("aria-pressed={checked}");
+    expect(source).not.toContain('type="checkbox"');
+  });
+
+  it("refreshes role options before creating or editing admin users", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/system-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("roleOptions");
+    expect(source).toContain("reloadRoleOptions");
+    expect(source).toContain("/api/admin/roles?page=1&pageSize=200");
+    expect(source).toContain("void reloadRoleOptions");
+  });
 });

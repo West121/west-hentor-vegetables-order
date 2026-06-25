@@ -28,10 +28,17 @@
 .profile-hero__content {
   align-items: center;
   display: flex;
-  gap: 14px;
   margin-top: 22px;
   position: relative;
   z-index: 1;
+}
+
+.profile__identity {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  max-width: calc(100% - 124px);
+  min-width: 0;
 }
 
 .profile-hero__image {
@@ -56,6 +63,19 @@
   font-weight: 800;
   height: 46px;
   justify-content: center;
+  overflow: hidden;
+  transition: opacity 120ms ease;
+}
+
+.profile__avatar--active,
+.profile__name--active {
+  opacity: 0.82;
+}
+
+.profile__avatar-image {
+  display: block;
+  height: 100%;
+  width: 100%;
 }
 
 .profile__body {
@@ -66,10 +86,10 @@
   font-size: 18px;
   font-weight: 800;
   line-height: 25px;
-  max-width: 132px;
+  max-width: 176px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  transition: opacity 120ms ease;
+  word-break: break-all;
 }
 
 .profile__meta {
@@ -79,8 +99,7 @@
   margin-top: 3px;
   max-width: 176px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
 }
 
 .member-card {
@@ -575,6 +594,65 @@
   font-weight: 800;
   line-height: 18px;
   margin-bottom: 7px;
+}
+
+.profile-editor__avatar-row {
+  align-items: center;
+  background: #f5faf2;
+  border: 1px solid #dcebd9;
+  border-radius: 16px;
+  display: flex;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 12px;
+}
+
+.profile-editor__avatar-button {
+  align-items: center;
+  background: #eff8f1;
+  border: 0;
+  border-radius: 999px;
+  box-sizing: border-box;
+  color: #1f8f4f;
+  display: flex;
+  flex: 0 0 58px;
+  font-size: 22px;
+  font-weight: 800;
+  height: 58px;
+  justify-content: center;
+  line-height: 58px;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.profile-editor__avatar-button::after {
+  border: 0;
+}
+
+.profile-editor__avatar-image {
+  display: block;
+  height: 58px;
+  width: 58px;
+}
+
+.profile-editor__avatar-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.profile-editor__avatar-title {
+  color: #102017;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 21px;
+}
+
+.profile-editor__avatar-meta {
+  color: #66756d;
+  font-size: 12px;
+  line-height: 18px;
+  margin-top: 3px;
 }
 
 .nickname-panel__input {

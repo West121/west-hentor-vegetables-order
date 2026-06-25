@@ -7,22 +7,27 @@ import cn.hentor.vegetables.dto.MiniLoginUserDto;
 import cn.hentor.vegetables.dto.MiniSessionContext;
 import cn.hentor.vegetables.dto.MiniStoreDto;
 import cn.hentor.vegetables.dto.MiniWxPhoneLoginRequest;
+import cn.hentor.vegetables.dto.MiniWxSessionLoginRequest;
 import cn.hentor.vegetables.dto.WechatLoginSessionDto;
 import cn.hentor.vegetables.dto.WechatPhoneDto;
 import cn.hentor.vegetables.entity.AdminOperationLogEntity;
 import cn.hentor.vegetables.entity.MemberStoreBindingEntity;
 import cn.hentor.vegetables.entity.StoreEntity;
+import cn.hentor.vegetables.entity.SystemConfigEntity;
 import cn.hentor.vegetables.entity.UserEntity;
 import cn.hentor.vegetables.mapper.AdminOperationLogMapper;
 import cn.hentor.vegetables.mapper.MemberStoreBindingMapper;
 import cn.hentor.vegetables.mapper.StoreMapper;
+import cn.hentor.vegetables.mapper.SystemConfigMapper;
 import cn.hentor.vegetables.mapper.UserMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.LinkedHashMap;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import jakarta.servlet.http.HttpServletRequest;
@@ -32,6 +37,7 @@ import org.springframework.util.StringUtils;
 
 @Service
 public class MiniAuthService {
+  private static final int DEFAULT_HOME_DISH_COLUMNS = 3;
   private static final Duration SESSION_TTL = Duration.ofDays(30);
   private static final String SESSION_KEY_PREFIX = "hentor:spring:mini-session:";
 
@@ -39,6 +45,7 @@ public class MiniAuthService {
   private final MemberStoreBindingMapper memberStoreBindingMapper;
   private final ObjectMapper objectMapper;
   private final StoreMapper storeMapper;
+  private final SystemConfigMapper systemConfigMapper;
   private final SessionStore sessionStore;
   private final UserMapper userMapper;
   private final WechatMiniappService wechatMiniappService;
@@ -48,6 +55,7 @@ public class MiniAuthService {
     MemberStoreBindingMapper memberStoreBindingMapper,
     ObjectMapper objectMapper,
     StoreMapper storeMapper,
+    SystemConfigMapper systemConfigMapper,
     SessionStore sessionStore,
     UserMapper userMapper,
     WechatMiniappService wechatMiniappService
@@ -56,6 +64,7 @@ public class MiniAuthService {
     this.memberStoreBindingMapper = memberStoreBindingMapper;
     this.objectMapper = objectMapper;
     this.storeMapper = storeMapper;
+    this.systemConfigMapper = systemConfigMapper;
     this.sessionStore = sessionStore;
     this.userMapper = userMapper;
     this.wechatMiniappService = wechatMiniappService;
@@ -123,6 +132,46 @@ public class MiniAuthService {
     return response;
   }
 
+  public MiniLoginResponse wxSessionLogin(MiniWxSessionLoginRequest request, HttpServletRequest servletRequest) {
+    long startedAt = System.currentTimeMillis();
+    WechatLoginSessionDto wechatSession = wechatMiniappService.exchangeLoginCode(request.loginCode().trim());
+    StoreEntity store = findAvailableStore(request.storeCode());
+    UserEntity user = userMapper.selectOne(
+      new LambdaQueryWrapper<UserEntity>()
+        .eq(UserEntity::getOpenid, wechatSession.openid())
+        .last("limit 1")
+    );
+    if (user == null) {
+      throw new ApiException("WECHAT_SESSION_UNBOUND", "请先使用手机号登录", HttpStatus.UNAUTHORIZED);
+    }
+
+    MemberStoreBindingEntity binding = memberStoreBindingMapper.selectOne(
+      new LambdaQueryWrapper<MemberStoreBindingEntity>()
+        .eq(MemberStoreBindingEntity::getUserId, user.getId())
+        .eq(MemberStoreBindingEntity::getStoreId, store.getId())
+        .last("limit 1")
+    );
+    if (binding == null) {
+      throw new ApiException("MEMBER_STORE_NOT_FOUND", "当前门店会员不存在", HttpStatus.UNAUTHORIZED);
+    }
+
+    String token = createSessionToken(user.getId(), user.getOpenid(), store.getId());
+    MiniLoginResponse response = new MiniLoginResponse(
+      token,
+      new MiniLoginUserDto(user.getId(), user.getPhone(), user.getNickname(), store.getId()),
+      toStoreDto(store)
+    );
+    writeSessionRefreshLog(
+      request,
+      response,
+      store,
+      user,
+      servletRequest,
+      Math.toIntExact(Math.min(System.currentTimeMillis() - startedAt, Integer.MAX_VALUE))
+    );
+    return response;
+  }
+
   public MiniSessionContext requireSession(String authorization) {
     String token = resolveBearerToken(authorization);
     if (!StringUtils.hasText(token)) {
@@ -179,13 +228,45 @@ public class MiniAuthService {
   }
 
   public MiniStoreDto toStoreDto(StoreEntity store) {
+    List<String> deliveryCities = DeliveryRangeSupport.readJsonStringArray(objectMapper, store.getDeliveryCities());
+    List<String> deliveryProvinces = DeliveryRangeSupport.readJsonStringArray(
+      objectMapper,
+      store.getDeliveryProvinces()
+    );
     return new MiniStoreDto(
       store.getId(),
       store.getCode(),
       store.getName(),
       store.getCutoffTime(),
-      store.getCustomerServiceTel()
+      store.getCustomerServiceTel(),
+      deliveryCities,
+      deliveryProvinces,
+      readHomeDishColumns(store.getId())
     );
+  }
+
+  private int readHomeDishColumns(String storeId) {
+    SystemConfigEntity config = systemConfigMapper.selectOne(
+      new LambdaQueryWrapper<SystemConfigEntity>()
+        .eq(SystemConfigEntity::getStoreId, storeId)
+        .eq(SystemConfigEntity::getKey, "home_dish_columns")
+        .last("limit 1")
+    );
+    String value = readJsonText(config == null ? null : config.getValue());
+    if (!StringUtils.hasText(value) && config != null) {
+      value = config.getValue() == null ? "" : config.getValue().trim();
+    }
+    if (!StringUtils.hasText(value)) {
+      return DEFAULT_HOME_DISH_COLUMNS;
+    }
+    try {
+      int columns = Integer.parseInt(value.trim());
+      return columns == 2 || columns == 3 || columns == 4
+        ? columns
+        : DEFAULT_HOME_DISH_COLUMNS;
+    } catch (NumberFormatException exception) {
+      return DEFAULT_HOME_DISH_COLUMNS;
+    }
   }
 
   private UserEntity upsertWechatPhoneUser(
@@ -322,6 +403,58 @@ public class MiniAuthService {
     adminOperationLogMapper.insertLog(log);
   }
 
+  private void writeSessionRefreshLog(
+    MiniWxSessionLoginRequest request,
+    MiniLoginResponse response,
+    StoreEntity store,
+    UserEntity user,
+    HttpServletRequest servletRequest,
+    Integer durationMs
+  ) {
+    AdminOperationLogEntity log = new AdminOperationLogEntity();
+    log.setId(id());
+    log.setAction("MINIAPP_SESSION_REFRESH");
+    log.setResource("miniapp_session");
+    log.setResourceId(user.getId());
+    log.setStoreId(store.getId());
+    log.setUserId(user.getId());
+    log.setBeforeValue("null");
+
+    Map<String, Object> afterValue = new LinkedHashMap<>();
+    afterValue.put("phone", maskPhone(user.getPhone()));
+    afterValue.put("storeCode", store.getCode());
+    log.setAfterValue(toJson(afterValue));
+
+    Map<String, Object> requestParams = new LinkedHashMap<>();
+    requestParams.put("loginCode", StringUtils.hasText(request.loginCode()) ? "[provided]" : "[missing]");
+    requestParams.put("storeCode", request.storeCode());
+    log.setRequestParams(toJson(requestParams));
+
+    Map<String, Object> responseData = new LinkedHashMap<>();
+    Map<String, Object> responseStore = new LinkedHashMap<>();
+    responseStore.put("code", store.getCode());
+    responseStore.put("id", store.getId());
+    responseStore.put("name", store.getName());
+    Map<String, Object> responseUser = new LinkedHashMap<>();
+    responseUser.put("defaultStoreId", store.getId());
+    responseUser.put("id", user.getId());
+    responseUser.put("nickname", user.getNickname());
+    responseUser.put("phone", maskPhone(user.getPhone()));
+    responseData.put("store", responseStore);
+    responseData.put("success", true);
+    responseData.put("token", "[issued]");
+    responseData.put("user", responseUser);
+    log.setResponseData(toJson(responseData));
+    log.setRequestMethod(servletRequest == null ? "POST" : servletRequest.getMethod());
+    log.setRequestPath(servletRequest == null ? "/api/spring/v1/auth/wx-session" : servletRequest.getRequestURI());
+    log.setStatusCode(200);
+    log.setDurationMs(durationMs);
+    log.setIp(resolveIp(servletRequest));
+    log.setUserAgent(servletRequest == null ? null : servletRequest.getHeader("user-agent"));
+    log.setCreatedAt(LocalDateTime.now());
+    adminOperationLogMapper.insertLog(log);
+  }
+
   private String resolveIp(HttpServletRequest servletRequest) {
     if (servletRequest == null) {
       return null;
@@ -338,6 +471,18 @@ public class MiniAuthService {
       return phone;
     }
     return phone.replaceFirst("^(\\d{3})\\d{4}(\\d{4})$", "$1****$2");
+  }
+
+  private String readJsonText(String value) {
+    if (!StringUtils.hasText(value)) {
+      return "";
+    }
+    try {
+      JsonNode node = objectMapper.readTree(value);
+      return node.isTextual() ? node.asText() : "";
+    } catch (JsonProcessingException exception) {
+      return value;
+    }
   }
 
   private String toJson(Object value) {

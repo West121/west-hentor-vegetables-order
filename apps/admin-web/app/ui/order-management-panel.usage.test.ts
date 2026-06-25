@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-describe("order management batch ship modal", () => {
+describe("order management panel", () => {
   it("uses shadcn select for the order status filter instead of a native select", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/order-management-panel.tsx"),
@@ -20,55 +20,37 @@ describe("order management batch ship modal", () => {
     expect(filterBlock).toContain("<SelectContent");
     expect(filterBlock).toContain("<SelectGroup");
     expect(filterBlock).toContain("<SelectLabel>订单状态</SelectLabel>");
+    expect(filterBlock).toContain("{filter.label}");
+    expect(filterBlock).not.toContain("订单状态：{filter.label}");
     expect(filterBlock).not.toContain("<select");
   });
 
-  it("keeps the batch ship panel draggable, fullscreen-capable and resizable", () => {
+  it("only exposes electronic waybill actions for shipping labels", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/order-management-panel.tsx"),
       "utf8",
     );
-    const batchShipBlock = source.slice(
-      source.indexOf("{batchShipOpen ? ("),
-      source.indexOf("{modal ? ("),
-    );
-
-    expect(batchShipBlock).toContain("h-[66vh] w-[760px] max-w-full resize");
-    expect(batchShipBlock).toContain("translate(");
-    expect(batchShipBlock).toContain("onPointerDown={handleHeaderPointerDown}");
-    expect(batchShipBlock).toContain("onPointerMove={handleHeaderPointerMove}");
-    expect(batchShipBlock).toContain("onPointerCancel={handleHeaderPointerUp}");
-    expect(batchShipBlock).toContain("onPointerUp={handleHeaderPointerUp}");
-    expect(batchShipBlock).toContain(
-      "onPointerDown={(event) => event.stopPropagation()}",
-    );
-    expect(batchShipBlock).toContain('title={fullscreen ? "退出全屏" : "全屏"}');
-    expect(batchShipBlock).toContain("Maximize2");
-    expect(batchShipBlock).toContain("Minimize2");
-    expect(batchShipBlock).not.toContain(">全屏<");
+    expect(source).toContain("async function cloudPrintOrders(");
+    expect(source).toContain("电子面单");
+    expect(source).toContain("CloudUpload");
+    expect(source).toContain("function currentPrintOrderIds() {\n    return selectedOrderIds;\n  }");
+    expect(source).toContain("请先勾选需要生成电子面单的待配送订单");
+    expect(source).toContain('aria-label="选择当前页可生成电子面单的订单"');
+    expect(source).toContain("function canCreateElectronicWaybill(order: OrderPanelItem)");
+    expect(source).not.toContain("批量发货");
+    expect(source).not.toContain("面单预览");
   });
 
-  it("resets shared modal placement when batch shipping opens or closes", () => {
+  it("does not keep the removed manual batch shipping workflow", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/order-management-panel.tsx"),
       "utf8",
     );
-    const openBatchShipPanel = source.slice(
-      source.indexOf("function openBatchShipPanel()"),
-      source.indexOf("function closeBatchShipPanel()"),
-    );
-    const closeBatchShipPanel = source.slice(
-      source.indexOf("function closeBatchShipPanel()"),
-      source.indexOf("function exportOrders()"),
-    );
 
-    expect(closeBatchShipPanel).toContain("canCloseAdminModal");
-    expect(closeBatchShipPanel).toContain("hasBatchShipLogisticsDraft");
-    expect(closeBatchShipPanel).not.toContain("window.confirm");
-    for (const block of [openBatchShipPanel, closeBatchShipPanel]) {
-      expect(block).toContain("setFullscreen(false)");
-      expect(block).toContain("setOffset({ x: 0, y: 0 })");
-    }
+    expect(source).not.toContain("batchShipOpen");
+    expect(source).not.toContain("function openBatchShipPanel()");
+    expect(source).not.toContain("function closeBatchShipPanel()");
+    expect(source).not.toContain("hasBatchShipLogisticsDraft");
   });
 
   it("lets operators add multiple shipment rows in the order edit modal", () => {
@@ -91,5 +73,16 @@ describe("order management batch ship modal", () => {
     expect(deliveryBlock).toContain("录入运单号");
     expect(deliveryBlock).toContain("packageName: event.target.value");
     expect(deliveryBlock).toContain("logisticsNo: event.target.value");
+  });
+
+  it("renders member avatars in order rows and detail modal", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/order-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("AdminMemberAvatar");
+    expect(source).toContain("avatarUrl={order.user?.avatarUrl}");
+    expect(source).toContain("avatarUrl={modal.item.user?.avatarUrl}");
   });
 });

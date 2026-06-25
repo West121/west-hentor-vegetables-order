@@ -59,7 +59,7 @@ export function OrderModalPreview() {
                 <section>
                   <h3 className="font-semibold">基础信息</h3>
                   <div className="mt-4 rounded-xl border border-[#dbe6dc] p-4 text-sm leading-8">
-                    会员：张建国 138****5678
+                    会员：张建国 13812345678
                     <br />
                     地址：莲花小区 3 栋 602
                   </div>

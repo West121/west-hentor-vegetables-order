@@ -17,4 +17,29 @@ describe("task management modal usage", () => {
     expect(source).toContain("任务详情");
     expect(source).toContain('modal.mode !== "detail"');
   });
+
+  it("supports canceling pending or future tasks with an icon tooltip", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/task-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("Ban");
+    expect(source).toContain("canCancelTask");
+    expect(source).toContain("cancelTask");
+    expect(source).toContain("/cancel");
+    expect(source).toContain('aria-label="取消任务"');
+    expect(source).toContain("已结束或已停用任务不可取消");
+  });
+
+  it("uses system dictionary labels when choosing task dishes", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/task-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("categoryOptions?: DishCategoryOption[]");
+    expect(source).toContain("categoryLabelByCode");
+    expect(source).not.toContain("CATEGORY_LABELS");
+  });
 });

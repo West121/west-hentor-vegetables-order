@@ -1,6 +1,6 @@
 # Figma 原型记录
 
-日期：2026-06-17
+日期：2026-06-24
 
 Figma 文件：[蔬菜预订系统原型 - 高效运营 x 社区生鲜](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3)
 
@@ -9,9 +9,11 @@ Figma 文件：[蔬菜预订系统原型 - 高效运营 x 社区生鲜](https://
 [04 小程序 / 提交与修改确认](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3?node-id=36-2)
 [05 小程序 / 订单](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3?node-id=3-443)
 [06 小程序 / 我的](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3?node-id=36-3)
+[06B 小程序 / 我的（多套餐摘要）](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3?node-id=278-2)
 [07 小程序 / 地址管理](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3?node-id=144-2)
 [08 小程序 / 登录](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3?node-id=15-42)
 [11 小程序 / 套餐](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3?node-id=36-4)
+[11B 小程序 / 套餐（多套餐切换）](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3?node-id=278-39)
 [12 小程序 / 修改已预订内容](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3?node-id=36-5)
 [13 小程序 / 首页（无套餐）](https://www.figma.com/design/O2IXF7XWERtVJfRT7lUYo3?node-id=100-2)
 
@@ -84,7 +86,7 @@ Figma 文件：[蔬菜预订系统原型 - 高效运营 x 社区生鲜](https://
 - `地址管理` 从“我的-地址管理”进入，页面只承担地址列表、默认地址切换、编辑和删除；新增/编辑使用底部弹框表单，带遮罩和关闭入口，不再像独立页面一样把表单常驻在正文里。地址列表中手机号做脱敏展示，完整号码仅用于表单提交和接口数据。
 - `地址管理原型` 已补充为 Figma 节点 `07 小程序 / 地址管理`：使用自定义顶部和返回入口，正文展示地址数量、新增地址按钮、默认地址卡、普通地址卡；卡片操作包括设为默认、编辑、删除；新增/编辑态使用底部弹框表单，字段覆盖收货人、联系电话、所在地区级联选择、详细地址和保存按钮。
 - `文字溢出` 已对提交确认和修改预订页做短句处理，底部篮子、提示卡和地址行需要按小程序窄屏宽度预留换行空间。
-- `套餐与我的` 参考瑞幸的会员身份卡片感，但内容改为蔬菜套餐权益、剩余额度、今日预订和常用服务；套餐页预留购买/续费入口，不做咖啡式优惠券堆叠。`06 小程序 / 我的` 当前隐藏当前门店切换卡、联系客服、最近消耗、订单入口和修改预订入口；常用服务只保留地址管理、套餐、账号设置，协议、隐私和注销统一收进“账号设置”入口。
+- `套餐与我的` 参考瑞幸的会员身份卡片感，但内容改为蔬菜套餐权益、剩余额度、今日预订和常用服务；`06B 小程序 / 我的（多套餐摘要）` 只展示最早创建的第一个套餐摘要，避免个人页承载复杂切换；常用服务保留订单、地址管理、套餐、账号设置，协议、隐私和退出登录统一收进“账号设置”入口。`11B 小程序 / 套餐（多套餐切换）` 用左右滑动卡片展示用户所有套餐，顺序按套餐创建时间从早到晚，卡片下方的权益、周期用量和使用明细跟随当前选中套餐切换。
 
 菜品图片来自 Unsplash，本地保存用于 Figma 原型稳定捕获；正式上线前需要替换为自有菜品照片或已授权素材。
 

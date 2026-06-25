@@ -112,6 +112,10 @@ export function hasUnsavedOrderModalChanges({
   initial: OrderFormState;
   mode: OrderModalMode;
 }) {
+  if (mode === "detail") {
+    return false;
+  }
+
   if (mode === "create") {
     return (
       current.createUserId !== initial.createUserId ||

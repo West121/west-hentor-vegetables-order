@@ -55,11 +55,12 @@ public class MiniProfileService {
     MiniOrderListData orders = miniOrderService.listOrdersForUser(session.userId(), store.getId());
 
     return new MiniProfileData(
-      miniPackageService.getCurrentPackage(session.userId(), store.getId()),
+      miniPackageService.getFirstCreatedPackage(session.userId(), store.getId()),
       loadDefaultAddress(session.userId(), store.getId()),
       binding == null || user == null
         ? null
         : new MiniMemberDto(
+          user.getAvatarUrl(),
           binding.getStatus(),
           user.getDisabledReason(),
           user.getId(),

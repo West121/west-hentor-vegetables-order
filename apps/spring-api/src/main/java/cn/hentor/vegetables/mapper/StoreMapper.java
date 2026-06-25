@@ -48,7 +48,6 @@ public interface StoreMapper extends BaseMapper<StoreEntity> {
   @Update("""
     UPDATE "Store"
     SET "customerServiceTel" = #{customerServiceTel},
-        "cutoffTime" = #{cutoffTime},
         "deliveryCities" = #{deliveryCities},
         "deliveryProvinces" = #{deliveryProvinces},
         "updatedAt" = #{updatedAt}

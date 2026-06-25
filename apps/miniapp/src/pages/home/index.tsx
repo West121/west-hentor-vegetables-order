@@ -1,22 +1,32 @@
 import { Image, Input, Picker, Text, View } from "@tarojs/components";
 import Taro, { useDidShow } from "@tarojs/taro";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { calculateReservationSummary } from "@hentor/shared";
 
 import { MiniCustomTop } from "../../components/mini-custom-top";
 import {
+  MiniConfirmModal,
+  type MiniConfirmTone,
+} from "../../components/mini-confirm-modal";
+import { requestWithMiniSession } from "../../lib/auth";
+import {
   buildAddressListUrl,
-  buildAddressRegionPickerValue,
+  buildAddressRegionMultiPickerModel,
   buildAddressSubmitPayload,
   buildSetDefaultAddressUrl,
   formatAddressFullAddress,
   formatAddressRegion,
   formatAddressReceiverLine,
+  formatDeliveryRangeText,
+  getAddressDeliveryRangeError,
   getAddressDetailError,
   getAddressRegionError,
+  hasDeliveryRangeLimit,
   isValidReceiverPhone,
-  parseAddressRegionPickerValue,
+  parseAddressRegionMultiPickerColumnChange,
+  parseAddressRegionMultiPickerValue,
+  type DeliveryRangeInput,
 } from "../../lib/addresses";
 import {
   buildSelectedBenefits,
@@ -37,6 +47,7 @@ import {
   getReservationGate,
   getReservationSummaryMeta,
   getSelectablePackageBenefits,
+  getUnderPackageLimitConfirm,
   getUnavailableSelectedItems,
   isPastCutoff,
 } from "../../lib/home";
@@ -53,9 +64,6 @@ import "./index.scss";
 const API_BASE_URL =
   process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
 const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
-const HOME_DISH_COLUMNS = getHomeDishColumns(
-  process.env.TARO_APP_HOME_DISH_COLUMNS,
-);
 const dishFallbackImages = {
   cabbage: cabbageImage,
   cucumber: cucumberImage,
@@ -72,6 +80,14 @@ type ApiResponse<T> = {
     code: string;
     message: string;
   };
+};
+
+type ConfirmDialogState = {
+  cancelText: string;
+  confirmText: string;
+  content: string;
+  title: string;
+  tone?: MiniConfirmTone;
 };
 
 type HomeData = {
@@ -149,8 +165,19 @@ type HomeData = {
     weightLimitJin: number;
   };
   store: {
-    cutoffTime: string;
+    cutoffTime: string | null;
+    deliveryCities?: string[];
+    deliveryProvinces?: string[];
+    homeDishColumns?: number | null;
     id: string;
+  };
+  task: null | {
+    cutoffTime: string | null;
+    endsAt?: string | null;
+    id: string;
+    name?: string | null;
+    startsAt?: string | null;
+    tag?: string | null;
   };
 };
 
@@ -196,6 +223,11 @@ const emptyAddressForm: AddressFormState = {
 };
 
 export default function HomePage() {
+  const router = Taro.getCurrentInstance().router;
+  const isEditPage = router?.path?.includes("pages/order-edit/index") ?? false;
+  const routeEditingOrderId = isEditPage
+    ? String(router?.params?.orderId ?? "").trim()
+    : "";
   const [homeData, setHomeData] = useState<HomeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Record<string, number>>({});
@@ -218,6 +250,25 @@ export default function HomePage() {
     null,
   );
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmDialog, setConfirmDialog] =
+    useState<ConfirmDialogState | null>(null);
+  const confirmDialogResolverRef = useRef<
+    ((confirmed: boolean) => void) | null
+  >(null);
+
+  function showConfirmDialog(nextDialog: ConfirmDialogState) {
+    return new Promise<boolean>((resolve) => {
+      confirmDialogResolverRef.current = resolve;
+      setConfirmDialog(nextDialog);
+    });
+  }
+
+  function resolveConfirmDialog(confirmed: boolean) {
+    const resolver = confirmDialogResolverRef.current;
+    confirmDialogResolverRef.current = null;
+    setConfirmDialog(null);
+    resolver?.(confirmed);
+  }
 
   async function loadHome(options?: { quiet?: boolean }) {
     if (!options?.quiet) {
@@ -225,30 +276,40 @@ export default function HomePage() {
     }
 
     try {
-      const token = Taro.getStorageSync("mini_session_token");
-      if (!token) {
-        Taro.navigateTo({ url: "/pages/login/index" });
+      if (isEditPage && !routeEditingOrderId) {
+        Taro.showToast({ icon: "none", title: "订单不存在" });
+        setTimeout(() => {
+          Taro.navigateBack({ delta: 1 });
+        }, 600);
         return;
       }
-      const storedEditingOrderId = Taro.getStorageSync("editing_order_id") as
-        | string
-        | undefined;
+
       const storeCode = getActiveStoreCode(
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
+      const requestEditingOrderId =
+        isEditPage && routeEditingOrderId ? routeEditingOrderId : undefined;
+      if (!isEditPage) {
+        Taro.removeStorageSync("editing_order_id");
+      }
       const homeUrl = buildHomeUrl({
         apiBaseUrl: API_BASE_URL,
-        editingOrderId: storedEditingOrderId,
+        editingOrderId: requestEditingOrderId,
         storeCode,
       });
 
-      const response = await Taro.request<ApiResponse<HomeData>>({
-        url: homeUrl,
-        method: "GET",
-        header: {
-          authorization: `Bearer ${token}`,
-        },
+      const response = await requestWithMiniSession<HomeData>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<HomeData>>({
+            url: homeUrl,
+            method: "GET",
+            header: {
+              authorization: `Bearer ${token}`,
+            },
+          }),
       });
       const payload = response.data;
 
@@ -262,18 +323,23 @@ export default function HomePage() {
       }
 
       setHomeData(payload.data);
-      const editingResolution = getEditingOrderResolution(storedEditingOrderId, {
+      const editingResolution = getEditingOrderResolution(requestEditingOrderId, {
         currentOrder: payload.data.currentOrder,
       });
-      const activeEditingOrderId = payload.data.currentOrder?.id ?? null;
+      const activeEditingOrderId = isEditPage
+        ? payload.data.currentOrder?.id ?? null
+        : null;
       if (editingResolution.shouldClearEditingOrder) {
         Taro.removeStorageSync("editing_order_id");
         setSelectedAddress(null);
-        if (!payload.data.currentOrder) {
+        if (isEditPage && !payload.data.currentOrder) {
           Taro.showToast({
             title: editingResolution.toastTitle ?? "该订单已不可修改",
             icon: "none",
           });
+          setTimeout(() => {
+            Taro.navigateBack({ delta: 1 });
+          }, 600);
         }
       }
       setEditingOrderId(activeEditingOrderId);
@@ -324,9 +390,20 @@ export default function HomePage() {
 
   const packageInfo = homeData?.package;
   const dishes = homeData?.dishes ?? [];
+  const deliveryRange: DeliveryRangeInput = {
+    deliveryCities: homeData?.store.deliveryCities ?? [],
+    deliveryProvinces: homeData?.store.deliveryProvinces ?? [],
+  };
+  const rangeLimited = hasDeliveryRangeLimit(deliveryRange);
+  const deliveryRangeText = formatDeliveryRangeText(deliveryRange);
+  const addressRegionPicker = buildAddressRegionMultiPickerModel(
+    addressForm,
+    deliveryRange,
+  );
   const hasPackage = Boolean(packageInfo);
   const reservationGate = getReservationGate({
-    hasCurrentOrder: Boolean(homeData?.currentOrder),
+    hasActiveTask: Boolean(homeData?.task),
+    hasCurrentOrder: isEditPage && Boolean(homeData?.currentOrder),
     isPastCutoff: isPastCutoff(homeData?.store.cutoffTime),
     memberInfo: homeData?.member,
     packageInfo,
@@ -355,6 +432,7 @@ export default function HomePage() {
     packageInfo?.weightLimitJin ?? 0,
   );
   const displayDishes = getDisplayDishes(dishes);
+  const homeDishColumns = getHomeDishColumns(homeData?.store.homeDishColumns);
   const reservationAddress = getReservationAddress({
     currentOrder: editableCurrentOrder,
     defaultAddress: homeData?.defaultAddress,
@@ -550,15 +628,20 @@ export default function HomePage() {
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
-      const response = await Taro.request<ApiResponse<AddressData>>({
-        header: {
-          authorization: `Bearer ${Taro.getStorageSync("mini_session_token")}`,
-        },
-        method: "GET",
-        url: buildAddressListUrl({
-          apiBaseUrl: API_BASE_URL,
-          storeCode,
-        }),
+      const response = await requestWithMiniSession<AddressData>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<AddressData>>({
+            header: {
+              authorization: `Bearer ${token}`,
+            },
+            method: "GET",
+            url: buildAddressListUrl({
+              apiBaseUrl: API_BASE_URL,
+              storeCode,
+            }),
+          }),
       });
       const payload = response.data;
 
@@ -596,6 +679,12 @@ export default function HomePage() {
       return;
     }
 
+    const rangeError = getAddressDeliveryRangeError(item, deliveryRange);
+    if (rangeError) {
+      Taro.showToast({ icon: "none", title: "该地区暂不配送" });
+      return;
+    }
+
     if (item.isDefault) {
       setSelectedAddress(item);
       setAddressSwitchOpen(false);
@@ -610,18 +699,23 @@ export default function HomePage() {
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
-      const response = await Taro.request<
-        ApiResponse<{ reservation?: { id?: string } }>
-      >({
-        header: {
-          authorization: `Bearer ${Taro.getStorageSync("mini_session_token")}`,
-        },
-        method: "POST",
-        url: buildSetDefaultAddressUrl({
-          addressId: item.id,
-          apiBaseUrl: API_BASE_URL,
-          storeCode,
-        }),
+      const response = await requestWithMiniSession<{
+        reservation?: { id?: string };
+      }>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<{ reservation?: { id?: string } }>>({
+            header: {
+              authorization: `Bearer ${token}`,
+            },
+            method: "POST",
+            url: buildSetDefaultAddressUrl({
+              addressId: item.id,
+              apiBaseUrl: API_BASE_URL,
+              storeCode,
+            }),
+          }),
       });
 
       if (!response.data.success) {
@@ -650,10 +744,31 @@ export default function HomePage() {
     setAddressForm((current) => ({ ...current, [key]: value }));
   }
 
-  function updateAddressFormRegion(value?: string[]) {
+  function updateAddressFormRegion(value?: number[]) {
+    const region = parseAddressRegionMultiPickerValue(value, deliveryRange);
+    const rangeError = getAddressDeliveryRangeError(region, deliveryRange);
+    if (rangeError) {
+      Taro.showToast({ icon: "none", title: "该地区暂不配送" });
+      return;
+    }
+
     setAddressForm((current) => ({
       ...current,
-      ...parseAddressRegionPickerValue(value),
+      ...region,
+    }));
+  }
+
+  function updateAddressFormRegionColumn(column: number, value: number) {
+    const region = parseAddressRegionMultiPickerColumnChange({
+      column,
+      current: addressForm,
+      deliveryRange,
+      value,
+    });
+
+    setAddressForm((current) => ({
+      ...current,
+      ...region,
     }));
   }
 
@@ -671,6 +786,11 @@ export default function HomePage() {
       Taro.showToast({ icon: "none", title: regionError });
       return;
     }
+    const rangeError = getAddressDeliveryRangeError(addressForm, deliveryRange);
+    if (rangeError) {
+      Taro.showToast({ icon: "none", title: "该地区暂不配送" });
+      return;
+    }
     const detailError = getAddressDetailError(addressForm.detail);
     if (detailError) {
       Taro.showToast({ icon: "none", title: detailError });
@@ -685,22 +805,27 @@ export default function HomePage() {
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
-      const response = await Taro.request<ApiResponse<{ address: AddressItem }>>({
-        data: buildAddressSubmitPayload({
-          city: addressForm.city,
-          detail: addressForm.detail,
-          district: addressForm.district,
-          isDefault: true,
-          province: addressForm.province,
-          receiverName: addressForm.receiverName,
-          receiverPhone: addressForm.receiverPhone,
-          storeCode,
-        }),
-        header: {
-          authorization: `Bearer ${Taro.getStorageSync("mini_session_token")}`,
-        },
-        method: "POST",
-        url: `${API_BASE_URL}/api/v1/addresses`,
+      const response = await requestWithMiniSession<{ address: AddressItem }>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<{ address: AddressItem }>>({
+            data: buildAddressSubmitPayload({
+              city: addressForm.city,
+              detail: addressForm.detail,
+              district: addressForm.district,
+              isDefault: true,
+              province: addressForm.province,
+              receiverName: addressForm.receiverName,
+              receiverPhone: addressForm.receiverPhone,
+              storeCode,
+            }),
+            header: {
+              authorization: `Bearer ${token}`,
+            },
+            method: "POST",
+            url: `${API_BASE_URL}/api/v1/addresses`,
+          }),
       });
 
       if (!response.data.success) {
@@ -760,6 +885,20 @@ export default function HomePage() {
       return;
     }
 
+    if (!isEditPage && homeData.currentOrder) {
+      const confirmed = await showConfirmDialog({
+        cancelText: "去修改",
+        confirmText: "仍然提交",
+        content:
+          "你今天已有一笔待发货订单。如需调整原订单，请到订单列表修改；继续提交会生成一笔新订单，并再消耗一次套餐次数。",
+        title: "今天已有订单",
+      });
+      if (!confirmed) {
+        Taro.navigateTo({ url: "/pages/orders/index" });
+        return;
+      }
+    }
+
     setConfirmOpen(true);
   }
 
@@ -788,10 +927,31 @@ export default function HomePage() {
       return;
     }
 
+    const underLimitConfirm = getUnderPackageLimitConfirm({
+      mode: isEditingCurrentOrder ? "edit" : "create",
+      totalWeightJin: summary.totalWeightJin,
+      weightLimitJin: packageInfo.weightLimitJin,
+    });
+    if (underLimitConfirm) {
+      const confirmed = await showConfirmDialog({
+        cancelText: underLimitConfirm.cancelText,
+        confirmText: underLimitConfirm.confirmText,
+        content: underLimitConfirm.content,
+        title: underLimitConfirm.title,
+      });
+      if (!confirmed) {
+        return;
+      }
+    }
+
     setSubmitting(true);
     Taro.showLoading({ title: "提交中" });
 
     try {
+      const storeCode = getActiveStoreCode(
+        Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+        DEFAULT_STORE_CODE,
+      );
       const requestOptions = buildReservationRequestOptions({
         addressId: reservationAddress.id,
         apiBaseUrl: API_BASE_URL,
@@ -803,19 +963,21 @@ export default function HomePage() {
           ? editingOrderId ?? undefined
           : undefined,
         items: selectedItems,
-        storeCode: getActiveStoreCode(
-          Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
-          DEFAULT_STORE_CODE,
-        ),
+        storeCode,
         userPackageId: packageInfo.id,
       });
-      const response = await Taro.request<ApiResponse<ReservationSubmitResult>>({
-        url: requestOptions.url,
-        method: requestOptions.method,
-        header: {
-          authorization: `Bearer ${Taro.getStorageSync("mini_session_token")}`,
-        },
-        data: requestOptions.data,
+      const response = await requestWithMiniSession<ReservationSubmitResult>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<ReservationSubmitResult>>({
+            url: requestOptions.url,
+            method: requestOptions.method,
+            header: {
+              authorization: `Bearer ${token}`,
+            },
+            data: requestOptions.data,
+          }),
       });
       const payload = response.data;
 
@@ -823,17 +985,17 @@ export default function HomePage() {
         throw new Error(payload.error?.message ?? "预订提交失败");
       }
 
-      const nextEditingOrderId = payload.data?.reservation?.id;
-      if (nextEditingOrderId) {
-        Taro.setStorageSync("editing_order_id", nextEditingOrderId);
-      }
-      await loadHome({ quiet: true });
       setSelectedAddress(null);
       setConfirmOpen(false);
-      Taro.showToast({
-        title: isEditingCurrentOrder ? "修改已保存" : "预订已提交",
-        icon: "success",
-      });
+      if (isEditingCurrentOrder) {
+        Taro.showToast({ title: "修改已保存", icon: "success" });
+        setTimeout(() => {
+          Taro.navigateBack({ delta: 1 });
+        }, 600);
+      } else {
+        await loadHome({ quiet: true });
+        Taro.showToast({ title: "订单已提交", icon: "success" });
+      }
     } catch (error) {
       Taro.showToast({
         title: error instanceof Error ? error.message : "预订提交失败",
@@ -847,7 +1009,12 @@ export default function HomePage() {
 
   return (
     <View className="home">
-      <MiniCustomTop className="home__custom-top" />
+      <MiniCustomTop
+        back={isEditPage}
+        className="home__custom-top"
+        onBack={() => Taro.navigateBack({ delta: 1 })}
+        title={isEditPage ? "修改预订" : undefined}
+      />
       {loading && !homeData ? (
         <View className="empty-package">正在加载今日可预订内容...</View>
       ) : hasPackage && packageInfo ? (
@@ -942,7 +1109,7 @@ export default function HomePage() {
       </View>
 
       <View className="content">
-        <View className={`dish-grid dish-grid--cols-${HOME_DISH_COLUMNS}`}>
+        <View className={`dish-grid dish-grid--cols-${homeDishColumns}`}>
           {displayDishes.map((dish) => {
             const weight = selected[dish.id] ?? 0;
             const soldOut = dish.stockJin <= 0;
@@ -1083,10 +1250,12 @@ export default function HomePage() {
               onClick={submitOrder}
             >
               {submitting
-                ? "提交中"
+                ? isEditingCurrentOrder
+                  ? "修改中"
+                  : "提交中"
                 : isEditingCurrentOrder
-                  ? "修改预订"
-                  : "提交预订"}
+                  ? "确认修改"
+                  : "提交订单"}
             </Text>
           ) : null}
         </View>
@@ -1110,25 +1279,26 @@ export default function HomePage() {
             <View className="confirm-card__title">
               {confirmationView.detailTitle}
             </View>
-            <View className="confirm-dish-grid">
+            <View className="confirm-dish-list">
               {selectedItems.map((item) => {
                 const dish = dishes.find((value) => value.id === item.dishId);
                 return (
                   <View
-                    className="dish-card dish-card--readonly confirm-dish-card"
+                    className="confirm-dish-item"
                     key={`${item.dishId}-${item.weightJin}`}
                   >
-                    <View className="dish-card__media">
+                    <View className="confirm-item__media">
                       <Image
-                        className="dish-card__image"
+                        className="confirm-item__image"
                         mode="aspectFill"
                         src={dish ? getDishImage(dish) : greensImage}
                       />
                     </View>
-                    <View className="dish-card__name">{item.name}</View>
-                    <Text className="dish-card__readonly-weight">
-                      {item.weightJin}斤
-                    </Text>
+                    <View className="confirm-item__body">
+                      <View className="confirm-item__name">{item.name}</View>
+                      <Text className="confirm-item__meta">菜品</Text>
+                    </View>
+                    <Text className="confirm-item__weight">{item.weightJin}斤</Text>
                   </View>
                 );
               })}
@@ -1136,24 +1306,27 @@ export default function HomePage() {
                 const benefitImage = getBenefitImage(benefit);
                 return (
                   <View
-                    className="dish-card dish-card--readonly benefit-card confirm-dish-card"
+                    className="confirm-dish-item confirm-dish-item--benefit"
                     key={`${benefit.name}-${benefit.quantity}-${benefit.unit}`}
                   >
-                    <View className="dish-card__media benefit-card__media">
+                    <View className="confirm-item__media confirm-item__media--benefit">
                       {benefitImage ? (
                         <Image
-                          className="dish-card__image benefit-card__image"
+                          className="confirm-item__image confirm-item__image--benefit"
                           mode="aspectFit"
                           src={benefitImage}
                         />
                       ) : (
-                        <Text className="benefit-card__icon">
+                        <Text className="confirm-item__benefit-icon">
                           {getBenefitIcon(benefit)}
                         </Text>
                       )}
                     </View>
-                    <View className="dish-card__name">{benefit.name}</View>
-                    <Text className="dish-card__readonly-weight">
+                    <View className="confirm-item__body">
+                      <View className="confirm-item__name">{benefit.name}</View>
+                      <Text className="confirm-item__meta">附加权益</Text>
+                    </View>
+                    <Text className="confirm-item__weight">
                       {benefit.quantity}
                       {benefit.unit}
                     </Text>
@@ -1196,7 +1369,11 @@ export default function HomePage() {
               }
             }}
           >
-            {submitting ? "提交中" : confirmationView.primaryText}
+            {submitting
+              ? isEditingCurrentOrder
+                ? "修改中"
+                : "提交中"
+              : confirmationView.primaryText}
           </Text>
           <Text
             className="confirm-secondary"
@@ -1292,7 +1469,9 @@ export default function HomePage() {
               </Text>
             </View>
             <View className="address-modal__field">
-              <View className="address-modal__label">收货人</View>
+              <View className="address-modal__label">
+                收货人<Text className="required-mark">*</Text>
+              </View>
               <Input
                 className="address-modal__input"
                 onInput={(event) =>
@@ -1303,7 +1482,9 @@ export default function HomePage() {
               />
             </View>
             <View className="address-modal__field">
-              <View className="address-modal__label">联系电话</View>
+              <View className="address-modal__label">
+                联系电话<Text className="required-mark">*</Text>
+              </View>
               <Input
                 className="address-modal__input"
                 onInput={(event) =>
@@ -1315,14 +1496,22 @@ export default function HomePage() {
               />
             </View>
             <View className="address-modal__field">
-              <View className="address-modal__label">所在地区</View>
+              <View className="address-modal__label">
+                所在地区<Text className="required-mark">*</Text>
+              </View>
               <Picker
-                level="region"
-                mode="region"
-                onChange={(event) =>
-                  updateAddressFormRegion(event.detail.value as string[])
+                mode="multiSelector"
+                onColumnChange={(event) =>
+                  updateAddressFormRegionColumn(
+                    Number(event.detail.column),
+                    Number(event.detail.value),
+                  )
                 }
-                value={buildAddressRegionPickerValue(addressForm)}
+                onChange={(event) =>
+                  updateAddressFormRegion(event.detail.value as number[])
+                }
+                range={addressRegionPicker.range}
+                value={addressRegionPicker.value}
               >
                 <View
                   className={[
@@ -1341,9 +1530,16 @@ export default function HomePage() {
                   <Text className="address-modal__selector-arrow">›</Text>
                 </View>
               </Picker>
+              {rangeLimited ? (
+                <View className="address-modal__hint">
+                  配送范围：{deliveryRangeText}
+                </View>
+              ) : null}
             </View>
             <View className="address-modal__field">
-              <View className="address-modal__label">详细地址</View>
+              <View className="address-modal__label">
+                详细地址<Text className="required-mark">*</Text>
+              </View>
               <Input
                 className="address-modal__input"
                 onInput={(event) =>
@@ -1369,6 +1565,19 @@ export default function HomePage() {
             </Text>
           </View>
         </View>
+      ) : null}
+
+      {confirmDialog ? (
+        <MiniConfirmModal
+          cancelText={confirmDialog.cancelText}
+          confirmText={confirmDialog.confirmText}
+          content={confirmDialog.content}
+          onCancel={() => resolveConfirmDialog(false)}
+          onConfirm={() => resolveConfirmDialog(true)}
+          title={confirmDialog.title}
+          tone={confirmDialog.tone}
+          visible
+        />
       ) : null}
     </View>
   );

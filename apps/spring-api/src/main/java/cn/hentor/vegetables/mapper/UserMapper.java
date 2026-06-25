@@ -43,6 +43,18 @@ public interface UserMapper extends BaseMapper<UserEntity> {
 
   @Update("""
     UPDATE "User"
+    SET "avatarUrl" = #{avatarUrl},
+        "updatedAt" = #{updatedAt}
+    WHERE "id" = #{id}
+    """)
+  int updateMiniAvatarUrl(
+    @Param("id") String id,
+    @Param("avatarUrl") String avatarUrl,
+    @Param("updatedAt") LocalDateTime updatedAt
+  );
+
+  @Update("""
+    UPDATE "User"
     SET "disabledReason" = #{disabledReason},
         "remark" = #{remark},
         "updatedAt" = #{updatedAt}

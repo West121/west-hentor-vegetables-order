@@ -43,9 +43,8 @@
   align-items: center;
   display: flex;
   gap: 8px;
-  justify-content: flex-start;
+  justify-content: space-between;
   min-width: 0;
-  padding-right: 110px;
 }
 
 .package-card__name {
@@ -69,11 +68,7 @@
   font-weight: 800;
   line-height: 16px;
   padding: 5px 9px;
-  position: absolute;
-  right: 18px;
-  top: 14px;
   white-space: nowrap;
-  z-index: 2;
 }
 
 .package-card__stats {
@@ -256,8 +251,8 @@
   border-radius: 22px;
   box-sizing: border-box;
   --dish-action-gap: 6px;
-  --dish-step-size: 34px;
-  --dish-weight-slot: 54px;
+  --dish-step-size: 30px;
+  --dish-weight-slot: 50px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -268,21 +263,21 @@
 }
 
 .dish-grid--cols-3 .dish-card {
-  --dish-action-gap: 2px;
-  --dish-step-size: 22px;
-  --dish-weight-slot: 40px;
+  --dish-action-gap: 4px;
+  --dish-step-size: 24px;
+  --dish-weight-slot: 42px;
   border-radius: 18px;
-  height: 128px;
-  padding: 10px 6px 6px;
+  height: 132px;
+  padding: 10px 6px 8px;
 }
 
 .dish-grid--cols-4 .dish-card {
-  --dish-action-gap: 1px;
-  --dish-step-size: 18px;
-  --dish-weight-slot: 30px;
+  --dish-action-gap: 0px;
+  --dish-step-size: 20px;
+  --dish-weight-slot: 28px;
   border-radius: 16px;
   height: 118px;
-  padding: 8px 4px 6px;
+  padding: 8px 2px 6px;
 }
 
 .dish-card--disabled {
@@ -387,12 +382,13 @@
   justify-content: center;
   margin-top: 6px;
   padding-top: 6px;
+  place-items: center;
   width: 100%;
 }
 
 .dish-grid--cols-3 .dish-card__actions {
   margin-top: 5px;
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
 .dish-grid--cols-4 .dish-card__actions {
@@ -487,9 +483,9 @@
 }
 
 .dish-grid--cols-4 .dish-card__weight {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 16px;
-  min-width: 30px;
+  min-width: 28px;
 }
 
 .step-btn {
@@ -499,7 +495,7 @@
   box-sizing: border-box;
   color: #fff;
   display: flex;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
   height: var(--dish-step-size);
   justify-content: center;
@@ -515,7 +511,11 @@
 }
 
 .dish-grid--cols-4 .step-btn {
-  font-size: 13px;
+  font-size: 11px;
+}
+
+.dish-grid--cols-4 .step-btn--minus {
+  border-width: 1px;
 }
 
 .step-btn--minus {
@@ -765,15 +765,103 @@
   min-height: 120px;
 }
 
-.confirm-dish-grid {
-  display: grid;
+.confirm-dish-list {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.confirm-dish-card {
-  height: 128px;
-  padding-bottom: 10px;
+.confirm-dish-item {
+  align-items: center;
+  background: #f8fbf7;
+  border: 1px solid #dcebd9;
+  border-radius: 14px;
+  box-sizing: border-box;
+  display: flex;
+  gap: 12px;
+  min-height: 72px;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.confirm-dish-item--benefit {
+  background: #fffdf5;
+  border-color: #f0dfb8;
+}
+
+.confirm-item__media {
+  background: #edf7ef;
+  border-radius: 12px;
+  flex: 0 0 68px;
+  height: 50px;
+  overflow: hidden;
+  width: 68px;
+}
+
+.confirm-item__media--benefit {
+  align-items: center;
+  background: #fff8e8;
+  display: flex;
+  justify-content: center;
+}
+
+.confirm-item__image {
+  display: block;
+  height: 50px;
+  width: 68px;
+}
+
+.confirm-item__image--benefit {
+  height: 42px;
+  width: 60px;
+}
+
+.confirm-item__benefit-icon {
+  display: block;
+  font-size: 30px;
+  line-height: 42px;
+  text-align: center;
+}
+
+.confirm-item__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.confirm-item__name {
+  color: #10251a;
+  display: -webkit-box;
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 22px;
+  max-height: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-all;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.confirm-item__meta {
+  color: #7a897f;
+  display: block;
+  font-size: 11px;
+  line-height: 16px;
+  margin-top: 4px;
+}
+
+.confirm-item__weight {
+  background: #e8f6ed;
+  border-radius: 999px;
+  color: #1c8b4b;
+  flex: 0 0 auto;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 24px;
+  max-width: 86px;
+  padding: 6px 12px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .confirm-address {
@@ -1061,6 +1149,14 @@
   font-weight: 800;
   line-height: 18px;
   margin-bottom: 7px;
+}
+
+.address-modal__hint {
+  color: #7c8b82;
+  font-size: 12px;
+  line-height: 18px;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
 }
 
 .address-modal__input {

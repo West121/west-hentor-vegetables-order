@@ -998,7 +998,6 @@ test("build admin system settings payload for system management smoke", async ()
     }),
     {
       aboutText: "真实数据 smoke 门店说明：用于验证后台系统设置写入与恢复。",
-      cutoffTime: "17:45",
       customerServiceTel: "400-0752-300",
       privacyPolicyUrl: "https://example.com/hentor/privacy-smoke",
       storeId: "store-1",

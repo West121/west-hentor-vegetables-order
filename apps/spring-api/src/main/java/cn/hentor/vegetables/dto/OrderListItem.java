@@ -13,6 +13,7 @@ public class OrderListItem {
   private String status;
   private BigDecimal totalWeightJin;
   private LocalDateTime createdAt;
+  private String userAvatarUrl;
   private String userNickname;
   private String userPhone;
 }

@@ -32,6 +32,11 @@ import {
 } from "./ui/role-management-panel";
 import { ShipmentStatsPanel } from "./ui/shipment-stats-panel";
 import { SystemManagementPanel, type AdminUserPanelItem } from "./ui/system-management-panel";
+import {
+  SystemDictionaryPanel,
+  type SystemDictionaryItem,
+  type SystemDictionaryMeta,
+} from "./ui/system-dictionary-panel";
 import { SystemSettingsPanel, type SystemSettingsPanelItem } from "./ui/system-settings-panel";
 import { TaskManagementPanel, type TaskDishOption, type TaskPanelItem } from "./ui/task-management-panel";
 
@@ -81,6 +86,8 @@ type DashboardData = {
   dishOptions: TaskDishOption[];
   dishPagination: ReturnType<typeof emptyPagination>;
   dishSummary: any;
+  dishCategoryOptions: SystemDictionaryItem[];
+  dictionaries: SystemDictionaryMeta[];
   dishes: DishPanelItem[];
   memberOptions: MemberPanelItem[];
   members: number;
@@ -291,6 +298,8 @@ async function loadDashboardData(
     tasks,
     operationLogs,
     systemSettings,
+    dictionaries,
+    dishCategoryOptions,
   ] = await Promise.all([
     canManageSystem
       ? readList<AdminUserPanelItem, Record<string, number>>(
@@ -381,6 +390,16 @@ async function loadDashboardData(
           .then(unwrapSystemSettings)
           .catch(() => null)
       : Promise.resolve(null),
+    activeStore
+      ? readApi<{ dictionaries: SystemDictionaryMeta[] }>(
+          `/api/admin/dictionaries?${storeParam}`,
+        ).catch(() => ({ dictionaries: [] as SystemDictionaryMeta[] }))
+      : Promise.resolve({ dictionaries: [] as SystemDictionaryMeta[] }),
+    activeStore
+      ? readApi<{ items: SystemDictionaryItem[] }>(
+          `/api/admin/dictionaries/DISH_CATEGORY?${storeParam}`,
+        ).catch(() => ({ items: [] as SystemDictionaryItem[] }))
+      : Promise.resolve({ items: [] as SystemDictionaryItem[] }),
   ]);
 
   const roleRows = roles.items;
@@ -391,7 +410,9 @@ async function loadDashboardData(
     adminUsers: adminUsers.items,
     adminUserPagination: adminUsers.pagination,
     adminUserSummary: adminUsers.summary,
+    dictionaries: dictionaries.dictionaries,
     dishes: dishes.items,
+    dishCategoryOptions: dishCategoryOptions.items,
     dishOptions: dishOptions.items,
     dishPagination: dishes.pagination,
     dishSummary: dishes.summary,
@@ -523,16 +544,37 @@ export default function DashboardPage() {
   const activeStore = data.activeStore;
   const activeSectionLabel = getAdminSectionLabel(activeSection);
   const isOrderSection = activeSection === "orders";
+  const userDisplay = data.userDisplay;
+  const scopeLabel = data.storeAccessScope === "ALL" ? "全部数据" : "授权数据";
+
+  function renderTopBarActions() {
+    return (
+      <>
+        <AdminMenuSearch groups={navGroups} />
+        <AdminThemeToggle />
+        <AdminUserMenu
+          canOpenOperationLogs={permissionCodes.includes("system.manage")}
+          name={userDisplay.name}
+          roles={userDisplay.roles}
+          scopeLabel={scopeLabel}
+        />
+      </>
+    );
+  }
 
   return (
-    <AdminShell brand="Hentor Fresh" groups={navGroups}>
-      <header className="flex min-h-20 items-center justify-between border-b border-[#dbe6dc] bg-white px-7">
+    <AdminShell
+      brand="Hentor Fresh"
+      groups={navGroups}
+      topBarActions={renderTopBarActions()}
+    >
+      <header className="admin-shell-header flex min-h-20 items-center justify-between border-b border-[#dbe6dc] bg-white px-7">
         <div>
           {isOrderSection ? (
             <>
               <h1 className="text-2xl font-semibold tracking-normal">订单管理</h1>
               <div className="mt-1 text-sm font-medium text-[#66756d]">
-                高频运营入口：筛选、批量发货、弹窗处理
+                高频运营入口：筛选、电子面单、弹窗处理
               </div>
             </>
           ) : (
@@ -546,19 +588,12 @@ export default function DashboardPage() {
             </>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          <AdminMenuSearch groups={navGroups} />
-          <AdminThemeToggle />
-          <AdminUserMenu
-            canOpenOperationLogs={permissionCodes.includes("system.manage")}
-            name={data.userDisplay.name}
-            roles={data.userDisplay.roles}
-            scopeLabel={data.storeAccessScope === "ALL" ? "全部数据" : "授权数据"}
-          />
+        <div className="admin-shell-header-actions flex items-center gap-3">
+          {renderTopBarActions()}
         </div>
       </header>
 
-      <main className="space-y-6 p-7">
+      <main className="admin-shell-main space-y-6 p-7">
         {activeSection === "overview" ? (
           <>
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -607,8 +642,9 @@ export default function DashboardPage() {
             initialPagination={data.storeOrderPagination}
             initialSummary={data.storeOrderSummary}
             memberOptions={data.memberOptions.map((member) => ({
+              avatarUrl: member.avatarUrl,
               defaultAddress: member.defaultAddress,
-              id: member.id,
+              id: member.id ?? member.userId,
               latestActivePackage: member.latestActivePackage,
               nickname: member.nickname,
               phone: member.phone,
@@ -618,7 +654,10 @@ export default function DashboardPage() {
         ) : null}
 
         {activeSection === "shipment-stats" ? (
-          <ShipmentStatsPanel store={activeStore} />
+          <ShipmentStatsPanel
+            categoryOptions={data.dishCategoryOptions}
+            store={activeStore}
+          />
         ) : null}
 
         {activeSection === "members" ? (
@@ -636,7 +675,8 @@ export default function DashboardPage() {
             initialPagination={data.userPackagePagination}
             initialSummary={data.userPackageSummary}
             memberOptions={data.memberOptions.map((member) => ({
-              id: member.id,
+              avatarUrl: member.avatarUrl,
+              id: member.id ?? member.userId,
               nickname: member.nickname,
               phone: member.phone,
             }))}
@@ -661,6 +701,7 @@ export default function DashboardPage() {
 
         {activeSection === "dishes" ? (
           <DishManagementPanel
+            categoryOptions={data.dishCategoryOptions}
             initialItems={data.dishes}
             initialPagination={data.dishPagination}
             initialSummary={data.dishSummary}
@@ -670,6 +711,7 @@ export default function DashboardPage() {
 
         {activeSection === "tasks" ? (
           <TaskManagementPanel
+            categoryOptions={data.dishCategoryOptions}
             dishOptions={data.dishOptions}
             initialItems={data.tasks}
             initialPagination={data.taskPagination}
@@ -699,6 +741,14 @@ export default function DashboardPage() {
 
         {activeSection === "menus" ? (
           <MenuManagementPanel menuTree={data.menuTree} />
+        ) : null}
+
+        {activeSection === "dictionaries" ? (
+          <SystemDictionaryPanel
+            initialDictionaries={data.dictionaries}
+            initialItems={data.dishCategoryOptions}
+            store={activeStore}
+          />
         ) : null}
 
         {activeSection === "operation-logs" ? (

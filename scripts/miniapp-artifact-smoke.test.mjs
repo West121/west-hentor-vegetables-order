@@ -771,21 +771,25 @@ default-status
         packages: {
           js: `
 packages__custom-top
+package-switcher
+package-swiper
+package-dots
 hero-card__photo
 benefit-card__dot--orange
 cycle-card__track
-payment-reserve__button
-payment-reserve__button--disabled
+usage-card__title
 `,
           wxss: `
 .packages__custom-top {}
+.package-switcher {}
+.package-swiper {}
+.package-dots {}
 .hero-card {}
 .hero-card__photo {}
 .benefit-grid {}
 .cycle-card {}
+.usage-card {}
 .primary-button {}
-.payment-reserve {}
-.payment-reserve__button--disabled {}
 `,
         },
       },
@@ -1225,35 +1229,41 @@ label: "账号设置";
   );
 });
 
-test("miniapp packages page keeps the Figma benefits layout and payment reserve", () => {
+test("miniapp packages page keeps the multi-package carousel prototype contract", () => {
   assert.deepEqual(
     assertMiniappPackagesPrototypeSource({
       scss: `
 .hero-card {}
 .hero-card__photo {}
+.package-switcher {}
+.package-swiper {}
+.package-dots {}
 .benefit-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .cycle-card {}
+.usage-card {}
 .primary-button {}
-.payment-reserve {}
-.payment-reserve__button {}
 `,
       tsx: `
+import { Swiper, SwiperItem } from "@tarojs/components";
 import loginVegetablesImage from "../../assets/login-vegetables.jpg";
-import { getCurrentPackageItem, getPackageHeroView } from "../../lib/packages";
+import { getFirstPackageItem, getPackageHeroView, getPackageSlidePosition } from "../../lib/packages";
+<View className="package-switcher">我的套餐 左右滑动切换</View>
+<Swiper className="package-swiper"><SwiperItem /></Swiper>
+<View className="package-dots"></View>
 <View className="hero-card">Hentor Fresh</View>
 <View>套餐权益</View>
 <View className="benefit-grid"></View>
 <View className="cycle-card">本周期用量</View>
+<View className="usage-card">套餐使用明细</View>
 <Text>去首页预订</Text>
-<View className="payment-reserve">购买/续费套餐</View>
-reservePurchase(purchaseTemplate.id);
 `,
     }),
     {
       hasBenefitGrid: true,
-      hasPaymentReserve: true,
+      hasPackageSwiper: true,
+      hasUsageDetails: true,
     },
   );
 
@@ -1276,22 +1286,24 @@ reservePurchase(purchaseTemplate.id);
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .cycle-card {}
+.usage-card {}
 .primary-button {}
-.payment-reserve {}
-.payment-reserve__button {}
 `,
         tsx: `
+import { Swiper, SwiperItem } from "@tarojs/components";
 import loginVegetablesImage from "../../assets/login-vegetables.jpg";
-import { getCurrentPackageItem, getPackageHeroView } from "../../lib/packages";
+import { getFirstPackageItem, getPackageHeroView, getPackageSlidePosition } from "../../lib/packages";
+<View className="package-switcher">我的套餐 左右滑动切换</View>
+<Swiper className="package-swiper"><SwiperItem /></Swiper>
+<View className="package-dots"></View>
 <View className="hero-card">Hentor Fresh</View>
 <Text>更多功能</Text>
 <View>更多功能暂未开放</View>
 <View>套餐权益</View>
 <View className="benefit-grid"></View>
 <View className="cycle-card">本周期用量</View>
+<View className="usage-card">套餐使用明细</View>
 <Text>去首页预订</Text>
-<View className="payment-reserve">购买/续费套餐</View>
-reservePurchase(purchaseTemplate.id);
 `,
       }),
     /MINIAPP_PACKAGES_PROTOTYPE_MISMATCH/,

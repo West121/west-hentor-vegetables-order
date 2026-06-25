@@ -18,6 +18,18 @@ describe("admin menu search", () => {
     expect(source).toContain("没有匹配的菜单");
     expect(source).toContain("metaKey || event.ctrlKey");
     expect(source).toContain('params.set("section", section)');
+    expect(source).toContain("activeIndex");
+    expect(source).toContain('event.key === "ArrowDown"');
+    expect(source).toContain('event.key === "ArrowUp"');
+    expect(source).toContain('event.key === "Enter"');
+    expect(source).toContain("nativeEvent.isComposing");
+    expect(source).toContain("aria-activedescendant");
+    expect(source).toContain('role="combobox"');
+    expect(source).toContain('role="listbox"');
+    expect(source).toContain("scrollIntoView");
+    expect(
+      readFileSync(join(process.cwd(), "app/lib/admin-navigation.ts"), "utf8"),
+    ).toContain("系统字典");
   });
 
   it("replaces the order-specific top search placeholder", () => {

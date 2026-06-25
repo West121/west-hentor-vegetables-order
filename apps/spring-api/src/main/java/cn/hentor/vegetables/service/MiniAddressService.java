@@ -15,8 +15,6 @@ import cn.hentor.vegetables.mapper.AddressMapper;
 import cn.hentor.vegetables.mapper.MemberStoreBindingMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -31,7 +29,6 @@ import org.springframework.util.StringUtils;
 @Service
 public class MiniAddressService {
   private static final int MAX_ADDRESS_COUNT = 10;
-  private static final int MIN_ADDRESS_DETAIL_LENGTH = 8;
   private static final Pattern MAINLAND_PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
 
   private final AddressMapper addressMapper;
@@ -216,32 +213,16 @@ public class MiniAddressService {
   }
 
   private void validateDeliveryRange(AddressEntity address, StoreEntity store) {
-    List<String> provinces = readJsonStringArray(store.getDeliveryProvinces());
-    List<String> cities = readJsonStringArray(store.getDeliveryCities());
+    List<String> provinces = DeliveryRangeSupport.readJsonStringArray(objectMapper, store.getDeliveryProvinces());
+    List<String> cities = DeliveryRangeSupport.readJsonStringArray(objectMapper, store.getDeliveryCities());
     String province = normalizeNullableText(address.getProvince());
     String city = normalizeNullableText(address.getCity());
-    if (!provinces.isEmpty() && !provinces.contains(province)) {
-      throw new ApiException("ADDRESS_OUT_OF_DELIVERY_RANGE", "当前门店仅配送：" + String.join("、", provinces), HttpStatus.BAD_REQUEST);
-    }
-    if (!cities.isEmpty() && !cities.contains(city)) {
-      throw new ApiException("ADDRESS_OUT_OF_DELIVERY_RANGE", "当前门店仅配送城市：" + String.join("、", cities), HttpStatus.BAD_REQUEST);
-    }
-  }
-
-  private List<String> readJsonStringArray(String value) {
-    if (!StringUtils.hasText(value)) {
-      return List.of();
-    }
-    try {
-      List<String> raw = objectMapper.readValue(value, new TypeReference<>() {});
-      return raw
-        .stream()
-        .map(this::normalizeNullableText)
-        .filter(StringUtils::hasText)
-        .distinct()
-        .toList();
-    } catch (JsonProcessingException error) {
-      return List.of();
+    if (!DeliveryRangeSupport.allows(province, city, provinces, cities)) {
+      throw new ApiException(
+        "ADDRESS_OUT_OF_DELIVERY_RANGE",
+        "当前地址不在配送范围内，仅配送：" + DeliveryRangeSupport.rangeText(provinces, cities),
+        HttpStatus.BAD_REQUEST
+      );
     }
   }
 
@@ -256,9 +237,6 @@ public class MiniAddressService {
     }
 
     String detail = normalizeRequiredText(request.detail(), "DETAIL_REQUIRED", "请输入详细地址");
-    if (detail.length() < MIN_ADDRESS_DETAIL_LENGTH) {
-      throw new ApiException("DETAIL_TOO_SHORT", "详细地址至少 8 个字", HttpStatus.BAD_REQUEST);
-    }
 
     AddressEntity address = new AddressEntity();
     address.setCity(normalizeNullableText(request.city()));

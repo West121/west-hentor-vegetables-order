@@ -68,6 +68,7 @@ export type ReservationPackageLike = {
 
 export type ReservationGateInput = {
   hasCurrentOrder?: boolean;
+  hasActiveTask?: boolean;
   isPastCutoff?: boolean;
   memberInfo?: {
     bindingStatus?: string | null;
@@ -116,6 +117,19 @@ export type ReservationSummaryMetaInput = {
   isOverLimit: boolean;
   packageMeta?: string | null;
   selectedCount: number;
+};
+
+export type UnderPackageLimitConfirmInput = {
+  mode: "create" | "edit";
+  totalWeightJin: number;
+  weightLimitJin: number;
+};
+
+export type UnderPackageLimitConfirm = {
+  cancelText: string;
+  confirmText: string;
+  content: string;
+  title: string;
 };
 
 export type ReservationConfirmViewInput = {
@@ -557,7 +571,7 @@ export function getReservationConfirmView({
         ? "保存后同步更新订单；超过截单时间不可修改。"
         : "提交后生成今日预订；超过截单时间不可修改。",
     noticeTitle: mode === "edit" ? "保存后覆盖原预订" : "提交后生成预订",
-    primaryText: mode === "edit" ? "保存修改" : "确认提交",
+    primaryText: mode === "edit" ? "确认修改" : "确认提交",
     progressPercent:
       weightLimitJin > 0
         ? Math.min(100, Math.max(0, (totalWeightJin / weightLimitJin) * 100))
@@ -600,6 +614,7 @@ export function getEditingOrderResolution(
 }
 
 export function getReservationGate({
+  hasActiveTask = true,
   hasCurrentOrder,
   isPastCutoff,
   memberInfo,
@@ -623,6 +638,15 @@ export function getReservationGate({
       canReserve: false,
       emptyMessage: "请在“我的-套餐”购买后再预订",
       packageMeta: null,
+      submitDisabled: true,
+    };
+  }
+
+  if (!hasActiveTask) {
+    return {
+      canReserve: false,
+      emptyMessage: null,
+      packageMeta: "今日暂无可预订任务",
       submitDisabled: true,
     };
   }
@@ -738,6 +762,31 @@ export function getReservationSummaryMeta({
   return selectedCount > 0
     ? "确认后提交预订，截单前可修改"
     : "请选择菜品后提交预订";
+}
+
+export function getUnderPackageLimitConfirm({
+  mode,
+  totalWeightJin,
+  weightLimitJin,
+}: UnderPackageLimitConfirmInput): UnderPackageLimitConfirm | null {
+  if (
+    weightLimitJin <= 0 ||
+    totalWeightJin <= 0 ||
+    totalWeightJin >= weightLimitJin
+  ) {
+    return null;
+  }
+
+  const action = mode === "edit" ? "修改" : "提交";
+
+  return {
+    cancelText: "继续选菜",
+    confirmText: `确认${action}`,
+    content: `套餐本次可选 ${formatJin(weightLimitJin)}斤，当前已选 ${formatJin(
+      totalWeightJin,
+    )}斤，还没选满。确认${action}吗？`,
+    title: "未选满套餐额度",
+  };
 }
 
 export function getPackageCardMeta({

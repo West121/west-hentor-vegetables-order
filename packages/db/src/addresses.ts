@@ -40,7 +40,6 @@ export type SetDefaultMiniappAddressInput = MiniappAddressScope & {
 };
 
 const MAX_ADDRESS_COUNT = 10;
-const MIN_ADDRESS_DETAIL_LENGTH = 8;
 const MAINLAND_PHONE_PATTERN = /^1[3-9]\d{9}$/;
 
 function normalizeRequiredText(value: string, code: string, message: string) {
@@ -76,13 +75,6 @@ function normalizeAddressInput(input: MiniappAddressInput) {
     "DETAIL_REQUIRED",
     "请输入详细地址",
   );
-
-  if (detail.length < MIN_ADDRESS_DETAIL_LENGTH) {
-    throw new AddressServiceError(
-      "DETAIL_TOO_SHORT",
-      "详细地址至少 8 个字",
-    );
-  }
 
   return {
     city: normalizeNullableText(input.city),

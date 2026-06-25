@@ -58,6 +58,8 @@ public class OrderController {
     @RequestParam String storeId,
     @RequestParam(required = false) String status,
     @RequestParam(required = false) String query,
+    @RequestParam(required = false) String dateFrom,
+    @RequestParam(required = false) String dateTo,
     @RequestParam(defaultValue = "1") long page,
     @RequestParam(defaultValue = "20") long pageSize,
     @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
@@ -68,7 +70,7 @@ public class OrderController {
     requirePermission(session, "orders.read");
     requireStoreAccess(session, storeId);
     return ApiResponse.ok(
-      orderQueryService.listOrders(storeId, status, query, page, pageSize)
+      orderQueryService.listOrders(storeId, status, query, dateFrom, dateTo, page, pageSize)
     );
   }
 

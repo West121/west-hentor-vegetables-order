@@ -4,21 +4,33 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   buildAddressListUrl,
-  buildAddressRegionPickerValue,
+  buildAddressRegionMultiPickerModel,
   buildAddressResourceUrl,
   buildAddressSubmitPayload,
   buildSetDefaultAddressUrl,
   formatAddressFullAddress,
   formatAddressRegion,
   formatAddressReceiverLine,
+  formatDeliveryRangeText,
+  getAddressDeliveryRangeError,
   getAddressDetailError,
   getDefaultAddressSwitchState,
   getAddressRegionError,
+  hasDeliveryRangeLimit,
   isValidReceiverPhone,
-  parseAddressRegionPickerValue,
+  parseAddressRegionMultiPickerColumnChange,
+  parseAddressRegionMultiPickerValue,
+  type DeliveryRangeInput,
 } from "../../lib/addresses";
+import {
+  requestWithMiniSession,
+} from "../../lib/auth";
 import { MiniCustomTop } from "../../components/mini-custom-top";
-import { ACTIVE_STORE_CODE_KEY, getActiveStoreCode } from "../../lib/stores";
+import {
+  ACTIVE_STORE_CODE_KEY,
+  buildStoreSettingsUrl,
+  getActiveStoreCode,
+} from "../../lib/stores";
 import "./index.scss";
 
 const API_BASE_URL =
@@ -51,6 +63,8 @@ type AddressData = {
   items: AddressItem[];
 };
 
+type PublicSettings = DeliveryRangeInput;
+
 type FormState = {
   city: string;
   detail: string;
@@ -79,6 +93,10 @@ export default function AddressesPage() {
   const [form, setForm] = useState<FormState>(buildForm());
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
+  const [deliveryRange, setDeliveryRange] = useState<DeliveryRangeInput>({
+    deliveryCities: [],
+    deliveryProvinces: [],
+  });
   const actionPendingRef = useRef(false);
 
   function goBack() {
@@ -94,10 +112,36 @@ export default function AddressesPage() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  function updateFormRegion(value?: string[]) {
+  function showDeliveryRangeToast(error?: string | null) {
+    if (error) {
+      Taro.showToast({ icon: "none", title: "该地区暂不配送" });
+    }
+  }
+
+  function updateFormRegion(value?: number[]) {
+    const region = parseAddressRegionMultiPickerValue(value, deliveryRange);
+    const rangeError = getAddressDeliveryRangeError(region, deliveryRange);
+    if (rangeError) {
+      showDeliveryRangeToast(rangeError);
+      return;
+    }
+
     setForm((current) => ({
       ...current,
-      ...parseAddressRegionPickerValue(value),
+      ...region,
+    }));
+  }
+
+  function updateFormRegionColumn(column: number, value: number) {
+    const region = parseAddressRegionMultiPickerColumnChange({
+      column,
+      current: form,
+      deliveryRange,
+      value,
+    });
+    setForm((current) => ({
+      ...current,
+      ...region,
     }));
   }
 
@@ -107,35 +151,45 @@ export default function AddressesPage() {
     }
 
     try {
-      const token = Taro.getStorageSync("mini_session_token");
-      if (!token) {
-        Taro.navigateTo({ url: "/pages/login/index" });
-        return;
-      }
       const storeCode = getActiveStoreCode(
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
 
-      const response = await Taro.request<ApiResponse<AddressData>>({
-        header: { authorization: `Bearer ${token}` },
-        method: "GET",
-        url: buildAddressListUrl({
+      const [response, settingsResponse] = await Promise.all([
+        requestWithMiniSession<AddressData>({
           apiBaseUrl: API_BASE_URL,
           storeCode,
+          request: (token) =>
+            Taro.request<ApiResponse<AddressData>>({
+              header: { authorization: `Bearer ${token}` },
+              method: "GET",
+              url: buildAddressListUrl({
+                apiBaseUrl: API_BASE_URL,
+                storeCode,
+              }),
+            }),
         }),
-      });
+        Taro.request<ApiResponse<PublicSettings>>({
+          method: "GET",
+          url: buildStoreSettingsUrl({
+            apiBaseUrl: API_BASE_URL,
+            storeCode,
+          }),
+        }).catch(() => null),
+      ]);
       const payload = response.data;
 
       if (!payload.success || !payload.data) {
-        if (payload.error?.code === "UNAUTHORIZED") {
-          Taro.navigateTo({ url: "/pages/login/index" });
-          return;
-        }
-
         throw new Error(payload.error?.message ?? "地址加载失败");
       }
 
+      if (settingsResponse?.data.success && settingsResponse.data.data) {
+        setDeliveryRange({
+          deliveryCities: settingsResponse.data.data.deliveryCities ?? [],
+          deliveryProvinces: settingsResponse.data.data.deliveryProvinces ?? [],
+        });
+      }
       setItems(payload.data.items);
       if (payload.data.items.length === 0) {
         setEditing(null);
@@ -204,6 +258,11 @@ export default function AddressesPage() {
       Taro.showToast({ icon: "none", title: regionError });
       return;
     }
+    const rangeError = getAddressDeliveryRangeError(form, deliveryRange);
+    if (rangeError) {
+      showDeliveryRangeToast(rangeError);
+      return;
+    }
     const detailError = getAddressDetailError(form.detail);
     if (detailError) {
       Taro.showToast({ icon: "none", title: detailError });
@@ -221,30 +280,34 @@ export default function AddressesPage() {
     actionPendingRef.current = true;
 
     try {
-      const token = Taro.getStorageSync("mini_session_token");
       const storeCode = getActiveStoreCode(
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
-      const response = await Taro.request<ApiResponse<unknown>>({
-        data: buildAddressSubmitPayload({
-          city: form.city,
-          detail: form.detail,
-          district: form.district,
-          isDefault: shouldSubmitDefault,
-          province: form.province,
-          receiverName: form.receiverName,
-          receiverPhone: form.receiverPhone,
-          storeCode,
-        }),
-        header: { authorization: `Bearer ${token}` },
-        method: editing ? "PUT" : "POST",
-        url: editing
-          ? buildAddressResourceUrl({
-              addressId: editing.id,
-              apiBaseUrl: API_BASE_URL,
-            })
-          : `${API_BASE_URL}/api/v1/addresses`,
+      const response = await requestWithMiniSession<unknown>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<unknown>>({
+            data: buildAddressSubmitPayload({
+              city: form.city,
+              detail: form.detail,
+              district: form.district,
+              isDefault: shouldSubmitDefault,
+              province: form.province,
+              receiverName: form.receiverName,
+              receiverPhone: form.receiverPhone,
+              storeCode,
+            }),
+            header: { authorization: `Bearer ${token}` },
+            method: editing ? "PUT" : "POST",
+            url: editing
+              ? buildAddressResourceUrl({
+                  addressId: editing.id,
+                  apiBaseUrl: API_BASE_URL,
+                })
+              : `${API_BASE_URL}/api/v1/addresses`,
+          }),
       });
       const payload = response.data;
 
@@ -270,6 +333,9 @@ export default function AddressesPage() {
     addressCount: items.length,
     editingIsDefault: editing?.isDefault,
   });
+  const rangeLimited = hasDeliveryRangeLimit(deliveryRange);
+  const deliveryRangeText = formatDeliveryRangeText(deliveryRange);
+  const regionPicker = buildAddressRegionMultiPickerModel(form, deliveryRange);
 
   async function setDefaultAddress(item: AddressItem) {
     if (actionPendingRef.current) {
@@ -279,21 +345,32 @@ export default function AddressesPage() {
     actionPendingRef.current = true;
     setEditing(item);
     setForm({ ...buildForm(item), isDefault: true });
+    const rangeError = getAddressDeliveryRangeError(item, deliveryRange);
+    if (rangeError) {
+      showDeliveryRangeToast(rangeError);
+      actionPendingRef.current = false;
+      setEditing(null);
+      return;
+    }
 
     try {
-      const token = Taro.getStorageSync("mini_session_token");
       const storeCode = getActiveStoreCode(
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
-      const response = await Taro.request<ApiResponse<unknown>>({
-        header: { authorization: `Bearer ${token}` },
-        method: "POST",
-        url: buildSetDefaultAddressUrl({
-          addressId: item.id,
-          apiBaseUrl: API_BASE_URL,
-          storeCode,
-        }),
+      const response = await requestWithMiniSession<unknown>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<unknown>>({
+            header: { authorization: `Bearer ${token}` },
+            method: "POST",
+            url: buildSetDefaultAddressUrl({
+              addressId: item.id,
+              apiBaseUrl: API_BASE_URL,
+              storeCode,
+            }),
+          }),
       });
       const payload = response.data;
 
@@ -335,19 +412,23 @@ export default function AddressesPage() {
     actionPendingRef.current = true;
 
     try {
-      const token = Taro.getStorageSync("mini_session_token");
       const storeCode = getActiveStoreCode(
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
-      const response = await Taro.request<ApiResponse<unknown>>({
-        header: { authorization: `Bearer ${token}` },
-        method: "DELETE",
-        url: buildAddressResourceUrl({
-          addressId: item.id,
-          apiBaseUrl: API_BASE_URL,
-          storeCode,
-        }),
+      const response = await requestWithMiniSession<unknown>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<unknown>>({
+            header: { authorization: `Bearer ${token}` },
+            method: "DELETE",
+            url: buildAddressResourceUrl({
+              addressId: item.id,
+              apiBaseUrl: API_BASE_URL,
+              storeCode,
+            }),
+          }),
       });
       const payload = response.data;
 
@@ -450,7 +531,9 @@ export default function AddressesPage() {
             </View>
 
             <View className="field">
-              <View className="field__label">收货人</View>
+              <View className="field__label">
+                收货人<Text className="required-mark">*</Text>
+              </View>
               <Input
                 className="field__input"
                 onInput={(event) => updateForm("receiverName", event.detail.value)}
@@ -459,7 +542,9 @@ export default function AddressesPage() {
               />
             </View>
             <View className="field">
-              <View className="field__label">联系电话</View>
+              <View className="field__label">
+                联系电话<Text className="required-mark">*</Text>
+              </View>
               <Input
                 className="field__input"
                 onInput={(event) => updateForm("receiverPhone", event.detail.value)}
@@ -469,14 +554,22 @@ export default function AddressesPage() {
               />
             </View>
             <View className="field">
-              <View className="field__label">所在地区</View>
+              <View className="field__label">
+                所在地区<Text className="required-mark">*</Text>
+              </View>
               <Picker
-                level="region"
-                mode="region"
-                onChange={(event) =>
-                  updateFormRegion(event.detail.value as string[])
+                mode="multiSelector"
+                onColumnChange={(event) =>
+                  updateFormRegionColumn(
+                    Number(event.detail.column),
+                    Number(event.detail.value),
+                  )
                 }
-                value={buildAddressRegionPickerValue(form)}
+                onChange={(event) =>
+                  updateFormRegion(event.detail.value as number[])
+                }
+                range={regionPicker.range}
+                value={regionPicker.value}
               >
                 <View
                   className={[
@@ -494,9 +587,16 @@ export default function AddressesPage() {
                   <Text className="field__selector-arrow">›</Text>
                 </View>
               </Picker>
+              {rangeLimited ? (
+                <View className="field__hint field__hint--range">
+                  配送范围：{deliveryRangeText}
+                </View>
+              ) : null}
             </View>
             <View className="field">
-              <View className="field__label">详细地址</View>
+              <View className="field__label">
+                详细地址<Text className="required-mark">*</Text>
+              </View>
               <Input
                 className="field__input"
                 onInput={(event) => updateForm("detail", event.detail.value)}

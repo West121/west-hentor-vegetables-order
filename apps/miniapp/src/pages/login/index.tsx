@@ -3,6 +3,10 @@ import Taro from "@tarojs/taro";
 import { useEffect, useState } from "react";
 
 import { MiniCustomTop } from "../../components/mini-custom-top";
+import {
+  getMiniSessionToken,
+  MINI_SESSION_TOKEN_KEY,
+} from "../../lib/auth";
 import { getAgreementEntry } from "../../lib/agreements";
 import {
   ACTIVE_STORE_CODE_KEY,
@@ -81,7 +85,24 @@ export default function LoginPage() {
 
   useEffect(() => {
     void loadPublicSettings();
+    void redirectRememberedSession();
   }, []);
+
+  async function redirectRememberedSession() {
+    const storeCode = getActiveStoreCode(
+      Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+      DEFAULT_STORE_CODE,
+    );
+    try {
+      await getMiniSessionToken({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+      });
+      Taro.switchTab({ url: "/pages/home/index" });
+    } catch {
+      // 未绑定微信身份或首次登录时仍停留在手机号授权页。
+    }
+  }
 
   function openAgreement(label: string, url?: string | null) {
     const entry = getAgreementEntry(label, url);
@@ -147,7 +168,7 @@ export default function LoginPage() {
       const token = payload.data?.token;
 
       if (response.statusCode >= 200 && response.statusCode < 300 && token) {
-        Taro.setStorageSync("mini_session_token", token);
+        Taro.setStorageSync(MINI_SESSION_TOKEN_KEY, token);
         if (payload.data?.store.code) {
           Taro.setStorageSync(ACTIVE_STORE_CODE_KEY, payload.data.store.code);
         }

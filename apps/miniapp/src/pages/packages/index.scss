@@ -9,6 +9,86 @@
   margin: 0 -20px;
 }
 
+.package-switcher {
+  margin: 20px -20px 0;
+}
+
+.package-switcher__head {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px 12px;
+}
+
+.package-switcher__title {
+  color: #10251a;
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 30px;
+}
+
+.package-switcher__meta {
+  color: #6c7e70;
+  font-size: 12px;
+  line-height: 17px;
+  margin-top: 2px;
+}
+
+.package-switcher__count {
+  background: #e8f6ed;
+  border-radius: 999px;
+  color: #1c8b4b;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 18px;
+  margin-top: 3px;
+  padding: 5px 11px;
+}
+
+.package-swiper {
+  height: 206px;
+}
+
+.package-swiper__item {
+  box-sizing: border-box;
+  height: 206px;
+  opacity: 0.82;
+  padding: 0 7px;
+  transform: scale(0.96);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.package-swiper__item--active {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.package-swiper .hero-card {
+  margin-top: 0;
+}
+
+.package-dots {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.package-dots__item {
+  background: #c7dacb;
+  border-radius: 999px;
+  height: 6px;
+  width: 6px;
+}
+
+.package-dots__item--active {
+  background: #1c8b4b;
+  width: 18px;
+}
+
 .hero-card {
   background: #07351f;
   border-radius: 24px;
@@ -211,70 +291,127 @@
   text-align: center;
 }
 
-.payment-reserve {
-  align-items: center;
+.usage-card {
   background: #fff;
-  border: 1px solid #e3ece5;
-  border-radius: 14px;
-  box-shadow: 0 4px 14px rgb(0 0 0 / 5%);
   box-sizing: border-box;
-  display: flex;
-  gap: 10px;
-  height: 44px;
-  margin-top: 10px;
-  padding: 8px 12px 8px 16px;
+  border-radius: 20px;
+  box-shadow: 0 5px 14px rgb(0 0 0 / 5%);
+  margin-top: 18px;
+  padding: 18px;
 }
 
-.payment-reserve__icon {
+.usage-card__header {
   align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usage-card__title {
+  color: #10251a;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 25px;
+}
+
+.usage-card__meta {
+  color: #6c7e70;
+  font-size: 12px;
+  line-height: 17px;
+  margin-top: 2px;
+}
+
+.usage-card__count {
   background: #e8f6ed;
   border-radius: 999px;
-  color: #248247;
-  display: flex;
-  flex: 0 0 24px;
+  color: #1c8b4b;
+  flex: 0 0 auto;
   font-size: 12px;
   font-weight: 800;
-  height: 24px;
-  justify-content: center;
+  line-height: 18px;
+  padding: 5px 11px;
 }
 
-.payment-reserve__body {
-  flex: 1;
+.usage-card__list {
+  margin-top: 12px;
+}
+
+.usage-row {
+  align-items: center;
+  border-top: 1px solid #edf3ed;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 11px 0;
+}
+
+.usage-row:first-child {
+  border-top: 0;
+}
+
+.usage-row__main {
   min-width: 0;
 }
 
-.payment-reserve__title {
-  color: #173326;
-  font-size: 13px;
+.usage-row__order {
+  color: #10251a;
+  font-size: 14px;
   font-weight: 800;
-  line-height: 16px;
-}
-
-.payment-reserve__meta {
-  color: #7d8b82;
-  font-size: 10px;
-  line-height: 12px;
-  margin-top: 3px;
+  line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.payment-reserve__button {
-  background: #f4f6f3;
-  border: 1px solid #dde8df;
-  border-radius: 999px;
-  color: #6e7b72;
-  flex: 0 0 88px;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 14px;
-  padding: 6px 0;
-  text-align: center;
+.usage-row__date {
+  color: #7d8b82;
+  font-size: 12px;
+  line-height: 17px;
+  margin-top: 3px;
 }
 
-.payment-reserve__button--disabled {
-  opacity: 0.72;
+.usage-row__detail {
+  color: #4d6155;
+  display: -webkit-box;
+  font-size: 12px;
+  line-height: 17px;
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.usage-row__side {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.usage-row__weight {
+  color: #173326;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 20px;
+}
+
+.usage-row__status {
+  color: #1c8b4b;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  margin-top: 3px;
+}
+
+.usage-card__empty {
+  background: #f8fbf7;
+  border-radius: 14px;
+  color: #7d8b82;
+  font-size: 13px;
+  line-height: 20px;
+  margin-top: 14px;
+  padding: 16px;
+  text-align: center;
 }
 
 .empty {

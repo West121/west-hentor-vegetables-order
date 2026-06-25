@@ -1025,11 +1025,6 @@ export async function getShipmentStats(input: ShipmentStatsInput) {
       (dish) =>
         `- ${dish.dishName} ${formatWeight(dish.totalWeightJin)}斤（${dish.orderCount}单）`,
     ),
-    "地址汇总：",
-    ...addresses.map(
-      (address) =>
-        `- ${address.address} ${formatWeight(address.totalWeightJin)}斤（${address.orderCount}单）`,
-    ),
   ].join("\n");
   const csvText = [
     ["类型", "名称", "订单数", "重量(斤)"].join(","),
@@ -1039,14 +1034,6 @@ export async function getShipmentStats(input: ShipmentStatsInput) {
         csvCell(dish.dishName),
         dish.orderCount,
         formatWeight(dish.totalWeightJin),
-      ].join(","),
-    ),
-    ...addresses.map((address) =>
-      [
-        "地址",
-        csvCell(address.address),
-        address.orderCount,
-        formatWeight(address.totalWeightJin),
       ].join(","),
     ),
   ].join("\n");

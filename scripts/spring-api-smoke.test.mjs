@@ -127,15 +127,14 @@ test("management smoke assertions validate permissions and system settings paylo
 
   assert.equal(
     assertSystemSettingsShape({
-      cutoffTime: "18:00",
       deliveryCities: ["南京市"],
       deliveryProvinces: ["江苏省"],
       store: { id: "store-1" },
-    }).cutoffTime,
-    "18:00",
+    }).store.id,
+    "store-1",
   );
   assert.throws(
-    () => assertSystemSettingsShape({ cutoffTime: "18:00", store: { id: "store-1" } }),
+    () => assertSystemSettingsShape({ store: { id: "store-1" } }),
     /delivery ranges must be arrays/,
   );
 });

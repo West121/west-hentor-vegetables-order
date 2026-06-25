@@ -9,6 +9,107 @@ export type AdminPaginationMeta = {
   totalPages: number;
 };
 
+export type AdminListPayload<TItem, TSummary extends Record<string, number>> = {
+  items?: TItem[];
+  page?: number;
+  pageSize?: number;
+  pagination?: AdminPaginationMeta;
+  summary?: TSummary;
+  take?: number;
+  total?: number;
+  totalPages?: number;
+};
+
+export function normalizeAdminPagination(
+  payload: {
+    page?: number;
+    pageSize?: number;
+    pagination?: AdminPaginationMeta;
+    take?: number;
+    total?: number;
+    totalPages?: number;
+  },
+  fallbackPageSize: number,
+): AdminPaginationMeta {
+  if (payload.pagination) {
+    return payload.pagination;
+  }
+
+  const pageSize = Number(payload.pageSize ?? payload.take ?? fallbackPageSize);
+  const total = Number(payload.total ?? 0);
+
+  return {
+    page: Number(payload.page ?? 1),
+    pageSize,
+    total,
+    totalPages: Number(payload.totalPages ?? Math.max(Math.ceil(total / pageSize), 1)),
+  };
+}
+
+function statusOf(item: unknown) {
+  return String((item as { status?: unknown })?.status ?? "").toUpperCase();
+}
+
+function buildSummary<TItem, TSummary extends Record<string, number>>(
+  items: TItem[],
+  fallbackSummary: TSummary,
+  total: number,
+) {
+  const summary: Record<string, number> = {
+    ...fallbackSummary,
+    total,
+  };
+  const countStatus = (...statuses: string[]) =>
+    items.filter((item) => statuses.includes(statusOf(item))).length;
+
+  if ("active" in summary) summary.active = countStatus("ACTIVE");
+  if ("disabled" in summary) summary.disabled = countStatus("DISABLED");
+  if ("draft" in summary) summary.draft = countStatus("DRAFT");
+  if ("frozen" in summary) summary.frozen = countStatus("FROZEN");
+  if ("expired" in summary) summary.expired = countStatus("EXPIRED");
+  if ("onSale" in summary) summary.onSale = countStatus("ON_SALE");
+  if ("offSale" in summary) summary.offSale = countStatus("OFF_SALE");
+  if ("pendingShipment" in summary) {
+    summary.pendingShipment = countStatus("PENDING_SHIPMENT");
+  }
+  if ("shipped" in summary) summary.shipped = countStatus("SHIPPED");
+  if ("signed" in summary) summary.signed = countStatus("SIGNED");
+  if ("canceled" in summary) summary.canceled = countStatus("CANCELED", "CANCELLED");
+  if ("stock" in summary) {
+    summary.stock = items.reduce(
+      (sum, item) => sum + Number((item as { stockJin?: unknown }).stockJin ?? 0),
+      0,
+    );
+  }
+  if ("lowStock" in summary) {
+    summary.lowStock = items.filter(
+      (item) => Number((item as { stockJin?: unknown }).stockJin ?? 0) <= 10,
+    ).length;
+  }
+
+  return summary as TSummary;
+}
+
+export function normalizeAdminListPayload<
+  TItem,
+  TSummary extends Record<string, number>,
+>(
+  payload: AdminListPayload<TItem, TSummary>,
+  fallbackSummary: TSummary,
+  fallbackPageSize: number,
+) {
+  const items = payload.items ?? [];
+  const pagination = normalizeAdminPagination(payload, fallbackPageSize);
+
+  return {
+    items,
+    pagination,
+    summary:
+      payload.summary ??
+      buildSummary(items, fallbackSummary, pagination.total),
+  };
+}
+
 type AdminPaginationProps = {
   disabled?: boolean;
   onPageChange: (page: number) => void;

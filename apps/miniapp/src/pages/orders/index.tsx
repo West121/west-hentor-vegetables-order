@@ -1,17 +1,24 @@
 import { Text, View } from "@tarojs/components";
 import Taro from "@tarojs/taro";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   buildCancelOrderUrl,
   buildHideOrderUrl,
   buildOrdersListUrl,
-  CANCEL_REASONS,
   filterOrdersByStatus,
   ORDER_STATUS_TABS,
   type OrderStatusFilter,
 } from "../../lib/orders";
+import {
+  requestWithMiniSession,
+} from "../../lib/auth";
+import { formatMiniDateTimeMinute } from "../../lib/datetime";
 import { MiniCustomTop } from "../../components/mini-custom-top";
+import {
+  MiniConfirmModal,
+  type MiniConfirmTone,
+} from "../../components/mini-confirm-modal";
 import { ACTIVE_STORE_CODE_KEY, getActiveStoreCode } from "../../lib/stores";
 import "./index.scss";
 
@@ -55,6 +62,14 @@ type OrdersData = {
   };
 };
 
+type ConfirmDialogState = {
+  cancelText: string;
+  confirmText: string;
+  content: string;
+  title: string;
+  tone?: MiniConfirmTone;
+};
+
 const STATUS_LABELS: Record<string, string> = {
   CANCELED: "已取消",
   PENDING_SHIPMENT: "待发货",
@@ -71,51 +86,56 @@ const STATUS_TONE_CLASSES: Record<string, string> = {
   VOIDED: "order__status order__status--canceled",
 };
 
-function formatDate(value: string) {
-  const date = new Date(value);
-  return `${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-    date.getDate(),
-  ).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(
-    date.getMinutes(),
-  ).padStart(2, "0")}`;
-}
-
 export default function OrdersPage() {
   const [data, setData] = useState<OrdersData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeStatus, setActiveStatus] =
     useState<OrderStatusFilter>("PENDING_SHIPMENT");
+  const [confirmDialog, setConfirmDialog] =
+    useState<ConfirmDialogState | null>(null);
+  const confirmDialogResolverRef = useRef<
+    ((confirmed: boolean) => void) | null
+  >(null);
+
+  function showConfirmDialog(nextDialog: ConfirmDialogState) {
+    return new Promise<boolean>((resolve) => {
+      confirmDialogResolverRef.current = resolve;
+      setConfirmDialog(nextDialog);
+    });
+  }
+
+  function resolveConfirmDialog(confirmed: boolean) {
+    const resolver = confirmDialogResolverRef.current;
+    confirmDialogResolverRef.current = null;
+    setConfirmDialog(null);
+    resolver?.(confirmed);
+  }
 
   async function loadOrders() {
     setLoading(true);
 
     try {
-      const token = Taro.getStorageSync("mini_session_token");
-      if (!token) {
-        Taro.navigateTo({ url: "/pages/login/index" });
-        return;
-      }
       const storeCode = getActiveStoreCode(
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
 
-      const response = await Taro.request<ApiResponse<OrdersData>>({
-        header: { authorization: `Bearer ${token}` },
-        method: "GET",
-        url: buildOrdersListUrl({
-          apiBaseUrl: API_BASE_URL,
-          storeCode,
-        }),
+      const response = await requestWithMiniSession<OrdersData>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<OrdersData>>({
+            header: { authorization: `Bearer ${token}` },
+            method: "GET",
+            url: buildOrdersListUrl({
+              apiBaseUrl: API_BASE_URL,
+              storeCode,
+            }),
+          }),
       });
       const payload = response.data;
 
       if (!payload.success || !payload.data) {
-        if (payload.error?.code === "UNAUTHORIZED") {
-          Taro.navigateTo({ url: "/pages/login/index" });
-          return;
-        }
-
         throw new Error(payload.error?.message ?? "订单加载失败");
       }
 
@@ -135,76 +155,49 @@ export default function OrdersPage() {
   }, []);
 
   function editOrder(orderId: string) {
-    Taro.setStorageSync("editing_order_id", orderId);
-    Taro.switchTab({ url: "/pages/home/index" });
+    Taro.navigateTo({
+      url: `/pages/order-edit/index?orderId=${encodeURIComponent(orderId)}`,
+    });
   }
 
   function goBack() {
     Taro.navigateBack({ delta: 1 });
   }
 
-  async function openPendingActions(orderId: string) {
-    try {
-      const action = await Taro.showActionSheet({
-        itemList: ["取消预订", "修改预订"],
-      });
-      if (action.tapIndex === 0) {
-        await cancelOrder(orderId);
-        return;
-      }
-      if (action.tapIndex === 1) {
-        editOrder(orderId);
-      }
-    } catch {
-      // 用户关闭操作面板，无需反馈。
-    }
-  }
-
-  async function chooseCancelReason() {
-    try {
-      const action = await Taro.showActionSheet({
-        itemList: CANCEL_REASONS,
-      });
-      return CANCEL_REASONS[action.tapIndex] ?? null;
-    } catch {
-      return null;
-    }
-  }
-
   async function cancelOrder(orderId: string) {
-    const reason = await chooseCancelReason();
-    if (!reason) {
-      return;
-    }
-
-    const modal = await Taro.showModal({
+    const confirmed = await showConfirmDialog({
       cancelText: "再想想",
       confirmText: "确认取消",
-      content: `取消原因：${reason}\n取消后会返还本次套餐次数。`,
-      title: "取消预订",
+      content: "取消后会返还本次套餐次数和菜品库存，确认取消这笔订单吗？",
+      title: "取消订单",
+      tone: "danger",
     });
 
-    if (!modal.confirm) {
+    if (!confirmed) {
       return;
     }
 
     try {
-      const token = Taro.getStorageSync("mini_session_token");
       const storeCode = getActiveStoreCode(
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
-      const response = await Taro.request<ApiResponse<unknown>>({
-        data: {
-          reason,
-          storeCode,
-        },
-        header: { authorization: `Bearer ${token}` },
-        method: "POST",
-        url: buildCancelOrderUrl({
-          apiBaseUrl: API_BASE_URL,
-          orderId,
-        }),
+      const response = await requestWithMiniSession<unknown>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<unknown>>({
+            data: {
+              reason: "用户取消订单",
+              storeCode,
+            },
+            header: { authorization: `Bearer ${token}` },
+            method: "POST",
+            url: buildCancelOrderUrl({
+              apiBaseUrl: API_BASE_URL,
+              orderId,
+            }),
+          }),
       });
 
       if (!response.data.success) {
@@ -223,19 +216,23 @@ export default function OrdersPage() {
 
   async function hideOrder(orderId: string) {
     try {
-      const token = Taro.getStorageSync("mini_session_token");
       const storeCode = getActiveStoreCode(
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
-      const response = await Taro.request<ApiResponse<unknown>>({
-        header: { authorization: `Bearer ${token}` },
-        method: "DELETE",
-        url: buildHideOrderUrl({
-          apiBaseUrl: API_BASE_URL,
-          orderId,
-          storeCode,
-        }),
+      const response = await requestWithMiniSession<unknown>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<unknown>>({
+            header: { authorization: `Bearer ${token}` },
+            method: "DELETE",
+            url: buildHideOrderUrl({
+              apiBaseUrl: API_BASE_URL,
+              orderId,
+              storeCode,
+            }),
+          }),
       });
 
       if (!response.data.success) {
@@ -315,15 +312,25 @@ export default function OrdersPage() {
               .join("、")}
           </View>
           <View className="order__bottom">
-            <View className="order__time">{formatDate(order.createdAt)}</View>
+            <View className="order__time">
+              {formatMiniDateTimeMinute(order.createdAt)}
+            </View>
             <View className="order__actions">
               {order.canEdit ? (
-                <Text
-                  className="order__button order__button--primary"
-                  onClick={() => void openPendingActions(order.id)}
-                >
-                  可取消
-                </Text>
+                <>
+                  <Text
+                    className="order__button order__button--primary"
+                    onClick={() => editOrder(order.id)}
+                  >
+                    修改
+                  </Text>
+                  <Text
+                    className="order__button order__button--danger"
+                    onClick={() => void cancelOrder(order.id)}
+                  >
+                    取消
+                  </Text>
+                </>
               ) : null}
               {order.status === "SHIPPED" && order.logisticsNo ? (
                 <Text
@@ -348,6 +355,19 @@ export default function OrdersPage() {
 
       {!loading && data?.items.length === 0 ? (
         <View className="empty">还没有订单，从首页提交预订后会显示在这里。</View>
+      ) : null}
+
+      {confirmDialog ? (
+        <MiniConfirmModal
+          cancelText={confirmDialog.cancelText}
+          confirmText={confirmDialog.confirmText}
+          content={confirmDialog.content}
+          onCancel={() => resolveConfirmDialog(false)}
+          onConfirm={() => resolveConfirmDialog(true)}
+          title={confirmDialog.title}
+          tone={confirmDialog.tone}
+          visible
+        />
       ) : null}
     </View>
   );

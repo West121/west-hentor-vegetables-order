@@ -3,7 +3,9 @@ package cn.hentor.vegetables.dto;
 import java.util.List;
 
 public record UserPackageImportResultDto(
+  Integer createdBindings,
   Integer createdPackages,
+  Integer createdUsers,
   Integer failedRows,
   List<ImportFailureDto> failures,
   Integer importedRows,

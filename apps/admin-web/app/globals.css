@@ -189,6 +189,26 @@ html.theme-fade-transitioning body * {
     box-shadow 760ms ease;
 }
 
+.admin-density-compact .admin-shell-header {
+  min-height: 4.5rem;
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
+}
+
+.admin-density-compact .admin-shell-header h1 {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+
+.admin-density-compact .admin-shell-main {
+  padding: 1.25rem;
+  row-gap: 1rem;
+}
+
+[data-admin-layout-mode="horizontal"] .admin-shell-header-actions {
+  display: none;
+}
+
 .dark [class~="bg-white"] {
   background-color: var(--card) !important;
 }

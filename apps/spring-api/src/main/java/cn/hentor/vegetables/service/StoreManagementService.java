@@ -105,9 +105,7 @@ public class StoreManagementService {
       }
       wrapper.in(StoreEntity::getId, storeIds);
     }
-    wrapper.orderByAsc(StoreEntity::getStatus)
-      .orderByAsc(StoreEntity::getType)
-      .orderByDesc(StoreEntity::getCreatedAt);
+    wrapper.orderByDesc(StoreEntity::getCreatedAt);
 
     Page<StoreEntity> result = storeMapper.selectPage(
       Page.of(normalizedPage, normalizedPageSize),
@@ -187,7 +185,6 @@ public class StoreManagementService {
     long normalizedPage = Math.max(page, 1);
     long normalizedPageSize = Math.min(Math.max(pageSize, 1), 100);
     LambdaQueryWrapper<FranchiseeEntity> wrapper = buildFranchiseeWrapper(query, status)
-      .orderByAsc(FranchiseeEntity::getStatus)
       .orderByDesc(FranchiseeEntity::getCreatedAt);
     Page<FranchiseeEntity> result = franchiseeMapper.selectPage(
       Page.of(normalizedPage, normalizedPageSize),

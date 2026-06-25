@@ -14,5 +14,6 @@ public record MiniPackageDto(
   String status,
   String frozenReason,
   List<MiniPackageBenefitDto> benefits,
+  List<MiniPackageUsageDto> usageDetails,
   BigDecimal weightLimitJin
 ) {}

@@ -1,4 +1,4 @@
-export type DishCategory = "LEAFY" | "FRUIT" | "ROOT" | "MUSHROOM" | "ACTIVITY";
+export type DishCategory = string;
 export type DishStatus = "ON_SALE" | "OFF_SALE";
 
 export type DishFormState = {

@@ -12,7 +12,11 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState, type PointerEvent } from "react";
 
-import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  AdminPagination,
+  normalizeAdminListPayload,
+  type AdminPaginationMeta,
+} from "./admin-pagination";
 import {
   buildDetailPath,
   loadDetailResource,
@@ -34,6 +38,8 @@ import {
   type StoreStatus,
   type StoreType,
 } from "./store-modal-state";
+import { formatDateOnly } from "./date-format";
+import { RequiredLabel, RequiredMark } from "./required-mark";
 
 export type StorePanelItem = {
   address: string;
@@ -128,18 +134,6 @@ const FRANCHISEE_STATUS_LABELS: Record<FranchiseeStatus, string> = {
   EXPIRED: "已到期",
   SUSPENDED: "暂停",
 };
-
-function formatDate(value: string | null) {
-  if (!value) {
-    return "未设置";
-  }
-
-  return new Intl.DateTimeFormat("zh-CN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date(value));
-}
 
 export function StoreManagementPanel({
   canManageAllStores,
@@ -443,9 +437,17 @@ export function StoreManagementPanel({
     };
 
     if (response.ok && result.success && result.data) {
-      setStores(result.data.stores);
-      setStorePagination(result.data.pagination);
-      setStoreSummary(result.data.summary);
+      const nextList = normalizeAdminListPayload(
+        {
+          ...result.data,
+          items: result.data.stores,
+        },
+        storeSummary,
+        storePagination.pageSize,
+      );
+      setStores(nextList.items);
+      setStorePagination(nextList.pagination);
+      setStoreSummary(nextList.summary);
     }
     setLoadingStores(false);
   }
@@ -484,9 +486,14 @@ export function StoreManagementPanel({
     };
 
     if (response.ok && result.success && result.data) {
-      setFranchisees(result.data.items);
-      setFranchiseePagination(result.data.pagination);
-      setFranchiseeSummary(result.data.summary);
+      const nextList = normalizeAdminListPayload(
+        result.data,
+        franchiseeSummary,
+        franchiseePagination.pageSize,
+      );
+      setFranchisees(nextList.items);
+      setFranchiseePagination(nextList.pagination);
+      setFranchiseeSummary(nextList.summary);
     }
     setLoadingFranchisees(false);
   }
@@ -909,7 +916,7 @@ export function StoreManagementPanel({
                 <span>{FRANCHISEE_STATUS_LABELS[item.status]}</span>
               </div>
               <div className="mt-2 text-xs text-[#66756d]">
-                合同到期：{formatDate(item.contractEndsAt)}
+                合同到期：{formatDateOnly(item.contractEndsAt)}
               </div>
             </div>
           ))}
@@ -1021,7 +1028,7 @@ export function StoreManagementPanel({
                 ) : null}
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-1 text-sm font-medium">
-                    <span>门店名称</span>
+                    <RequiredLabel>门店名称</RequiredLabel>
                     <input
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) => updateStoreForm("name", event.target.value)}
@@ -1030,7 +1037,7 @@ export function StoreManagementPanel({
                     />
                   </label>
                   <label className="space-y-1 text-sm font-medium">
-                    <span>门店编码</span>
+                    <RequiredLabel>门店编码</RequiredLabel>
                     <input
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) => updateStoreForm("code", event.target.value)}
@@ -1039,7 +1046,7 @@ export function StoreManagementPanel({
                     />
                   </label>
                   <label className="space-y-1 text-sm font-medium">
-                    <span>门店类型</span>
+                    <RequiredLabel>门店类型</RequiredLabel>
                     <select
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       disabled={isDetailModal}
@@ -1053,7 +1060,10 @@ export function StoreManagementPanel({
                     </select>
                   </label>
                   <label className="space-y-1 text-sm font-medium">
-                    <span>加盟商</span>
+                    <span>
+                      加盟商
+                      {storeForm.type === "FRANCHISE" ? <RequiredMark /> : null}
+                    </span>
                     <select
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       disabled={isDetailModal || storeForm.type === "DIRECT"}
@@ -1071,7 +1081,7 @@ export function StoreManagementPanel({
                     </select>
                   </label>
                   <label className="space-y-1 text-sm font-medium">
-                    <span>状态</span>
+                    <RequiredLabel>状态</RequiredLabel>
                     <select
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       disabled={isDetailModal}
@@ -1089,10 +1099,11 @@ export function StoreManagementPanel({
                     label="截单时间"
                     onChange={(value) => updateStoreForm("cutoffTime", value)}
                     readOnly={isDetailModal}
+                    required
                     value={storeForm.cutoffTime}
                   />
                   <label className="space-y-1 text-sm font-medium">
-                    <span>店长</span>
+                    <RequiredLabel>店长</RequiredLabel>
                     <input
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) =>
@@ -1103,7 +1114,7 @@ export function StoreManagementPanel({
                     />
                   </label>
                   <label className="space-y-1 text-sm font-medium">
-                    <span>门店电话</span>
+                    <RequiredLabel>门店电话</RequiredLabel>
                     <input
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) =>
@@ -1191,7 +1202,7 @@ export function StoreManagementPanel({
                 ) : null}
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-1 text-sm font-medium md:col-span-2">
-                    <span>加盟商名称</span>
+                    <RequiredLabel>加盟商名称</RequiredLabel>
                     <input
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) =>
@@ -1202,7 +1213,7 @@ export function StoreManagementPanel({
                     />
                   </label>
                   <label className="space-y-1 text-sm font-medium">
-                    <span>联系人</span>
+                    <RequiredLabel>联系人</RequiredLabel>
                     <input
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) =>
@@ -1213,7 +1224,7 @@ export function StoreManagementPanel({
                     />
                   </label>
                   <label className="space-y-1 text-sm font-medium">
-                    <span>联系电话</span>
+                    <RequiredLabel>联系电话</RequiredLabel>
                     <input
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) =>
@@ -1224,7 +1235,7 @@ export function StoreManagementPanel({
                     />
                   </label>
                   <label className="space-y-1 text-sm font-medium">
-                    <span>状态</span>
+                    <RequiredLabel>状态</RequiredLabel>
                     <select
                       className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       disabled={isDetailModal}

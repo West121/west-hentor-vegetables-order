@@ -10,9 +10,14 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
-import { useRef, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 
-import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  AdminPagination,
+  normalizeAdminListPayload,
+  type AdminPaginationMeta,
+} from "./admin-pagination";
+import { RequiredLabel } from "./required-mark";
 import {
   buildDetailPath,
   loadDetailResource,
@@ -20,6 +25,7 @@ import {
 } from "./detail-loaders";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import { hasAdminFormChanges } from "./admin-form-dirty";
+import { formatDateTimeSecond } from "./date-format";
 
 type AdminStatus = "ACTIVE" | "DISABLED";
 
@@ -97,6 +103,16 @@ const STATUS_LABELS: Record<AdminStatus, string> = {
   DISABLED: "停用",
 };
 
+const ROLE_OPTIONS_ENDPOINT = "/api/admin/roles?page=1&pageSize=200";
+
+type ApiResponse<T> = {
+  data?: T;
+  error?: {
+    message: string;
+  };
+  success: boolean;
+};
+
 function buildFormState(
   item: AdminUserPanelItem | null,
   roles: RoleOption[],
@@ -112,25 +128,8 @@ function buildFormState(
   };
 }
 
-function formatDateTime(value: string | null) {
-  if (!value) {
-    return "未登录";
-  }
-
-  return new Intl.DateTimeFormat("zh-CN", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-  }).format(new Date(value));
-}
-
-function maskPhone(phone: string | null) {
-  if (!phone || phone.length < 7) {
-    return phone ?? "未填写";
-  }
-
-  return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
+function displayPhone(phone: string | null) {
+  return phone ?? "未填写";
 }
 
 function toggleValue(values: string[], value: string) {
@@ -149,15 +148,19 @@ export function SystemManagementPanel({
   const [adminUsers, setAdminUsers] = useState(initialAdminUsers);
   const [pagination, setPagination] = useState(initialPagination);
   const [summary, setSummary] = useState(initialSummary);
+  const [roleOptions, setRoleOptions] = useState(roles);
   const [modal, setModal] = useState<ModalState | null>(null);
-  const [form, setForm] = useState<FormState>(() => buildFormState(null, roles));
+  const [form, setForm] = useState<FormState>(() =>
+    buildFormState(null, roleOptions),
+  );
   const [initialForm, setInitialForm] = useState<FormState>(() =>
-    buildFormState(null, roles),
+    buildFormState(null, roleOptions),
   );
   const [fullscreen, setFullscreen] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
+  const [loadingRoles, setLoadingRoles] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -171,6 +174,10 @@ export function SystemManagementPanel({
     y: number;
   } | null>(null);
 
+  useEffect(() => {
+    void reloadRoleOptions(false);
+  }, []);
+
   function resetModalPosition() {
     setFullscreen(false);
     setOffset({ x: 0, y: 0 });
@@ -178,33 +185,36 @@ export function SystemManagementPanel({
   }
 
   function openCreateModal() {
-    const nextForm = buildFormState(null, roles);
+    const nextForm = buildFormState(null, roleOptions);
     setModal({ item: null, mode: "create" });
     setForm(nextForm);
     setInitialForm(nextForm);
     resetModalPosition();
+    void reloadRoleOptions(true);
   }
 
   function openEditModal(item: AdminUserPanelItem) {
-    const nextForm = buildFormState(item, roles);
+    const nextForm = buildFormState(item, roleOptions);
     setModal({ item, mode: "edit" });
     setForm(nextForm);
     setInitialForm(nextForm);
     resetModalPosition();
+    void reloadRoleOptions(false);
     void hydrateAdminUserDetail(item);
   }
 
   function openDetailModal(item: AdminUserPanelItem) {
-    const nextForm = buildFormState(item, roles);
+    const nextForm = buildFormState(item, roleOptions);
     setModal({ item, mode: "detail" });
     setForm(nextForm);
     setInitialForm(nextForm);
     resetModalPosition();
+    void reloadRoleOptions(false);
     void hydrateAdminUserDetail(item);
   }
 
   function openPasswordModal(item: AdminUserPanelItem) {
-    const nextForm = { ...buildFormState(item, roles), password: "" };
+    const nextForm = { ...buildFormState(item, roleOptions), password: "" };
     setModal({ item, mode: "password" });
     setForm(nextForm);
     setInitialForm(nextForm);
@@ -234,7 +244,7 @@ export function SystemManagementPanel({
 
         return current;
       });
-      const detailForm = buildFormState(detail, roles);
+      const detailForm = buildFormState(detail, roleOptions);
       setInitialForm({ ...detailForm, password: "" });
       setForm((current) =>
         current
@@ -315,6 +325,36 @@ export function SystemManagementPanel({
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  async function reloadRoleOptions(defaultCreateRole: boolean) {
+    setLoadingRoles(true);
+    try {
+      const response = await fetch(ROLE_OPTIONS_ENDPOINT);
+      const result = (await response.json()) as ApiResponse<{
+        items: RoleOption[];
+      }>;
+      if (!response.ok || !result.success || !result.data?.items) {
+        throw new Error(result.error?.message ?? "角色列表加载失败");
+      }
+
+      const nextRoles = result.data.items.map((role) => ({
+        id: role.id,
+        name: role.name,
+      }));
+      setRoleOptions(nextRoles);
+      if (defaultCreateRole) {
+        setForm((current) =>
+          current.roleIds.length === 0 && nextRoles[0]
+            ? { ...current, roleIds: [nextRoles[0].id] }
+            : current,
+        );
+      }
+    } catch (roleError) {
+      setError(roleError instanceof Error ? roleError.message : "角色列表加载失败");
+    } finally {
+      setLoadingRoles(false);
+    }
+  }
+
   async function reloadAdminUsers(
     page = pagination.page,
     filters = { query, statusFilter, storeFilter },
@@ -348,9 +388,14 @@ export function SystemManagementPanel({
     };
 
     if (response.ok && result.success && result.data?.items) {
-      setAdminUsers(result.data.items);
-      setPagination(result.data.pagination);
-      setSummary(result.data.summary);
+      const nextList = normalizeAdminListPayload(
+        result.data,
+        initialSummary,
+        pagination.pageSize,
+      );
+      setAdminUsers(nextList.items);
+      setPagination(nextList.pagination);
+      setSummary(nextList.summary);
     }
     setLoadingList(false);
   }
@@ -527,7 +572,7 @@ export function SystemManagementPanel({
                       {item.name}
                     </div>
                     <div className="mt-1 max-w-48 truncate text-xs text-[#66756d]">
-                      {item.username} · {maskPhone(item.phone)}
+                      {item.username} · {displayPhone(item.phone)}
                     </div>
                   </td>
                   <td className="px-4 py-4">
@@ -541,7 +586,7 @@ export function SystemManagementPanel({
                     </span>
                   </td>
                   <td className="px-4 py-4 text-[#66756d]">
-                    {formatDateTime(item.lastLoginAt)}
+                    {formatDateTimeSecond(item.lastLoginAt, "未登录")}
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex justify-end gap-2">
@@ -664,7 +709,7 @@ export function SystemManagementPanel({
                   </div>
                 </div>
                 <label className="flex flex-col gap-2 text-sm font-medium">
-                  新密码
+                  <RequiredLabel>新密码</RequiredLabel>
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     minLength={8}
@@ -677,7 +722,7 @@ export function SystemManagementPanel({
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="flex flex-col gap-2 text-sm font-medium">
-                    登录账号
+                    <RequiredLabel>登录账号</RequiredLabel>
                     <input
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f] disabled:bg-[#f5f8f3]"
                       disabled={modal.mode !== "create"}
@@ -687,7 +732,7 @@ export function SystemManagementPanel({
                     />
                   </label>
                   <label className="flex flex-col gap-2 text-sm font-medium">
-                    姓名
+                    <RequiredLabel>姓名</RequiredLabel>
                     <input
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) => updateForm("name", event.target.value)}
@@ -697,7 +742,7 @@ export function SystemManagementPanel({
                   </label>
                   {modal.mode === "create" ? (
                     <label className="flex flex-col gap-2 text-sm font-medium">
-                      初始密码
+                      <RequiredLabel>初始密码</RequiredLabel>
                       <input
                         className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         minLength={8}
@@ -718,39 +763,66 @@ export function SystemManagementPanel({
                       value={form.phone}
                     />
                   </label>
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    状态
-                    <select
-                      className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
-                      disabled={modal.mode === "detail"}
-                      onChange={(event) =>
-                        updateForm("status", event.target.value as AdminStatus)
-                      }
-                      value={form.status}
-                    >
-                      <option value="ACTIVE">启用</option>
-                      <option value="DISABLED">停用</option>
-                    </select>
-                  </label>
-                  <div className="md:col-span-2">
-                    <div className="mb-2 text-sm font-medium">角色</div>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {roles.map((role) => (
-                        <label
-                          className="flex h-11 items-center gap-3 rounded-xl border border-[#dbe6dc] px-3 text-sm"
-                          key={role.id}
+                  <div className="flex flex-col gap-2 text-sm font-medium">
+                    <RequiredLabel>状态</RequiredLabel>
+                    <div className="grid h-11 grid-cols-2 gap-2 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-1">
+                      {(["ACTIVE", "DISABLED"] as const).map((status) => (
+                        <button
+                          className={[
+                            "rounded-lg text-sm font-semibold transition",
+                            form.status === status
+                              ? "bg-white text-[#1f8f4f] shadow-sm"
+                              : "text-[#66756d] hover:bg-white/70",
+                          ].join(" ")}
+                          disabled={modal.mode === "detail"}
+                          key={status}
+                          onClick={() => updateForm("status", status)}
+                          type="button"
                         >
-                          <input
-                            checked={form.roleIds.includes(role.id)}
+                          {STATUS_LABELS[status]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="md:col-span-2">
+                    <div className="mb-2 text-sm font-medium">
+                      <RequiredLabel>
+                        角色{loadingRoles ? "（刷新中）" : ""}
+                      </RequiredLabel>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {roleOptions.map((role) => {
+                        const checked = form.roleIds.includes(role.id);
+                        return (
+                          <button
+                            aria-pressed={checked}
+                            className={[
+                              "flex h-11 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition",
+                              checked
+                                ? "border-[#8ecaa1] bg-[#eef8f0] text-[#1f8f4f]"
+                                : "border-[#dbe6dc] bg-white text-[#405248] hover:bg-[#f8fbf7]",
+                            ].join(" ")}
                             disabled={modal.mode === "detail"}
-                            onChange={() =>
+                            key={role.id}
+                            onClick={() =>
                               updateForm("roleIds", toggleValue(form.roleIds, role.id))
                             }
-                            type="checkbox"
-                          />
-                          {role.name}
-                        </label>
-                      ))}
+                            type="button"
+                          >
+                            <span>{role.name}</span>
+                            <span
+                              className={[
+                                "grid h-5 w-5 place-items-center rounded-full border text-xs",
+                                checked
+                                  ? "border-[#1f8f4f] bg-[#1f8f4f] text-white"
+                                  : "border-[#bfd5c6] text-transparent",
+                              ].join(" ")}
+                            >
+                              ✓
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

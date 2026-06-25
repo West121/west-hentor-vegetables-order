@@ -10,10 +10,10 @@ describe("system settings form helpers", () => {
     expect(
       buildSystemSettingsPayload("store-1", {
         aboutText: "  社区蔬菜配送说明  ",
-        cutoffTime: " 17:30 ",
         customerServiceTel: " 400-222-3333 ",
-        deliveryCities: " 南京市、合肥市，南京市 ",
-        deliveryProvinces: " 江苏省、安徽省 ",
+        deliveryCities: [" 南京市 ", "合肥市", "南京市"],
+        deliveryProvinces: [" 江苏省 ", "安徽省"],
+        homeDishColumns: 4,
         loginImageUrl: " /uploads/login.jpg ",
         loginSubtitle: " 社区鲜蔬会员 ",
         loginTitle: " Hentor Fresh ",
@@ -23,10 +23,10 @@ describe("system settings form helpers", () => {
       }),
     ).toEqual({
       aboutText: "社区蔬菜配送说明",
-      cutoffTime: "17:30",
       customerServiceTel: "400-222-3333",
       deliveryCities: ["南京市", "合肥市"],
       deliveryProvinces: ["江苏省", "安徽省"],
+      homeDishColumns: 4,
       loginImageUrl: "/uploads/login.jpg",
       loginSubtitle: "社区鲜蔬会员",
       loginTitle: "Hentor Fresh",
@@ -35,6 +35,24 @@ describe("system settings form helpers", () => {
       storeId: "store-1",
       userAgreementUrl: "https://example.com/agreement",
     });
+  });
+
+  it("falls back to three home dish columns for invalid form values", () => {
+    expect(
+      buildSystemSettingsPayload("store-1", {
+        aboutText: "",
+        customerServiceTel: "",
+        deliveryCities: [],
+        deliveryProvinces: [],
+        homeDishColumns: 5,
+        loginImageUrl: "",
+        loginSubtitle: "",
+        loginTitle: "",
+        loginWelcome: "",
+        privacyPolicyUrl: "",
+        userAgreementUrl: "",
+      }).homeDishColumns,
+    ).toBe(3);
   });
 
   it("only allows submit when an active store is selected and not saving", () => {

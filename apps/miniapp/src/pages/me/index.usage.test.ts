@@ -44,8 +44,9 @@ describe("miniapp me page lifecycle", () => {
     );
 
     expect(source).toContain('"退出登录"');
-    expect(source).toContain('"修改昵称"');
-    expect(source).toContain('Taro.removeStorageSync("mini_session_token")');
+    expect(source).toContain('"编辑资料"');
+    expect(source).toContain("MINI_SESSION_TOKEN_KEY");
+    expect(source).toContain("Taro.removeStorageSync(MINI_SESSION_TOKEN_KEY)");
     expect(source).toContain('Taro.removeStorageSync("editing_order_id")');
     expect(source).toContain("已退出登录");
     expect(source).not.toContain("账号注销");
@@ -63,8 +64,59 @@ describe("miniapp me page lifecycle", () => {
     expect(source).toContain("onNickNameReview");
     expect(source).toContain("value.nickname");
     expect(source).toContain('method: "PATCH"');
-    expect(source).toContain("/api/v1/account");
-    expect(source).toContain("昵称已更新");
-    expect(source).toContain("修改昵称");
+    expect(source).toContain("buildMiniappAccountUrl(API_BASE_URL)");
+    expect(source).toContain("资料已更新");
+    expect(source).toContain("编辑资料");
+  });
+
+  it("supports editing avatar through the WeChat chooseAvatar capability", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/pages/me/index.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain('openType="chooseAvatar"');
+    expect(source).toContain("onChooseAvatar={handleAvatarChoose}");
+    expect(source).toContain("Taro.uploadFile");
+    expect(source).toContain("buildMiniappAccountAvatarUrl(API_BASE_URL)");
+    expect(source).toContain("isUnauthorizedMiniResponse(payload)");
+    expect(source).toContain("refreshMiniSessionToken");
+    expect(source).toContain("avatarUrl");
+  });
+
+  it("separates avatar and nickname click areas in the profile header", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/pages/me/index.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("function openProfileEditor()");
+    expect(source).toContain("function openNicknameEditor()");
+    expect(source).not.toContain("onClick={openNicknameEditor}\n          >\n            <View className=\"profile__avatar\"");
+    expect(source).toContain('className="profile__avatar"');
+    expect(source).toContain("onClick={openProfileEditor}");
+    expect(source).toContain('className="profile__name"');
+    expect(source).toContain("onClick={openNicknameEditor}");
+    expect(source).toContain('hoverClass="profile__avatar--active"');
+    expect(source).toContain('hoverClass="profile__name--active"');
+    expect(source).toContain("loginVegetablesImage");
+    expect(source).toContain('className="profile-hero__image"');
+    expect(source).not.toContain('hoverClass="profile-hero__content--active"');
+    expect(source).not.toContain("} · {memberStatusText}");
+  });
+
+  it("keeps profile header text readable without ellipsis styling", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/pages/me/index.scss"),
+      "utf8",
+    );
+    const identityBlock = source.slice(
+      source.indexOf(".profile__identity"),
+      source.indexOf(".member-card"),
+    );
+
+    expect(identityBlock).toContain(".profile-hero__image");
+    expect(identityBlock).not.toContain("text-overflow: ellipsis");
+    expect(identityBlock).toContain("word-break: break-all");
   });
 });

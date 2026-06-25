@@ -7,6 +7,7 @@ describe("admin user menu model", () => {
     expect(buildAdminUserMenuItems({ canOpenOperationLogs: true })).toEqual([
       expect.objectContaining({ key: "profile", label: "个人资料" }),
       expect.objectContaining({ key: "role-switch", label: "切换角色" }),
+      expect.objectContaining({ key: "layout-settings", label: "布局设置" }),
       expect.objectContaining({ key: "operation-logs", label: "操作日志" }),
       expect.objectContaining({ key: "logout", label: "退出登录" }),
     ]);
@@ -33,6 +34,10 @@ describe("admin user menu model", () => {
     expect(items.find((item) => item.key === "role-switch")).toMatchObject({
       disabled: false,
       helper: "查看当前角色范围",
+    });
+    expect(items.find((item) => item.key === "layout-settings")).toMatchObject({
+      disabled: false,
+      helper: "调整后台布局",
     });
   });
 });

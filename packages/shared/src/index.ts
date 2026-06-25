@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export * from "./china-regions.js";
+
 export const STORE_CODE_PATTERN = /^[a-z0-9][a-z0-9-]{2,31}$/;
 
 export const apiErrorSchema = z.object({

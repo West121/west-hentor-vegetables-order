@@ -79,8 +79,8 @@ export function assertNonEmptyArray(value, label = "array") {
 }
 
 export function assertSystemSettingsShape(settings, label = "system settings") {
-  if (!settings?.store?.id || !settings?.cutoffTime) {
-    throw new Error(`${label}: store or cutoffTime missing`);
+  if (!settings?.store?.id) {
+    throw new Error(`${label}: store missing`);
   }
   if (!Array.isArray(settings.deliveryProvinces) || !Array.isArray(settings.deliveryCities)) {
     throw new Error(`${label}: delivery ranges must be arrays`);
@@ -466,7 +466,7 @@ export async function runSpringApiSmoke(options = {}) {
       roleCount: roles.length,
       shipmentStatsOrderCount: stats.summary?.orderCount ?? 0,
       storeId: store.id,
-      systemCutoffTime: systemSettings.cutoffTime,
+      homeDishColumns: systemSettings.homeDishColumns,
       adminUserCount: adminUsers.length,
       franchiseeCount: franchisees.length,
       taskCount: tasks.length,

@@ -34,6 +34,7 @@ export type PackagePanelItem = {
   usedTimes: number;
   usagePercent: number;
   user: {
+    avatarUrl?: string | null;
     id: string;
     nickname: string | null;
     phone: string | null;
@@ -48,6 +49,7 @@ export type SpringPackagePanelItem = Partial<PackagePanelItem> & {
   templateId?: string;
   templateName?: string;
   userId?: string;
+  userAvatarUrl?: string | null;
   userNickname?: string | null;
   userPhone?: string | null;
   userStatus?: string;
@@ -89,6 +91,7 @@ export function normalizePackagePanelItem(
       item.usagePercent ??
       (totalTimes > 0 ? Math.min(100, (usedTimes / totalTimes) * 100) : 0),
     user: item.user ?? {
+      avatarUrl: item.userAvatarUrl ?? null,
       id: item.userId ?? "",
       nickname: item.userNickname ?? null,
       phone: item.userPhone ?? null,

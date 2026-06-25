@@ -17,7 +17,14 @@ type OrderStatus =
   | "SIGNED"
   | "VOIDED";
 
-type DishCategory = "ACTIVITY" | "FRUIT" | "LEAFY" | "MUSHROOM" | "ROOT";
+type DishCategory = string;
+
+type DishCategoryOption = {
+  code: string;
+  enabled: boolean;
+  name: string;
+  sortOrder: number;
+};
 
 type ShipmentStats = {
   addresses: Array<{
@@ -41,6 +48,7 @@ type ShipmentStats = {
 };
 
 type ShipmentStatsPanelProps = {
+  categoryOptions?: DishCategoryOption[];
   store: StoreOption | null;
 };
 
@@ -61,13 +69,12 @@ const STATUS_OPTIONS: Array<{ label: string; value: "" | OrderStatus }> = [
   { label: "已作废", value: "VOIDED" },
 ];
 
-const CATEGORY_OPTIONS: Array<{ label: string; value: "" | DishCategory }> = [
-  { label: "全部菜品", value: "" },
-  { label: "叶菜", value: "LEAFY" },
-  { label: "果菜", value: "FRUIT" },
-  { label: "根茎", value: "ROOT" },
-  { label: "菌菇", value: "MUSHROOM" },
-  { label: "活动", value: "ACTIVITY" },
+const DEFAULT_CATEGORY_OPTIONS: DishCategoryOption[] = [
+  { code: "LEAFY", enabled: true, name: "叶菜", sortOrder: 1 },
+  { code: "FRUIT", enabled: true, name: "茄果", sortOrder: 2 },
+  { code: "ROOT", enabled: true, name: "根茎", sortOrder: 3 },
+  { code: "MUSHROOM", enabled: true, name: "菌菇", sortOrder: 4 },
+  { code: "ACTIVITY", enabled: true, name: "活动", sortOrder: 5 },
 ];
 
 function todayInputValue() {
@@ -94,7 +101,10 @@ function downloadCsv(filename: string, csvText: string) {
   URL.revokeObjectURL(url);
 }
 
-export function ShipmentStatsPanel({ store }: ShipmentStatsPanelProps) {
+export function ShipmentStatsPanel({
+  categoryOptions,
+  store,
+}: ShipmentStatsPanelProps) {
   const [stats, setStats] = useState<ShipmentStats | null>(null);
   const [status, setStatus] = useState<"" | OrderStatus>("SHIPPED");
   const [dishCategory, setDishCategory] = useState<"" | DishCategory>("");
@@ -103,6 +113,11 @@ export function ShipmentStatsPanel({ store }: ShipmentStatsPanelProps) {
   const [dateTo, setDateTo] = useState(todayInputValue());
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const resolvedCategoryOptions = (
+    categoryOptions?.length ? categoryOptions : DEFAULT_CATEGORY_OPTIONS
+  )
+    .filter((option) => option.enabled)
+    .sort((left, right) => left.sortOrder - right.sortOrder);
 
   async function loadStats(nextFilters?: Partial<ShipmentStatsFilters>) {
     if (!store) {
@@ -194,7 +209,7 @@ export function ShipmentStatsPanel({ store }: ShipmentStatsPanelProps) {
             发货统计
           </div>
           <h2 className="mt-2 text-xl font-semibold tracking-normal">
-            按菜品和地址汇总
+            按菜品汇总
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#66756d]">
             支持日期、状态、菜品分类和地址筛选，可复制或导出 CSV。
@@ -255,9 +270,10 @@ export function ShipmentStatsPanel({ store }: ShipmentStatsPanelProps) {
           }
           value={dishCategory}
         >
-          {CATEGORY_OPTIONS.map((option) => (
-            <option key={option.value || "ALL"} value={option.value}>
-              {option.label}
+          <option value="">全部菜品</option>
+          {resolvedCategoryOptions.map((option) => (
+            <option key={option.code} value={option.code}>
+              {option.name}
             </option>
           ))}
         </select>
@@ -292,7 +308,7 @@ export function ShipmentStatsPanel({ store }: ShipmentStatsPanelProps) {
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[240px_1fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
         <div className="rounded-xl border border-[#dbe6dc] bg-[#f8fff8] p-4">
           <div className="text-sm text-[#66756d]">汇总</div>
           <div className="mt-3 text-3xl font-semibold">
@@ -323,33 +339,6 @@ export function ShipmentStatsPanel({ store }: ShipmentStatsPanelProps) {
             ) : (
               <div className="px-4 py-8 text-center text-sm text-[#66756d]">
                 暂无菜品统计
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-[#dbe6dc]">
-          <div className="border-b border-[#edf2ed] px-4 py-3 font-semibold">
-            地址汇总
-          </div>
-          <div className="divide-y divide-[#edf2ed]">
-            {stats?.addresses.length ? (
-              stats.addresses.map((address) => (
-                <div
-                  className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
-                  key={address.address}
-                >
-                  <span className="min-w-0 truncate font-medium">
-                    {address.address}
-                  </span>
-                  <span className="shrink-0 text-[#66756d]">
-                    {address.totalWeightJin}斤 · {address.orderCount}单
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="px-4 py-8 text-center text-sm text-[#66756d]">
-                暂无地址统计
               </div>
             )}
           </div>

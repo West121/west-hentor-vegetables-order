@@ -37,7 +37,7 @@ public interface AdminUserMapper extends BaseMapper<AdminUserEntity> {
           </foreach>
       )
     </if>
-    ORDER BY u."status" ASC, u."createdAt" DESC
+    ORDER BY u."createdAt" DESC
     LIMIT #{limit}
     OFFSET #{offset}
     </script>

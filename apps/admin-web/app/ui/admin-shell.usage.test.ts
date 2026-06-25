@@ -49,7 +49,9 @@ describe("admin shell sidebar affordance", () => {
     );
 
     expect(source).toContain('collapsed ? "w-[72px]" : "w-[220px]"');
-    expect(source).toContain('collapsed ? "pl-[72px]" : "pl-[220px]"');
+    expect(source).toContain('? "pl-[72px]"');
+    expect(source).toContain(': "pl-[220px]"');
+    expect(source).toContain(': "pl-[236px]"');
     expect(source).not.toContain("w-[84px]");
     expect(source).not.toContain("w-[260px]");
     expect(source).not.toContain("pl-[84px]");
@@ -64,5 +66,47 @@ describe("admin shell sidebar affordance", () => {
 
     expect(source).toContain('collapsed ? "overflow-visible px-3" : "overflow-y-auto px-4"');
     expect(source).not.toContain("no-scrollbar flex-1 overflow-y-auto");
+  });
+
+  it("applies general layout preferences to the admin shell", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/admin-shell.tsx"),
+      "utf8",
+    );
+    const dashboardSource = readFileSync(
+      join(process.cwd(), "app/dashboard-client.tsx"),
+      "utf8",
+    );
+    const cssSource = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
+
+    expect(source).toContain("data-admin-layout-density={density}");
+    expect(source).toContain("data-admin-layout-mode={layoutMode}");
+    expect(source).toContain("data-admin-layout-width={width}");
+    expect(source).toContain("admin-density-compact");
+    expect(source).toContain("max-w-[1500px]");
+    expect(source).toContain("ADMIN_SHELL_PREFERENCES_CHANGED_EVENT");
+    expect(source).toContain('layoutMode === "vertical"');
+    expect(source).toContain('layoutMode === "double"');
+    expect(source).toContain('layoutMode === "horizontal"');
+    expect(source).toContain("contentPaddingClass");
+    expect(source).toContain("pl-[236px]");
+    expect(source).toContain("topBarActions?: ReactNode");
+    expect(source).toContain("admin-shell-top-actions");
+    expect(source).toContain('aria-haspopup="menu"');
+    expect(source).toContain("group.items.length > 0");
+    expect(source).toContain("group.items.map((item)");
+    expect(source).toContain("horizontalOpenGroup");
+    expect(source).toContain("onMouseLeave={() => setHorizontalOpenGroup(null)}");
+    expect(source).toContain("onClick={() => setHorizontalOpenGroup(null)}");
+    expect(source).not.toContain("group-focus-within/horizontal:pointer-events-auto");
+    expect(dashboardSource).toContain("topBarActions={renderTopBarActions()}");
+    expect(dashboardSource).toContain("admin-shell-header-actions");
+    expect(dashboardSource).toContain("admin-shell-header");
+    expect(dashboardSource).toContain("admin-shell-main");
+    expect(cssSource).toContain(".admin-density-compact .admin-shell-header");
+    expect(cssSource).toContain(".admin-density-compact .admin-shell-main");
+    expect(cssSource).toContain(
+      '[data-admin-layout-mode="horizontal"] .admin-shell-header-actions',
+    );
   });
 });

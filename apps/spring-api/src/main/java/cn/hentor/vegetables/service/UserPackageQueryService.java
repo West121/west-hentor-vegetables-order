@@ -131,13 +131,13 @@ public class UserPackageQueryService {
         .selectAs(UserPackageEntity::getFrozenReason, UserPackageListItem::getFrozenReason)
         .selectAs(UserPackageEntity::getLastUsedAt, UserPackageListItem::getLastUsedAt)
         .selectAs(UserPackageEntity::getCreatedAt, UserPackageListItem::getCreatedAt)
+        .selectAs(UserEntity::getAvatarUrl, UserPackageListItem::getUserAvatarUrl)
         .selectAs(UserEntity::getNickname, UserPackageListItem::getUserNickname)
         .selectAs(UserEntity::getPhone, UserPackageListItem::getUserPhone)
         .selectAs(UserEntity::getStatus, UserPackageListItem::getUserStatus)
         .leftJoin(UserEntity.class, UserEntity::getId, UserPackageEntity::getUserId)
         .eq(UserPackageEntity::getStoreId, storeId)
-        .orderByAsc(UserPackageEntity::getStatus)
-        .orderByDesc(UserPackageEntity::getUpdatedAt);
+        .orderByDesc(UserPackageEntity::getCreatedAt);
 
     if (StringUtils.hasText(status) && !"ALL".equalsIgnoreCase(status)) {
       validatePackageStatus(status);
@@ -355,17 +355,6 @@ public class UserPackageQueryService {
     List<UserPackageImportRow> validRows = validateImportRows(rows, result.failures());
 
     for (UserPackageImportRow row : validRows) {
-      MemberStoreBindingEntity binding = findBindingByPhone(storeId, row.phone());
-      if (binding == null) {
-        result.failures().add(new ImportFailureDto(
-          row.phone(),
-          "会员不存在或未绑定当前数据范围",
-          row.rowNumber(),
-          row.templateName()
-        ));
-        continue;
-      }
-
       List<PackageTemplateEntity> templates = findActiveTemplates(storeId, row.templateName());
       if (templates.isEmpty()) {
         result.failures().add(new ImportFailureDto(
@@ -402,6 +391,7 @@ public class UserPackageQueryService {
         continue;
       }
 
+      MemberStoreBindingEntity binding = findOrCreateBindingByPhone(storeId, row.phone(), result);
       String status = row.status() == null ? (usedTimes >= totalTimes ? "USED_UP" : "ACTIVE") : row.status();
       String reason = row.remark() == null ? "会员套餐导入" : row.remark();
       UserPackageEntity created = createImportedPackage(
@@ -428,8 +418,12 @@ public class UserPackageQueryService {
     result.failedRows = result.failures().size();
     UserPackageImportResultDto response = result.toDto();
     writeAdminImportLog(operator.getId(), storeId, rows.size(), Map.of(
+      "createdBindings",
+      response.createdBindings(),
       "createdPackages",
       response.createdPackages(),
+      "createdUsers",
+      response.createdUsers(),
       "failedRows",
       response.failedRows(),
       "failureSamples",
@@ -652,6 +646,65 @@ public class UserPackageQueryService {
       }
     }
     return null;
+  }
+
+  private MemberStoreBindingEntity findOrCreateBindingByPhone(
+    String storeId,
+    String phone,
+    ImportUserPackageAccumulator result
+  ) {
+    MemberStoreBindingEntity existingBinding = findBindingByPhone(storeId, phone);
+    if (existingBinding != null) {
+      return existingBinding;
+    }
+
+    UserEntity user = findUserByPhone(phone);
+    LocalDateTime now = LocalDateTime.now();
+    boolean shouldUseStoreAsDefault =
+      user == null ||
+        !StringUtils.hasText(user.getDefaultStoreId()) ||
+        storeId.equals(user.getDefaultStoreId());
+
+    if (user == null) {
+      user = new UserEntity();
+      user.setId(id());
+      user.setDefaultStoreId(storeId);
+      user.setOpenid("imported-phone:" + phone);
+      user.setPhone(phone);
+      user.setStatus("ACTIVE");
+      user.setCreatedAt(now);
+      user.setUpdatedAt(now);
+      userMapper.insert(user);
+      result.createdUsers += 1;
+    } else if (!StringUtils.hasText(user.getDefaultStoreId())) {
+      UserEntity update = new UserEntity();
+      update.setId(user.getId());
+      update.setDefaultStoreId(storeId);
+      update.setUpdatedAt(now);
+      userMapper.updateById(update);
+    }
+
+    MemberStoreBindingEntity binding = new MemberStoreBindingEntity();
+    binding.setId(id());
+    binding.setUserId(user.getId());
+    binding.setStoreId(storeId);
+    binding.setStatus("ACTIVE");
+    binding.setSource("user_package_import");
+    binding.setIsDefault(shouldUseStoreAsDefault);
+    binding.setCreatedAt(now);
+    binding.setUpdatedAt(now);
+    memberStoreBindingMapper.insertAdminBinding(binding);
+    result.createdBindings += 1;
+    return binding;
+  }
+
+  private UserEntity findUserByPhone(String phone) {
+    return userMapper.selectOne(
+      new LambdaQueryWrapper<UserEntity>()
+        .eq(UserEntity::getPhone, phone)
+        .orderByAsc(UserEntity::getCreatedAt)
+        .last("LIMIT 1")
+    );
   }
 
   private List<PackageTemplateEntity> findActiveTemplates(String storeId, String templateName) {
@@ -940,7 +993,9 @@ public class UserPackageQueryService {
   }
 
   private static class ImportUserPackageAccumulator {
+    private int createdBindings = 0;
     private int createdPackages = 0;
+    private int createdUsers = 0;
     private int failedRows = 0;
     private final List<ImportFailureDto> failures = new ArrayList<>();
     private int importedRows = 0;
@@ -957,7 +1012,9 @@ public class UserPackageQueryService {
 
     private UserPackageImportResultDto toDto() {
       return new UserPackageImportResultDto(
+        createdBindings,
         createdPackages,
+        createdUsers,
         failedRows,
         List.copyOf(failures),
         importedRows,

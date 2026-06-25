@@ -708,7 +708,6 @@ export function buildAdminUserPackageAdjustPayload({ storeId }) {
 export function buildAdminSystemSettingsPayload({ storeId }) {
   return {
     aboutText: "真实数据 smoke 门店说明：用于验证后台系统设置写入与恢复。",
-    cutoffTime: "17:45",
     customerServiceTel: "400-0752-300",
     privacyPolicyUrl: "https://example.com/hentor/privacy-smoke",
     storeId,
@@ -719,7 +718,6 @@ export function buildAdminSystemSettingsPayload({ storeId }) {
 function buildAdminSystemSettingsRestorePayload({ settings, storeId }) {
   return {
     aboutText: settings.aboutText ?? "",
-    cutoffTime: settings.cutoffTime,
     customerServiceTel: settings.customerServiceTel ?? "",
     privacyPolicyUrl: settings.privacyPolicyUrl ?? "",
     storeId,
@@ -3066,7 +3064,6 @@ async function patchAdminSystemSettings(baseUrl, cookie, payload, label) {
 function assertSystemSettingsMatch(settings, payload, label) {
   const fields = [
     "aboutText",
-    "cutoffTime",
     "customerServiceTel",
     "privacyPolicyUrl",
     "userAgreementUrl",
@@ -3088,7 +3085,7 @@ async function checkAdminSystemSettingsWorkflow(baseUrl, cookie, storeId) {
     beforeResponse.payload,
     "admin system settings before update",
   ).settings;
-  if (!before.store?.id || !before.cutoffTime) {
+  if (!before.store?.id) {
     throw new Error("ADMIN_SETTINGS_MISSING: system settings response incomplete");
   }
 
@@ -3133,7 +3130,7 @@ async function checkAdminSystemSettingsWorkflow(baseUrl, cookie, storeId) {
       (item) =>
         item.action === "SYSTEM_SETTINGS_UPDATED" &&
         item.resourceId === storeId &&
-        item.afterValue?.cutoffTime === updatePayload.cutoffTime,
+        item.afterValue?.customerServiceTel === updatePayload.customerServiceTel,
     );
     if (!updateLog) {
       throw new Error("ADMIN_SYSTEM_SETTINGS_LOG_MISSING: update log missing");
@@ -3152,7 +3149,7 @@ async function checkAdminSystemSettingsWorkflow(baseUrl, cookie, storeId) {
       logVerified: true,
       restored,
       storeId,
-      updatedCutoffTime: updated.cutoffTime,
+      updatedCustomerServiceTel: updated.customerServiceTel,
     };
   } finally {
     if (updateApplied && !restored) {

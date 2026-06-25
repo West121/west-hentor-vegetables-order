@@ -94,3 +94,11 @@ export function buildStoreSettingsUrl({
 export function buildMiniappMeUrl({ apiBaseUrl, storeCode }: StoreCodeUrlInput) {
   return `${apiBaseUrl}/api/v1/me?storeCode=${encodeURIComponent(storeCode)}`;
 }
+
+export function buildMiniappAccountUrl(apiBaseUrl: string) {
+  return `${apiBaseUrl}/api/v1/account`;
+}
+
+export function buildMiniappAccountAvatarUrl(apiBaseUrl: string) {
+  return `${buildMiniappAccountUrl(apiBaseUrl)}/avatar`;
+}

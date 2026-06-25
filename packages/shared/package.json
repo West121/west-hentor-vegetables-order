@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "china-area-data": "5.0.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

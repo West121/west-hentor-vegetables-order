@@ -11,10 +11,12 @@ import cn.hentor.vegetables.dto.AdminSessionDto;
 import cn.hentor.vegetables.service.AdminAuthService;
 import cn.hentor.vegetables.service.SystemManagementService;
 import jakarta.validation.Valid;
+import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -99,6 +101,19 @@ public class AdminRoleController {
     @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
   ) {
     return update(roleId, request, authorization, tokenHeader, tokenCookie);
+  }
+
+  @DeleteMapping("/{roleId}")
+  public ApiResponse<Map<String, Boolean>> delete(
+    @PathVariable String roleId,
+    @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
+    @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
+  ) {
+    AdminSessionDto session = requireSession(authorization, tokenHeader, tokenCookie);
+    requirePermission(session, "system.manage");
+    systemManagementService.deleteAdminRole(session, roleId);
+    return ApiResponse.ok(Map.of("deleted", true));
   }
 
   private AdminSessionDto requireSession(String authorization, String tokenHeader, String tokenCookie) {

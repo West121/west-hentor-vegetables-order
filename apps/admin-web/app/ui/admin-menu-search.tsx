@@ -13,6 +13,7 @@ import {
   Package,
   Search,
   Settings,
+  Settings2,
   ShieldCheck,
   Store,
   Truck,
@@ -42,6 +43,7 @@ const iconMap: Record<AdminNavIcon, ComponentType<LucideProps>> = {
   "file-clock": FileClock,
   "folder-tree": FolderTree,
   package: Package,
+  "settings-2": Settings2,
   settings: Settings,
   shield: ShieldCheck,
   store: Store,
@@ -62,11 +64,14 @@ export function AdminMenuSearch({ groups }: AdminMenuSearchProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(-1);
 
-  const filteredGroups = useMemo(() => {
+  const searchGroups = useMemo(() => {
     const normalizedQuery = normalizeSearchText(query);
+    let resultIndex = 0;
 
     return groups
       .map((group) => {
@@ -81,11 +86,21 @@ export function AdminMenuSearch({ groups }: AdminMenuSearchProps) {
             normalizeSearchText(searchable).includes(normalizedQuery)
           );
         });
+        const results = items.map((item) => ({
+          groupLabel: group.label,
+          index: resultIndex++,
+          item,
+        }));
 
-        return { ...group, items };
+        return { ...group, results };
       })
-      .filter((group) => group.items.length > 0);
+      .filter((group) => group.results.length > 0);
   }, [groups, query]);
+
+  const searchResults = useMemo(
+    () => searchGroups.flatMap((group) => group.results),
+    [searchGroups],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -98,6 +113,23 @@ export function AdminMenuSearch({ groups }: AdminMenuSearchProps) {
 
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      setActiveIndex(-1);
+      return;
+    }
+
+    setActiveIndex(searchResults.length ? 0 : -1);
+  }, [open, query, searchResults.length]);
+
+  useEffect(() => {
+    if (!open || activeIndex < 0) {
+      return;
+    }
+
+    resultRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, open]);
 
   useEffect(() => {
     function handleKeyDown(event: globalThis.KeyboardEvent) {
@@ -126,11 +158,56 @@ export function AdminMenuSearch({ groups }: AdminMenuSearchProps) {
     setQuery("");
   }
 
+  function moveActiveResult(direction: 1 | -1) {
+    if (!searchResults.length) {
+      return;
+    }
+
+    setActiveIndex((currentIndex) => {
+      if (currentIndex < 0) {
+        return direction > 0 ? 0 : searchResults.length - 1;
+      }
+
+      return (
+        (currentIndex + direction + searchResults.length) % searchResults.length
+      );
+    });
+  }
+
   function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveActiveResult(1);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveActiveResult(-1);
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      setActiveIndex(searchResults.length ? 0 : -1);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      setActiveIndex(searchResults.length - 1);
+      return;
+    }
+
     if (event.key === "Enter") {
-      const firstItem = filteredGroups[0]?.items[0];
-      if (firstItem) {
-        navigateTo(firstItem.section);
+      event.preventDefault();
+      const activeResult = searchResults[activeIndex] ?? searchResults[0];
+      if (activeResult) {
+        navigateTo(activeResult.item.section);
       }
     }
   }
@@ -165,10 +242,19 @@ export function AdminMenuSearch({ groups }: AdminMenuSearchProps) {
               <Search className="shrink-0 text-[#66756d]" size={17} />
               <input
                 className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#8a9a90]"
+                aria-activedescendant={
+                  activeIndex >= 0
+                    ? `admin-menu-search-result-${activeIndex}`
+                    : undefined
+                }
+                aria-controls="admin-menu-search-results"
+                aria-expanded={open}
+                aria-autocomplete="list"
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={handleInputKeyDown}
                 placeholder="搜索菜单，例如：订单、会员、日志"
                 ref={inputRef}
+                role="combobox"
                 value={query}
               />
               <button
@@ -181,9 +267,14 @@ export function AdminMenuSearch({ groups }: AdminMenuSearchProps) {
               </button>
             </div>
 
-            <div className="max-h-[calc(68vh-48px)] overflow-y-auto p-2">
-              {filteredGroups.length ? (
-                filteredGroups.map((group) => {
+            <div
+              className="max-h-[calc(68vh-48px)] overflow-y-auto p-2"
+              aria-label="菜单搜索结果"
+              id="admin-menu-search-results"
+              role="listbox"
+            >
+              {searchGroups.length ? (
+                searchGroups.map((group) => {
                   const GroupIcon = iconMap[group.icon];
 
                   return (
@@ -193,17 +284,27 @@ export function AdminMenuSearch({ groups }: AdminMenuSearchProps) {
                         <span>{group.label}</span>
                       </div>
                       <div className="space-y-1">
-                        {group.items.map((item) => {
-                          const ItemIcon = iconMap[item.icon];
+                        {group.results.map((result) => {
+                          const ItemIcon = iconMap[result.item.icon];
+                          const highlighted = result.index === activeIndex;
 
                           return (
                             <button
+                              aria-selected={highlighted}
                               className={cn(
                                 "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left transition hover:bg-[#eef8f0]",
-                                item.active && "bg-[#eef8f0]",
+                                result.item.active && "bg-[#f3f7f1]",
+                                highlighted &&
+                                  "bg-[#e7f5e9] ring-1 ring-[#a6d4ad]",
                               )}
-                              key={item.section}
-                              onClick={() => navigateTo(item.section)}
+                              id={`admin-menu-search-result-${result.index}`}
+                              key={result.item.section}
+                              onClick={() => navigateTo(result.item.section)}
+                              onMouseEnter={() => setActiveIndex(result.index)}
+                              ref={(node) => {
+                                resultRefs.current[result.index] = node;
+                              }}
+                              role="option"
                               type="button"
                             >
                               <ItemIcon
@@ -212,12 +313,12 @@ export function AdminMenuSearch({ groups }: AdminMenuSearchProps) {
                               />
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate text-sm font-semibold text-[#10251a]">
-                                  {item.label}
+                                  {result.item.label}
                                 </span>
                                 <span className="mt-0.5 flex items-center gap-1 truncate text-xs text-[#66756d]">
-                                  <span>{group.label}</span>
+                                  <span>{result.groupLabel}</span>
                                   <ChevronRight size={12} />
-                                  <span>{item.label}</span>
+                                  <span>{result.item.label}</span>
                                 </span>
                               </span>
                               <ChevronRight

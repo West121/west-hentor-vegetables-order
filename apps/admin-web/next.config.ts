@@ -38,6 +38,10 @@ const nextConfig: NextConfig = {
           source: "/api/v1/:path*",
           destination: `${springApiBaseUrl}/api/spring/v1/:path*`,
         },
+        {
+          source: "/uploads/:path*",
+          destination: `${springApiBaseUrl}/uploads/:path*`,
+        },
       ],
     };
   },

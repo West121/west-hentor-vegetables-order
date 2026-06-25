@@ -4,10 +4,10 @@ import java.util.List;
 
 public record SystemSettingsDto(
   String aboutText,
-  String cutoffTime,
   String customerServiceTel,
   List<String> deliveryCities,
   List<String> deliveryProvinces,
+  Integer homeDishColumns,
   String loginImageUrl,
   String loginSubtitle,
   String loginTitle,

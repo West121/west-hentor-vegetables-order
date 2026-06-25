@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Ban,
   Copy,
   Eye,
   FileClock,
@@ -11,7 +12,11 @@ import {
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
 
-import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  AdminPagination,
+  normalizeAdminListPayload,
+  type AdminPaginationMeta,
+} from "./admin-pagination";
 import {
   buildStoreScopedDetailPath,
   loadDetailResource,
@@ -23,6 +28,8 @@ import {
   AdminDateTimePicker,
   AdminTimePicker,
 } from "./admin-date-time-picker";
+import { formatDateTimeMinute } from "./date-format";
+import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
   id: string;
@@ -30,7 +37,14 @@ type StoreOption = {
 };
 
 type TaskStatus = "DRAFT" | "ACTIVE" | "DISABLED";
-type DishCategory = "LEAFY" | "FRUIT" | "ROOT" | "MUSHROOM" | "ACTIVITY";
+type DishCategory = string;
+
+type DishCategoryOption = {
+  code: string;
+  enabled: boolean;
+  name: string;
+  sortOrder: number;
+};
 
 export type TaskPanelItem = {
   cutoffTime: string;
@@ -68,6 +82,7 @@ export type TaskDishOption = {
 };
 
 type TaskManagementPanelProps = {
+  categoryOptions?: DishCategoryOption[];
   dishOptions: TaskDishOption[];
   initialItems: TaskPanelItem[];
   initialPagination: AdminPaginationMeta;
@@ -106,13 +121,13 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   DRAFT: "草稿",
 };
 
-const CATEGORY_LABELS: Record<DishCategory, string> = {
-  ACTIVITY: "活动",
-  FRUIT: "茄果",
-  LEAFY: "叶菜",
-  MUSHROOM: "菌菇",
-  ROOT: "根茎",
-};
+const DEFAULT_CATEGORY_OPTIONS: DishCategoryOption[] = [
+  { code: "LEAFY", enabled: true, name: "叶菜", sortOrder: 1 },
+  { code: "FRUIT", enabled: true, name: "茄果", sortOrder: 2 },
+  { code: "ROOT", enabled: true, name: "根茎", sortOrder: 3 },
+  { code: "MUSHROOM", enabled: true, name: "菌菇", sortOrder: 4 },
+  { code: "ACTIVITY", enabled: true, name: "活动", sortOrder: 5 },
+];
 
 function toDateTimeLocal(value: string | Date) {
   const date = value instanceof Date ? value : new Date(value);
@@ -168,16 +183,8 @@ function buildCopyForm(item: TaskPanelItem): FormState {
   };
 }
 
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-  }).format(new Date(value));
-}
-
 export function TaskManagementPanel({
+  categoryOptions,
   dishOptions,
   initialItems,
   initialPagination,
@@ -195,6 +202,7 @@ export function TaskManagementPanel({
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "ALL">("ALL");
@@ -205,6 +213,15 @@ export function TaskManagementPanel({
     x: number;
     y: number;
   } | null>(null);
+  const resolvedCategoryOptions = (
+    categoryOptions?.length ? categoryOptions : DEFAULT_CATEGORY_OPTIONS
+  ).sort((left, right) => left.sortOrder - right.sortOrder);
+  const categoryLabelByCode = new Map(
+    [...DEFAULT_CATEGORY_OPTIONS, ...resolvedCategoryOptions].map((option) => [
+      option.code,
+      option.name,
+    ]),
+  );
 
   function resetModal() {
     setFullscreen(false);
@@ -341,9 +358,14 @@ export function TaskManagementPanel({
         throw new Error(result.error?.message ?? "加载任务失败");
       }
 
-      setItems(result.data.items);
-      setPagination(result.data.pagination);
-      setSummary(result.data.summary);
+      const nextList = normalizeAdminListPayload(
+        result.data,
+        initialSummary,
+        pagination.pageSize,
+      );
+      setItems(nextList.items);
+      setPagination(nextList.pagination);
+      setSummary(nextList.summary);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "加载任务失败");
     } finally {
@@ -483,6 +505,38 @@ export function TaskManagementPanel({
     }
   }
 
+  function canCancelTask(item: TaskPanelItem) {
+    return item.status !== "DISABLED" && new Date(item.endsAt) > new Date();
+  }
+
+  async function cancelTask(item: TaskPanelItem) {
+    if (!store || !canCancelTask(item)) {
+      return;
+    }
+
+    setCancelingId(item.id);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/tasks/${item.id}/cancel`, {
+        body: JSON.stringify({ storeId: store.id }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        error?: { message: string };
+        success: boolean;
+      };
+      if (!response.ok || !result.success) {
+        throw new Error(result.error?.message ?? "取消任务失败");
+      }
+      await refreshTasks(pagination.page);
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : "取消任务失败");
+    } finally {
+      setCancelingId(null);
+    }
+  }
+
   const modalTitle =
     modal?.mode === "create"
       ? "新建任务"
@@ -607,9 +661,9 @@ export function TaskManagementPanel({
                   </div>
                 </td>
                 <td className="px-4 py-4">
-                  <div>{formatDateTime(item.startsAt)}</div>
+                  <div>{formatDateTimeMinute(item.startsAt)}</div>
                   <div className="mt-1 text-xs text-[#66756d]">
-                    至 {formatDateTime(item.endsAt)}
+                    至 {formatDateTimeMinute(item.endsAt)}
                   </div>
                 </td>
                 <td className="px-4 py-4">
@@ -627,6 +681,7 @@ export function TaskManagementPanel({
                 <td className="px-4 py-4">
                   <div className="flex justify-end gap-2">
                     <button
+                      aria-label="查看任务详情"
                       className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                       onClick={() => openDetailModal(item)}
                       title="查看详情"
@@ -635,6 +690,7 @@ export function TaskManagementPanel({
                       <Eye size={16} />
                     </button>
                     <button
+                      aria-label="复制任务"
                       className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                       onClick={() => openCopyModal(item)}
                       title="复制任务"
@@ -643,6 +699,26 @@ export function TaskManagementPanel({
                       <Copy size={16} />
                     </button>
                     <button
+                      aria-label="取消任务"
+                      className={[
+                        "grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#b85a2b] hover:bg-[#fff7ed]",
+                        !canCancelTask(item)
+                          ? "cursor-not-allowed opacity-45 hover:bg-white"
+                          : "",
+                      ].join(" ")}
+                      disabled={!canCancelTask(item) || cancelingId === item.id}
+                      onClick={() => void cancelTask(item)}
+                      title={
+                        canCancelTask(item)
+                          ? "取消任务"
+                          : "已结束或已停用任务不可取消"
+                      }
+                      type="button"
+                    >
+                      {cancelingId === item.id ? "..." : <Ban size={16} />}
+                    </button>
+                    <button
+                      aria-label="编辑任务"
                       className={[
                         "grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]",
                         item.status === "ACTIVE"
@@ -715,6 +791,7 @@ export function TaskManagementPanel({
                 onPointerDown={(event) => event.stopPropagation()}
               >
                 <button
+                  aria-label={fullscreen ? "退出全屏" : "全屏"}
                   className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f]"
                   onClick={() => setFullscreen((value) => !value)}
                   title={fullscreen ? "退出全屏" : "全屏"}
@@ -723,6 +800,7 @@ export function TaskManagementPanel({
                   {fullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
                 </button>
                 <button
+                  aria-label="关闭"
                   className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 bg-red-50 text-red-600"
                   onClick={closeModal}
                   title="关闭"
@@ -736,7 +814,7 @@ export function TaskManagementPanel({
             <div className="flex-1 overflow-auto p-6">
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-                  任务名称
+                  <RequiredLabel>任务名称</RequiredLabel>
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     onChange={(event) => updateForm("name", event.target.value)}
@@ -750,6 +828,7 @@ export function TaskManagementPanel({
                   label="开始时间"
                   onChange={(value) => updateForm("startsAt", value)}
                   readOnly={modal.mode === "detail"}
+                  required
                   value={form.startsAt}
                 />
                 <AdminDateTimePicker
@@ -757,6 +836,7 @@ export function TaskManagementPanel({
                   label="结束时间"
                   onChange={(value) => updateForm("endsAt", value)}
                   readOnly={modal.mode === "detail"}
+                  required
                   value={form.endsAt}
                 />
                 <AdminTimePicker
@@ -764,10 +844,11 @@ export function TaskManagementPanel({
                   label="截单时间"
                   onChange={(value) => updateForm("cutoffTime", value)}
                   readOnly={modal.mode === "detail"}
+                  required
                   value={form.cutoffTime}
                 />
                 <label className="flex flex-col gap-2 text-sm font-medium">
-                  状态
+                  <RequiredLabel>状态</RequiredLabel>
                   <select
                     className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
                     disabled={modal.mode === "detail" || modal.mode === "copy"}
@@ -793,7 +874,9 @@ export function TaskManagementPanel({
               </div>
 
               <div className="mt-5">
-                <div className="mb-3 text-sm font-medium">关联菜品</div>
+                <div className="mb-3 text-sm font-medium">
+                  <RequiredLabel>关联菜品</RequiredLabel>
+                </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   {dishOptions.map((dish) => {
                     const selected = form.dishIds.includes(dish.id);
@@ -815,7 +898,7 @@ export function TaskManagementPanel({
                             {dish.name}
                           </span>
                           <span className="mt-1 block text-xs text-[#66756d]">
-                            {CATEGORY_LABELS[dish.category]} · 库存 {dish.stockJin}斤
+                            {categoryLabelByCode.get(dish.category) ?? dish.category} · 库存 {dish.stockJin}斤
                           </span>
                         </span>
                         <span

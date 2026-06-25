@@ -17,6 +17,7 @@ public class UserPackageListItem {
   private LocalDateTime createdAt;
   private LocalDateTime lastUsedAt;
   private String userId;
+  private String userAvatarUrl;
   private String userNickname;
   private String userPhone;
   private String userStatus;

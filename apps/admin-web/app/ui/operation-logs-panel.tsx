@@ -3,8 +3,13 @@
 import { RefreshCcw } from "lucide-react";
 import { useState } from "react";
 
-import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  AdminPagination,
+  normalizeAdminListPayload,
+  type AdminPaginationMeta,
+} from "./admin-pagination";
 import { AdminDatePicker } from "./admin-date-time-picker";
+import { formatDateTimeSecond } from "./date-format";
 
 export type OperationLogPanelItem = {
   action: string;
@@ -95,22 +100,8 @@ const RESOURCE_LABELS: Record<string, string> = {
   user_package: "会员套餐",
 };
 
-function formatDateTime(value: string | null) {
-  if (!value) {
-    return "未记录";
-  }
-
-  const date = new Date(value);
-  const pad = (part: number) => String(part).padStart(2, "0");
-
-  return [
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
-    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
-  ].join(" ");
-}
-
-function maskPhone(phone: string | null) {
-  return phone ? phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2") : null;
+function displayPhone(phone: string | null) {
+  return phone;
 }
 
 function actorPrimary(log: OperationLogPanelItem) {
@@ -118,7 +109,7 @@ function actorPrimary(log: OperationLogPanelItem) {
     return log.operator.name;
   }
 
-  return log.user?.nickname ?? maskPhone(log.user?.phone ?? null) ?? "微信会员";
+  return log.user?.nickname ?? displayPhone(log.user?.phone ?? null) ?? "微信会员";
 }
 
 function actorSecondary(log: OperationLogPanelItem) {
@@ -126,7 +117,7 @@ function actorSecondary(log: OperationLogPanelItem) {
     return log.operator.username;
   }
 
-  return log.user?.phone ? `会员 ${maskPhone(log.user.phone)}` : "小程序用户";
+  return log.user?.phone ? `会员 ${displayPhone(log.user.phone)}` : "小程序用户";
 }
 
 function formatDuration(durationMs: number | null) {
@@ -234,8 +225,13 @@ export function OperationLogsPanel({
       };
 
       if (response.ok && result.success && result.data?.items) {
-        setLogs(result.data.items);
-        setPagination(result.data.pagination);
+        const nextList = normalizeAdminListPayload(
+          result.data,
+          { total: 0 },
+          pagination.pageSize,
+        );
+        setLogs(nextList.items);
+        setPagination(nextList.pagination);
       }
     } finally {
       setLoading(false);
@@ -431,7 +427,7 @@ export function OperationLogsPanel({
                   </div>
                 </td>
                 <td className="px-4 py-4 align-top text-[#66756d]">
-                  {formatDateTime(log.createdAt)}
+                  {formatDateTimeSecond(log.createdAt, "未记录")}
                 </td>
               </tr>
             ))}

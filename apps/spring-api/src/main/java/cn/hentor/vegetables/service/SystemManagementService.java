@@ -261,8 +261,7 @@ public class SystemManagementService {
     long normalizedPage = Math.max(page, 1);
     long normalizedPageSize = Math.min(Math.max(pageSize, 1), 100);
     LambdaQueryWrapper<AdminRoleEntity> wrapper = new LambdaQueryWrapper<AdminRoleEntity>()
-      .orderByAsc(AdminRoleEntity::getCreatedAt)
-      .orderByAsc(AdminRoleEntity::getCode);
+      .orderByDesc(AdminRoleEntity::getCreatedAt);
     String keyword = trimToNull(query);
     if (StringUtils.hasText(keyword)) {
       wrapper.and(w -> w
@@ -360,6 +359,42 @@ public class SystemManagementService {
       adminRoleLogValue(existing.getCode(), input.name(), input.permissionIds())
     );
     return new AdminRoleResponse(buildRoleItems(List.of(requireAdminRole(roleId))).getFirst());
+  }
+
+  @Transactional
+  public void deleteAdminRole(AdminSessionDto session, String roleId) {
+    AdminUserEntity operator = requireActiveOperator(session.adminUserId());
+    AdminRoleEntity existing = requireAdminRole(roleId);
+    if ("super_admin".equals(existing.getCode())) {
+      throw new ApiException("ROLE_PROTECTED", "超级管理员角色不能删除", HttpStatus.BAD_REQUEST);
+    }
+
+    long userCount = adminUserRoleMapper.selectCount(
+      new LambdaQueryWrapper<AdminUserRoleEntity>().eq(AdminUserRoleEntity::getRoleId, roleId)
+    );
+    if (userCount > 0) {
+      throw new ApiException("ROLE_IN_USE", "该角色已分配给后台用户，不能删除", HttpStatus.BAD_REQUEST);
+    }
+
+    Map<String, Object> before = adminRoleLogValue(
+      existing.getCode(),
+      existing.getName(),
+      loadRolePermissionIds(roleId)
+    );
+    adminRolePermissionMapper.delete(
+      new LambdaQueryWrapper<AdminRolePermissionEntity>().eq(AdminRolePermissionEntity::getRoleId, roleId)
+    );
+    adminRoleMapper.deleteById(roleId);
+
+    writeOperationLog(
+      operator.getId(),
+      null,
+      "admin_role",
+      roleId,
+      "ADMIN_ROLE_DELETED",
+      before,
+      Map.of("deleted", true)
+    );
   }
 
   private List<AdminUserItemDto> buildUserItems(List<AdminUserEntity> users) {

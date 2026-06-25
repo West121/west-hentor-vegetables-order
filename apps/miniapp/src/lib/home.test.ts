@@ -23,6 +23,7 @@ import {
   getReservationAddress,
   getReservationAddressTitle,
   getReservationSummaryMeta,
+  getUnderPackageLimitConfirm,
   getUnavailableSelectedItems,
   isPastCutoff,
 } from "./home";
@@ -443,6 +444,40 @@ describe("miniapp home helpers", () => {
     });
   });
 
+  it("does not let create-mode homepage bypass used-up packages just because today has an order", () => {
+    expect(
+      getReservationGate({
+        hasCurrentOrder: false,
+        packageInfo: {
+          remainingTimes: 0,
+          status: "ACTIVE",
+        },
+      }),
+    ).toEqual({
+      canReserve: false,
+      emptyMessage: null,
+      packageMeta: "套餐次数已用完",
+      submitDisabled: true,
+    });
+  });
+
+  it("locks reservations when there is no active task", () => {
+    expect(
+      getReservationGate({
+        hasActiveTask: false,
+        packageInfo: {
+          remainingTimes: 3,
+          status: "ACTIVE",
+        },
+      }),
+    ).toEqual({
+      canReserve: false,
+      emptyMessage: null,
+      packageMeta: "今日暂无可预订任务",
+      submitDisabled: true,
+    });
+  });
+
   it("locks reservations after the store cutoff time", () => {
     expect(
       getReservationGate({
@@ -698,7 +733,7 @@ describe("miniapp home helpers", () => {
       main: "3样菜 · 4.5斤",
       meta: "合计4.5斤，套餐单次最多8斤",
       noticeTitle: "保存后覆盖原预订",
-      primaryText: "保存修改",
+      primaryText: "确认修改",
       progressPercent: 56.25,
       rows: [
         {
@@ -747,5 +782,28 @@ describe("miniapp home helpers", () => {
       stateLabel: "待提交",
       summaryLabel: "预订确认",
     });
+  });
+
+  it("asks for confirmation when selected vegetables are below package limit", () => {
+    expect(
+      getUnderPackageLimitConfirm({
+        mode: "create",
+        totalWeightJin: 3.5,
+        weightLimitJin: 8,
+      }),
+    ).toEqual({
+      cancelText: "继续选菜",
+      confirmText: "确认提交",
+      content: "套餐本次可选 8斤，当前已选 3.5斤，还没选满。确认提交吗？",
+      title: "未选满套餐额度",
+    });
+
+    expect(
+      getUnderPackageLimitConfirm({
+        mode: "edit",
+        totalWeightJin: 8,
+        weightLimitJin: 8,
+      }),
+    ).toBeNull();
   });
 });

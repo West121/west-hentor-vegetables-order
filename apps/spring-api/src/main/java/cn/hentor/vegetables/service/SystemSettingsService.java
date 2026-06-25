@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -33,11 +32,11 @@ import org.springframework.util.StringUtils;
 
 @Service
 public class SystemSettingsService {
-  private static final Pattern CUTOFF_TIME_PATTERN = Pattern.compile("^([01]\\d|2[0-3]):[0-5]\\d$");
+  private static final int DEFAULT_HOME_DISH_COLUMNS = 3;
   private static final List<String> CONFIG_KEYS = List.of(
     "about_text",
-    "cutoff_time",
     "customer_service_tel",
+    "home_dish_columns",
     "login_image_url",
     "login_subtitle",
     "login_title",
@@ -76,16 +75,15 @@ public class SystemSettingsService {
     String operatorId
   ) {
     AdminUserEntity operator = requireActiveOperator(operatorId);
-    String cutoffTime = normalizeCutoffTime(request.cutoffTime());
     String customerServiceTel = normalizeText(request.customerServiceTel());
     List<String> deliveryCities = normalizeDeliveryRangeValues(request.deliveryCities());
     List<String> deliveryProvinces = normalizeDeliveryRangeValues(request.deliveryProvinces());
+    int homeDishColumns = normalizeHomeDishColumns(request.homeDishColumns());
     SystemSettingsDto before = readSystemSettings(request.storeId());
 
     StoreEntity storeUpdate = new StoreEntity();
     storeUpdate.setId(request.storeId());
     storeUpdate.setCustomerServiceTel(StringUtils.hasText(customerServiceTel) ? customerServiceTel : null);
-    storeUpdate.setCutoffTime(cutoffTime);
     storeUpdate.setDeliveryCities(toJson(deliveryCities));
     storeUpdate.setDeliveryProvinces(toJson(deliveryProvinces));
     storeUpdate.setUpdatedAt(LocalDateTime.now());
@@ -93,8 +91,8 @@ public class SystemSettingsService {
 
     Map<String, String> configValues = Map.of(
       "about_text", normalizeText(request.aboutText()),
-      "cutoff_time", cutoffTime,
       "customer_service_tel", customerServiceTel,
+      "home_dish_columns", String.valueOf(homeDishColumns),
       "login_image_url", normalizeText(request.loginImageUrl()),
       "login_subtitle", normalizeText(request.loginSubtitle()),
       "login_title", normalizeText(request.loginTitle()),
@@ -140,10 +138,10 @@ public class SystemSettingsService {
 
     return new SystemSettingsDto(
       readJsonText(configByKey.get("about_text")),
-      store.getCutoffTime(),
       store.getCustomerServiceTel() == null ? "" : store.getCustomerServiceTel(),
       readJsonStringArray(store.getDeliveryCities()),
       readJsonStringArray(store.getDeliveryProvinces()),
+      readHomeDishColumns(configByKey.get("home_dish_columns")),
       readJsonText(configByKey.get("login_image_url")),
       readJsonText(configByKey.get("login_subtitle")),
       readJsonText(configByKey.get("login_title")),
@@ -166,12 +164,12 @@ public class SystemSettingsService {
     return value == null ? "" : value.trim();
   }
 
-  private String normalizeCutoffTime(String value) {
-    String normalized = normalizeText(value);
-    if (!CUTOFF_TIME_PATTERN.matcher(normalized).matches()) {
-      throw new ApiException("INVALID_CUTOFF_TIME", "截单时间必须是 HH:mm", HttpStatus.BAD_REQUEST);
+  private int normalizeHomeDishColumns(Integer value) {
+    int columns = value == null ? DEFAULT_HOME_DISH_COLUMNS : value;
+    if (columns != 2 && columns != 3 && columns != 4) {
+      throw new ApiException("INVALID_HOME_DISH_COLUMNS", "首页菜品每行数量只能是 2、3、4", HttpStatus.BAD_REQUEST);
     }
-    return normalized;
+    return columns;
   }
 
   private List<String> normalizeDeliveryRangeValues(List<String> values) {
@@ -218,13 +216,28 @@ public class SystemSettingsService {
     }
   }
 
+  private int readHomeDishColumns(String value) {
+    String text = readJsonText(value);
+    if (!StringUtils.hasText(text)) {
+      text = normalizeText(value);
+    }
+    if (!StringUtils.hasText(text)) {
+      return DEFAULT_HOME_DISH_COLUMNS;
+    }
+    try {
+      return normalizeHomeDishColumns(Integer.valueOf(text.trim()));
+    } catch (NumberFormatException exception) {
+      return DEFAULT_HOME_DISH_COLUMNS;
+    }
+  }
+
   private Map<String, Object> settingsLogValue(SystemSettingsDto settings) {
     Map<String, Object> value = new LinkedHashMap<>();
     value.put("aboutText", settings.aboutText());
-    value.put("cutoffTime", settings.cutoffTime());
     value.put("customerServiceTel", settings.customerServiceTel());
     value.put("deliveryCities", settings.deliveryCities());
     value.put("deliveryProvinces", settings.deliveryProvinces());
+    value.put("homeDishColumns", settings.homeDishColumns());
     value.put("loginImageUrl", settings.loginImageUrl());
     value.put("loginSubtitle", settings.loginSubtitle());
     value.put("loginTitle", settings.loginTitle());

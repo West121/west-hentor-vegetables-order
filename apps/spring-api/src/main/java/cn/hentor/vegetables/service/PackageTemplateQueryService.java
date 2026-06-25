@@ -25,6 +25,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -329,24 +330,23 @@ public class PackageTemplateQueryService {
     if (benefits == null || benefits.isEmpty()) {
       return List.of();
     }
+    Set<String> usedKinds = new HashSet<>();
     return IntStream
       .range(0, benefits.size())
-      .mapToObj(index -> normalizeBenefit(benefits.get(index), index))
+      .mapToObj(index -> normalizeBenefit(benefits.get(index), index, usedKinds))
       .toList();
   }
 
   private NormalizedBenefitInput normalizeBenefit(
     PackageTemplateBenefitRequest benefit,
-    int index
+    int index,
+    Set<String> usedKinds
   ) {
-    String kind = benefit.kind() == null ? "EXTRA" : benefit.kind().trim();
-    if (!StringUtils.hasText(kind)) {
-      kind = "EXTRA";
-    }
     String name = benefit.name() == null ? "" : benefit.name().trim();
     if (!StringUtils.hasText(name)) {
       throw new ApiException("BENEFIT_NAME_REQUIRED", "请输入附加权益名称", HttpStatus.BAD_REQUEST);
     }
+    String kind = generateBenefitKind(name, index, usedKinds);
     String unit = benefit.unit() == null ? "" : benefit.unit().trim();
     if (!StringUtils.hasText(unit)) {
       throw new ApiException("BENEFIT_UNIT_REQUIRED", "请输入附加权益单位", HttpStatus.BAD_REQUEST);
@@ -367,6 +367,31 @@ public class PackageTemplateQueryService {
       benefit.totalQuantity().setScale(2, RoundingMode.HALF_UP),
       unit
     );
+  }
+
+  private String generateBenefitKind(String name, int index, Set<String> usedKinds) {
+    String base;
+    if (name.contains("鸡蛋")) {
+      base = "EGG";
+    } else if (name.contains("老母鸡") || name.contains("母鸡") || name.contains("鸡")) {
+      base = "HEN";
+    } else {
+      String normalized = name
+        .trim()
+        .toUpperCase()
+        .replaceAll("[^A-Z0-9]+", "_")
+        .replaceAll("^_+|_+$", "");
+      base = StringUtils.hasText(normalized) ? normalized : "EXTRA";
+    }
+
+    String kind = base;
+    int suffix = index + 1;
+    while (usedKinds.contains(kind)) {
+      suffix += 1;
+      kind = base + "_" + suffix;
+    }
+    usedKinds.add(kind);
+    return kind;
   }
 
   private void replaceBenefits(

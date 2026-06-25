@@ -15,7 +15,11 @@ import {
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
 
-import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  AdminPagination,
+  normalizeAdminListPayload,
+  type AdminPaginationMeta,
+} from "./admin-pagination";
 import {
   buildStoreScopedDetailPath,
   loadDetailResource,
@@ -32,10 +36,18 @@ import {
   type DishStatus,
   type InventoryFormState,
 } from "./dish-modal-state";
+import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
   id: string;
   name: string;
+};
+
+type DishCategoryOption = {
+  code: string;
+  enabled: boolean;
+  name: string;
+  sortOrder: number;
 };
 
 export type DishPanelItem = {
@@ -69,6 +81,7 @@ export type DishPanelItem = {
 };
 
 type DishManagementPanelProps = {
+  categoryOptions?: DishCategoryOption[];
   initialItems: DishPanelItem[];
   initialPagination: AdminPaginationMeta;
   initialSummary: {
@@ -102,17 +115,17 @@ type InventoryModalState = {
 
 type ModalState = DishModalState | InventoryModalState;
 
-const CATEGORY_LABELS: Record<DishCategory, string> = {
-  ACTIVITY: "活动",
-  FRUIT: "茄果",
-  LEAFY: "叶菜",
-  MUSHROOM: "菌菇",
-  ROOT: "根茎",
-};
+const DEFAULT_CATEGORY_OPTIONS: DishCategoryOption[] = [
+  { code: "LEAFY", enabled: true, name: "叶菜", sortOrder: 1 },
+  { code: "FRUIT", enabled: true, name: "茄果", sortOrder: 2 },
+  { code: "ROOT", enabled: true, name: "根茎", sortOrder: 3 },
+  { code: "MUSHROOM", enabled: true, name: "菌菇", sortOrder: 4 },
+  { code: "ACTIVITY", enabled: true, name: "活动", sortOrder: 5 },
+];
 
 const STATUS_LABELS: Record<DishStatus, string> = {
-  OFF_SALE: "下架",
-  ON_SALE: "上架",
+  OFF_SALE: "已下架",
+  ON_SALE: "已上架",
 };
 
 const DISH_IMAGE_ACCEPT = "image/avif,image/jpeg,image/png,image/webp";
@@ -125,6 +138,7 @@ function nowIso() {
 }
 
 export function DishManagementPanel({
+  categoryOptions,
   initialItems,
   initialPagination,
   initialSummary,
@@ -165,6 +179,17 @@ export function DishManagementPanel({
     x: number;
     y: number;
   } | null>(null);
+  const resolvedCategoryOptions = (
+    categoryOptions?.length ? categoryOptions : DEFAULT_CATEGORY_OPTIONS
+  )
+    .filter((option) => option.enabled)
+    .sort((left, right) => left.sortOrder - right.sortOrder);
+  const categoryLabelByCode = new Map(
+    [...DEFAULT_CATEGORY_OPTIONS, ...resolvedCategoryOptions].map((option) => [
+      option.code,
+      option.name,
+    ]),
+  );
 
   async function reloadDishes(
     page = pagination.page,
@@ -209,9 +234,14 @@ export function DishManagementPanel({
         throw new Error(result.error?.message ?? "加载菜品失败");
       }
 
-      setItems(result.data.items);
-      setPagination(result.data.pagination);
-      setSummary(result.data.summary);
+      const nextList = normalizeAdminListPayload(
+        result.data,
+        initialSummary,
+        pagination.pageSize,
+      );
+      setItems(nextList.items);
+      setPagination(nextList.pagination);
+      setSummary(nextList.summary);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "加载菜品失败");
     } finally {
@@ -237,7 +267,10 @@ export function DishManagementPanel({
   }
 
   function openCreateModal() {
-    const nextForm = buildDishFormState();
+    const nextForm = {
+      ...buildDishFormState(),
+      category: resolvedCategoryOptions[0]?.code ?? "LEAFY",
+    };
     setModal({ item: null, mode: "create" });
     setDishForm(nextForm);
     setInitialDishForm(nextForm);
@@ -719,9 +752,9 @@ export function DishManagementPanel({
             value={categoryFilter}
           >
             <option value="ALL">全部分类</option>
-            {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
+            {resolvedCategoryOptions.map((option) => (
+              <option key={option.code} value={option.code}>
+                {option.name}
               </option>
             ))}
           </select>
@@ -799,7 +832,9 @@ export function DishManagementPanel({
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-4">{CATEGORY_LABELS[item.category]}</td>
+                <td className="px-4 py-4">
+                  {categoryLabelByCode.get(item.category) ?? item.category}
+                </td>
                 <td className="px-4 py-4">
                   <span
                     className={
@@ -838,6 +873,7 @@ export function DishManagementPanel({
                           : <Power size={16} />}
                     </button>
                     <button
+                      aria-label="查看菜品详情"
                       className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                       onClick={() => openDetailModal(item)}
                       title="查看详情"
@@ -846,6 +882,7 @@ export function DishManagementPanel({
                       <Eye size={16} />
                     </button>
                     <button
+                      aria-label="库存调整"
                       className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                       onClick={() => openInventoryModal(item)}
                       title="库存调整"
@@ -854,6 +891,7 @@ export function DishManagementPanel({
                       <SlidersHorizontal size={16} />
                     </button>
                     <button
+                      aria-label="编辑菜品"
                       className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                       onClick={() => openEditModal(item)}
                       title="编辑菜品"
@@ -920,6 +958,7 @@ export function DishManagementPanel({
                 onPointerDown={(event) => event.stopPropagation()}
               >
                 <button
+                  aria-label={fullscreen ? "退出全屏" : "全屏"}
                   className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f]"
                   onClick={() => setFullscreen((value) => !value)}
                   title={fullscreen ? "退出全屏" : "全屏"}
@@ -928,6 +967,7 @@ export function DishManagementPanel({
                   {fullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
                 </button>
                 <button
+                  aria-label="关闭"
                   className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 bg-red-50 text-red-600"
                   onClick={closeModal}
                   title="关闭"
@@ -959,7 +999,7 @@ export function DishManagementPanel({
                     </div>
                   ) : null}
                   <label className="flex flex-col gap-2 text-sm font-medium">
-                    调整斤数
+                    <RequiredLabel>调整斤数</RequiredLabel>
                     <input
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) =>
@@ -975,7 +1015,7 @@ export function DishManagementPanel({
                     />
                   </label>
                   <label className="flex flex-col gap-2 text-sm font-medium">
-                    原因
+                    <RequiredLabel>原因</RequiredLabel>
                     <textarea
                       className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) =>
@@ -1047,7 +1087,7 @@ export function DishManagementPanel({
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-                      菜品名称
+                      <RequiredLabel>菜品名称</RequiredLabel>
                       <input
                         className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) => updateDishForm("name", event.target.value)}
@@ -1056,7 +1096,7 @@ export function DishManagementPanel({
                       />
                     </label>
                     <label className="flex flex-col gap-2 text-sm font-medium">
-                      分类
+                      <RequiredLabel>分类</RequiredLabel>
                       <select
                         className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
                         disabled={modal.mode === "detail"}
@@ -1065,15 +1105,15 @@ export function DishManagementPanel({
                         }
                         value={dishForm.category}
                       >
-                        {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
+                        {resolvedCategoryOptions.map((option) => (
+                          <option key={option.code} value={option.code}>
+                            {option.name}
                           </option>
                         ))}
                       </select>
                     </label>
                     <label className="flex flex-col gap-2 text-sm font-medium">
-                      状态
+                      <RequiredLabel>状态</RequiredLabel>
                       <select
                         className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
                         disabled={modal.mode === "detail"}
@@ -1082,12 +1122,12 @@ export function DishManagementPanel({
                         }
                         value={dishForm.status}
                       >
-                        <option value="ON_SALE">上架</option>
-                        <option value="OFF_SALE">下架</option>
+                        <option value="ON_SALE">{STATUS_LABELS.ON_SALE}</option>
+                        <option value="OFF_SALE">{STATUS_LABELS.OFF_SALE}</option>
                       </select>
                     </label>
                     <label className="flex flex-col gap-2 text-sm font-medium">
-                      库存斤数
+                      <RequiredLabel>库存斤数</RequiredLabel>
                       <input
                         className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none read-only:bg-[#f5f8f3] read-only:text-[#66756d] focus:border-[#1f8f4f]"
                         min={0}
@@ -1106,7 +1146,7 @@ export function DishManagementPanel({
                       ) : null}
                     </label>
                     <label className="flex flex-col gap-2 text-sm font-medium">
-                      起订步进
+                      <RequiredLabel>起订步进</RequiredLabel>
                       <input
                         className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         min={0.5}
@@ -1120,7 +1160,7 @@ export function DishManagementPanel({
                       />
                     </label>
                     <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-                      排序
+                      <RequiredLabel>排序</RequiredLabel>
                       <input
                         className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>

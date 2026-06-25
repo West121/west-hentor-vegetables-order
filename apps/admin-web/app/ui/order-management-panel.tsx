@@ -5,23 +5,22 @@ import {
   Maximize2,
   Minimize2,
   Plus,
-  Printer,
   Search,
   Trash2,
   X,
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
 
-import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  AdminPagination,
+  normalizeAdminListPayload,
+  type AdminPaginationMeta,
+} from "./admin-pagination";
 import {
   buildStoreScopedDetailPath,
   loadDetailResource,
   replaceItemById,
 } from "./detail-loaders";
-import {
-  getPendingOrderIds,
-  hasBatchShipLogisticsDraft,
-} from "./order-selection";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import {
   buildOrderFormState,
@@ -30,6 +29,7 @@ import {
   type OrderModalMode,
 } from "./order-modal-state";
 import { AdminDatePicker } from "./admin-date-time-picker";
+import { formatDateTimeSecond } from "./date-format";
 import {
   Select,
   SelectContent,
@@ -39,6 +39,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { AdminMemberAvatar } from "./admin-member-avatar";
+import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
   id: string;
@@ -46,6 +48,7 @@ type StoreOption = {
 };
 
 type OrderMemberOption = {
+  avatarUrl?: string | null;
   defaultAddress: {
     detail: string;
     id: string;
@@ -80,7 +83,7 @@ type OrderStatus =
   | "VOIDED";
 
 export type OrderPanelItem = {
-  addressSnapshot: Record<string, unknown>;
+  addressSnapshot: Record<string, unknown> | null;
   benefitItems: Array<{
     id: string;
     kind: string;
@@ -122,15 +125,16 @@ export type OrderPanelItem = {
   totalWeightJin: number;
   updatedAt: string;
   user: {
+    avatarUrl?: string | null;
     id: string;
     nickname: string | null;
     phone: string | null;
     status: string;
-  };
+  } | null;
   userPackage: {
     id: string;
     nameSnapshot: string;
-  };
+  } | null;
   userVisibleRemark: string | null;
 };
 
@@ -163,26 +167,11 @@ type ModalState = {
   mode: OrderModalMode;
 };
 
-type BatchShipOrder = Pick<
-  OrderPanelItem,
-  "id" | "orderNo" | "totalWeightJin" | "user"
->;
-
-type BatchShipResult = {
-  failureCount: number;
-  failures: Array<{
-    code: string;
-    logisticsNo: string;
-    message: string;
-    orderId: string;
-  }>;
-  successCount: number;
-  successes: Array<{
-    logisticsNo: string;
-    orderId: string;
-    shippedAt: string | null;
-    status: OrderStatus;
-  }>;
+type SpringOrderListItem = Partial<OrderPanelItem> & {
+  packageName?: string | null;
+  userAvatarUrl?: string | null;
+  userNickname?: string | null;
+  userPhone?: string | null;
 };
 
 const STATUS_LABELS: Record<OrderStatus, string> = {
@@ -204,24 +193,81 @@ const STATUS_FILTERS: Array<{
   { label: "已取消", value: "CANCELED" },
 ];
 
-function maskPhone(phone: string | null) {
-  if (!phone || phone.length < 7) {
-    return phone ?? "未绑定手机号";
-  }
+function normalizeOrderListItem(
+  item: OrderPanelItem | SpringOrderListItem,
+  store: StoreOption | null,
+): OrderPanelItem {
+  const flatItem = item as SpringOrderListItem;
+  const createdAt = String(item.createdAt ?? "");
+  const logisticsNo = item.logisticsNo ?? null;
+  const shipments =
+    item.shipments ??
+    (logisticsNo
+      ? [
+          {
+            logisticsNo,
+            packageName: "蔬菜包裹",
+            packageType: "VEGETABLE",
+          },
+        ]
+      : []);
 
-  return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
+  return {
+    addressSnapshot: item.addressSnapshot ?? {},
+    benefitItems: item.benefitItems ?? [],
+    canceledAt: item.canceledAt ?? null,
+    cancelReason: item.cancelReason ?? null,
+    createdAt,
+    id: item.id ?? "",
+    internalRemark: item.internalRemark ?? null,
+    items: item.items ?? [],
+    logisticsNo,
+    modifiedAt: item.modifiedAt ?? null,
+    orderNo: item.orderNo ?? "",
+    shippedAt: item.shippedAt ?? null,
+    shipments,
+    signedAt: item.signedAt ?? null,
+    status: item.status ?? "PENDING_SHIPMENT",
+    store: item.store ?? {
+      code: "",
+      id: store?.id ?? "",
+      name: store?.name ?? "",
+    },
+    totalWeightJin: Number(item.totalWeightJin ?? 0),
+    updatedAt: item.updatedAt ?? createdAt,
+    user: item.user ?? {
+      avatarUrl: flatItem.userAvatarUrl ?? null,
+      id: "",
+      nickname: flatItem.userNickname ?? null,
+      phone: flatItem.userPhone ?? null,
+      status: "ACTIVE",
+    },
+    userPackage: item.userPackage ?? {
+      id: "",
+      nameSnapshot: flatItem.packageName ?? "无套餐",
+    },
+    userVisibleRemark: item.userVisibleRemark ?? null,
+  };
+}
+
+function displayPhone(phone: string | null | undefined) {
+  return phone ?? "未绑定手机号";
 }
 
 function textFromSnapshot(
-  snapshot: Record<string, unknown>,
+  snapshot: Record<string, unknown> | null | undefined,
   key: string,
   fallback: string | null = "",
 ) {
-  const value = snapshot[key];
+  const value = snapshot?.[key];
   return typeof value === "string" ? value : fallback;
 }
 
-function addressText(snapshot: Record<string, unknown>) {
+function addressText(snapshot: Record<string, unknown> | null | undefined) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return "未记录地址";
+  }
+
   return [
     textFromSnapshot(snapshot, "province"),
     textFromSnapshot(snapshot, "city"),
@@ -232,22 +278,18 @@ function addressText(snapshot: Record<string, unknown>) {
     .join(" ") || "未记录地址";
 }
 
-function formatDateTime(value: string | null) {
-  if (!value) {
-    return "未设置";
-  }
-
-  return new Intl.DateTimeFormat("zh-CN", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-  }).format(new Date(value));
-}
-
 function formatJin(value: number) {
   const rounded = Number(value.toFixed(1));
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function pickOrderItemText(order: OrderPanelItem) {
+  return [
+    ...(order.items ?? []).map((item) => item.dishNameSnapshot),
+    ...(order.benefitItems ?? []).map((benefit) => benefit.nameSnapshot),
+  ]
+    .filter(Boolean)
+    .join(" / ");
 }
 
 function formatQuantity(value: number) {
@@ -256,7 +298,9 @@ function formatQuantity(value: number) {
 }
 
 function logisticsText(order: Pick<OrderPanelItem, "logisticsNo" | "shipments">) {
-  const shipped = order.shipments
+  const shipments = order.shipments ?? [];
+
+  const shipped = shipments
     .map((shipment) => shipment.logisticsNo?.trim())
     .filter(Boolean);
 
@@ -267,9 +311,23 @@ function logisticsText(order: Pick<OrderPanelItem, "logisticsNo" | "shipments">)
   return order.logisticsNo ?? "未发货";
 }
 
+function hasGeneratedLogistics(order: Pick<OrderPanelItem, "logisticsNo" | "shipments">) {
+  return (
+    Boolean(order.logisticsNo?.trim()) ||
+    (order.shipments ?? []).some((shipment) => Boolean(shipment.logisticsNo?.trim()))
+  );
+}
+
+function canCreateElectronicWaybill(order: OrderPanelItem) {
+  return order.status === "PENDING_SHIPMENT" && !hasGeneratedLogistics(order);
+}
+
 function defaultShipmentsForOrder(order: OrderPanelItem) {
-  if (order.shipments.length > 0) {
-    return order.shipments.map((shipment) => ({
+  const safeShipments = order.shipments ?? [];
+  const safeBenefits = order.benefitItems ?? [];
+
+  if (safeShipments.length > 0) {
+    return safeShipments.map((shipment) => ({
       logisticsNo: shipment.logisticsNo ?? "",
       packageName: shipment.packageName,
       packageType: shipment.packageType,
@@ -282,7 +340,7 @@ function defaultShipmentsForOrder(order: OrderPanelItem) {
       packageName: "蔬菜包裹",
       packageType: "VEGETABLE",
     },
-    ...order.benefitItems.map((benefit) => ({
+    ...safeBenefits.map((benefit) => ({
       logisticsNo: "",
       packageName: `${benefit.nameSnapshot}包裹`,
       packageType: benefit.kind,
@@ -321,7 +379,9 @@ export function OrderManagementPanel({
   memberOptions,
   store,
 }: OrderManagementPanelProps) {
-  const [items, setItems] = useState(initialItems);
+  const [items, setItems] = useState(() =>
+    initialItems.map((item) => normalizeOrderListItem(item, store)),
+  );
   const [pagination, setPagination] = useState(initialPagination);
   const [summary, setSummary] = useState(initialSummary);
   const [query, setQuery] = useState("");
@@ -330,10 +390,6 @@ export function OrderManagementPanel({
   const [statusFilter, setStatusFilter] = useState<"ALL" | OrderStatus>("ALL");
   const [loadingList, setLoadingList] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
-  const [batchShipOpen, setBatchShipOpen] = useState(false);
-  const [batchShipOrders, setBatchShipOrders] = useState<BatchShipOrder[]>([]);
-  const [batchLogistics, setBatchLogistics] = useState<Record<string, string>>({});
-  const [batchResult, setBatchResult] = useState<BatchShipResult | null>(null);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [form, setForm] = useState<OrderFormState>(
     buildOrderFormState(null, memberOptions),
@@ -347,6 +403,7 @@ export function OrderManagementPanel({
   const [cloudPrinting, setCloudPrinting] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const detailRequestRef = useRef(0);
   const dragRef = useRef<{
     pointerId: number;
@@ -507,6 +564,7 @@ export function OrderManagementPanel({
 
     setLoadingList(true);
     setError(null);
+    setSuccessMessage(null);
 
     try {
       const response = await fetch(`/api/admin/orders?${params.toString()}`);
@@ -524,12 +582,22 @@ export function OrderManagementPanel({
         throw new Error(result.error?.message ?? "加载订单失败");
       }
 
-      setItems(result.data.items);
-      setPagination(result.data.pagination);
-      setSummary(result.data.summary);
+      const nextList = normalizeAdminListPayload(
+        result.data,
+        initialSummary,
+        pagination.pageSize,
+      );
+      const normalizedItems = nextList.items.map((item) =>
+        normalizeOrderListItem(item, store),
+      );
+      setItems(normalizedItems);
+      setPagination(nextList.pagination);
+      setSummary(nextList.summary);
       setSelectedOrderIds((selected) =>
         selected.filter((orderId) =>
-          result.data!.items.some((item) => item.id === orderId),
+          normalizedItems.some(
+            (item) => item.id === orderId && canCreateElectronicWaybill(item),
+          ),
         ),
       );
     } catch (loadError) {
@@ -557,65 +625,6 @@ export function OrderManagementPanel({
     });
   }
 
-  function openBatchShipPanel() {
-    const selectedPendingIds =
-      selectedPendingCount > 0 ? selectedOrderIds : pendingOrderIdsInView;
-    const selected = items
-      .filter(
-        (item) =>
-          item.status === "PENDING_SHIPMENT" &&
-          selectedPendingIds.includes(item.id),
-      )
-      .map((item) => ({
-        id: item.id,
-        orderNo: item.orderNo,
-        totalWeightJin: item.totalWeightJin,
-        user: item.user,
-      }));
-
-    if (!selected.length) {
-      setError("请选择待配送订单");
-      return;
-    }
-
-    setBatchShipOrders(selected);
-    setBatchLogistics((value) =>
-      selected.reduce<Record<string, string>>((next, order) => {
-        next[order.id] = value[order.id] ?? "";
-        return next;
-      }, {}),
-    );
-    setBatchResult(null);
-    setFullscreen(false);
-    setOffset({ x: 0, y: 0 });
-    setBatchShipOpen(true);
-    setError(null);
-  }
-
-  function closeBatchShipPanel() {
-    if (saving) {
-      return;
-    }
-
-    if (
-      !batchResult &&
-      !canCloseAdminModal({
-        hasUnsavedChanges: hasBatchShipLogisticsDraft(
-          batchShipOrders,
-          batchLogistics,
-        ),
-      })
-    ) {
-      return;
-    }
-
-    setBatchShipOpen(false);
-    setBatchResult(null);
-    setFullscreen(false);
-    setOffset({ x: 0, y: 0 });
-    setError(null);
-  }
-
   function exportOrders() {
     if (!store) {
       return;
@@ -640,29 +649,7 @@ export function OrderManagementPanel({
   }
 
   function currentPrintOrderIds() {
-    return selectedOrderIds.length > 0
-      ? selectedOrderIds
-      : pendingOrderIdsInView.length > 0
-        ? pendingOrderIdsInView
-        : items.map((item) => item.id);
-  }
-
-  function openPrintLabels(orderIds = currentPrintOrderIds()) {
-    if (!store) {
-      return;
-    }
-
-    const ids = [...new Set(orderIds)].filter(Boolean);
-    if (!ids.length) {
-      setError("请选择要打印的订单");
-      return;
-    }
-
-    const params = new URLSearchParams({
-      orderIds: ids.join(","),
-      storeId: store.id,
-    });
-    window.open(`/api/admin/orders/print-labels?${params.toString()}`, "_blank");
+    return selectedOrderIds;
   }
 
   async function cloudPrintOrders(orderIds = currentPrintOrderIds()) {
@@ -672,12 +659,13 @@ export function OrderManagementPanel({
 
     const ids = [...new Set(orderIds)].filter(Boolean);
     if (!ids.length) {
-      setError("请选择要云打印的订单");
+      setError("请先勾选需要生成电子面单的待配送订单");
       return;
     }
 
     setCloudPrinting(true);
     setError(null);
+    setSuccessMessage(null);
 
     try {
       const response = await fetch("/api/admin/orders/print-labels", {
@@ -703,18 +691,42 @@ export function OrderManagementPanel({
           ?.map((failure) => `${failure.orderNo} ${failure.packageName}：${failure.message}`)
           .join("；");
         throw new Error(
-          failureMessage || result.error?.message || "快递100云打印失败",
+          failureMessage || result.error?.message || "电子面单生成失败",
         );
       }
 
+      if ((result.data?.failureCount ?? 0) > 0) {
+        const failureMessage = result.data?.failures
+          ?.map((failure) => `${failure.orderNo} ${failure.packageName}：${failure.message}`)
+          .join("；");
+        throw new Error(failureMessage || "电子面单生成失败");
+      }
+
+      const successCount = result.data?.successCount ?? ids.length;
       await loadOrders();
+      setSelectedOrderIds([]);
+      setSuccessMessage(`电子面单生成成功，已处理 ${successCount} 个包裹`);
     } catch (printError) {
       setError(
-        printError instanceof Error ? printError.message : "快递100云打印失败",
+        printError instanceof Error ? printError.message : "电子面单生成失败",
       );
     } finally {
       setCloudPrinting(false);
     }
+  }
+
+  function toggleOrderSelection(orderId: string, checked: boolean) {
+    setSelectedOrderIds((selected) => {
+      if (checked) {
+        return selected.includes(orderId) ? selected : [...selected, orderId];
+      }
+
+      return selected.filter((selectedOrderId) => selectedOrderId !== orderId);
+    });
+  }
+
+  function toggleAllPrintableOrders(checked: boolean) {
+    setSelectedOrderIds(checked ? printableOrderIdsInView : []);
   }
 
   function handleHeaderPointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -1087,56 +1099,6 @@ export function OrderManagementPanel({
     }
   }
 
-  async function submitBatchShip() {
-    if (!store) {
-      return;
-    }
-
-    const shipments = batchShipOrders.map((order) => ({
-      logisticsNo: (batchLogistics[order.id] ?? "").trim(),
-      orderId: order.id,
-    }));
-    const missingLogistics = shipments.filter((shipment) => !shipment.logisticsNo);
-    if (missingLogistics.length) {
-      setError("请补充所有待发货订单的运单号");
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setBatchResult(null);
-
-    try {
-      const response = await fetch("/api/admin/orders/batch-ship", {
-        body: JSON.stringify({
-          shipments,
-          storeId: store.id,
-        }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-      const result = (await response.json()) as {
-        data?: BatchShipResult;
-        error?: { message: string };
-        success: boolean;
-      };
-
-      if (!response.ok || !result.success || !result.data) {
-        throw new Error(result.error?.message ?? "批量发货失败");
-      }
-
-      setBatchResult(result.data);
-      setSelectedOrderIds(result.data.failures.map((failure) => failure.orderId));
-      await loadOrders();
-    } catch (submitError) {
-      setError(
-        submitError instanceof Error ? submitError.message : "批量发货失败",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function createOrder() {
     if (!store || !selectedCreateMember || !createPackage || !createAddress) {
       setError("请选择具备可用套餐和默认地址的会员");
@@ -1198,50 +1160,26 @@ export function OrderManagementPanel({
       : modal?.mode === "edit"
         ? `编辑订单 · ${modal.item?.orderNo}`
         : `订单详情 · ${modal?.item?.orderNo}`;
-  const pendingOrderIdsInView = getPendingOrderIds(items);
-  const selectedPendingCount = selectedOrderIds.filter((orderId) =>
-    pendingOrderIdsInView.includes(orderId),
+  const modalIsReadOnly = modal?.mode === "detail";
+  const modalCanEditShipment =
+    modal?.mode === "edit" && modal.item?.status === "PENDING_SHIPMENT";
+  const printableOrderIdsInView = items
+    .filter(canCreateElectronicWaybill)
+    .map((order) => order.id);
+  const selectedPrintableCount = selectedOrderIds.filter((orderId) =>
+    printableOrderIdsInView.includes(orderId),
   ).length;
-  const totalWeightInView = items.reduce(
-    (sum, item) => sum + item.totalWeightJin,
-    0,
-  );
-  const orderedWeightByDish = items.reduce<Record<string, number>>((next, item) => {
-    for (const orderItem of item.items) {
-      next[orderItem.dishNameSnapshot] =
-        (next[orderItem.dishNameSnapshot] ?? 0) + orderItem.weightJin;
-    }
-    return next;
-  }, {});
-  const inventoryRiskItems = dishOptions
-    .slice(0, 4)
-    .map((dish) => {
-      const orderedWeight = orderedWeightByDish[dish.name] ?? 0;
-      const stockJin = Math.max(0, dish.stockJin);
-      const percent =
-        stockJin > 0
-          ? Math.min(100, Math.max(14, (orderedWeight / stockJin) * 100))
-          : orderedWeight > 0
-            ? 100
-            : 14;
-
-      return {
-        label: `${dish.name} · ${formatJin(stockJin)}斤`,
-        percent,
-        risk: orderedWeight > stockJin,
-      };
-    });
-  const inventoryWarningCount = inventoryRiskItems.filter((item) => item.risk).length;
-  const batchShipCount = selectedPendingCount || pendingOrderIdsInView.length;
-
+  const allPrintableSelected =
+    printableOrderIdsInView.length > 0 &&
+    printableOrderIdsInView.every((orderId) => selectedOrderIds.includes(orderId));
   return (
     <section className="space-y-6">
-      <div className="grid gap-5 xl:grid-cols-[repeat(4,minmax(0,1fr))_260px]">
+      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
         {[
           ["今日待发货", summary.pendingShipment, "border-l-[#1f8f4f]"],
           ["今日订单", summary.total, "border-l-[#2f5fb3]"],
-          ["总重量 / 斤", formatJin(totalWeightInView), "border-l-[#d29b2d]"],
-          ["库存预警", inventoryWarningCount, "border-l-[#b63b3b]"],
+          ["已发货", summary.shipped, "border-l-[#d29b2d]"],
+          ["已签收", summary.signed, "border-l-[#64748b]"],
         ].map(([label, value, accent]) => (
           <div
             className={`rounded-xl border border-[#dbe6dc] border-l-4 ${accent} bg-white px-4 py-4 shadow-sm`}
@@ -1267,9 +1205,6 @@ export function OrderManagementPanel({
       </div>
 
       <div className="flex flex-nowrap items-center gap-3 overflow-x-auto rounded-xl border border-[#dbe6dc] bg-white px-6 py-4 shadow-sm">
-        <div className="flex h-10 w-[150px] shrink-0 items-center rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-3 text-sm text-[#405248]">
-          下单日期：今日
-        </div>
         <div className="flex min-w-[190px] flex-1 items-center gap-2 rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-3">
           <Search size={16} className="shrink-0 text-[#66756d]" />
           <input
@@ -1310,7 +1245,7 @@ export function OrderManagementPanel({
               <SelectLabel>订单状态</SelectLabel>
               {STATUS_FILTERS.map((filter) => (
                 <SelectItem key={filter.value} value={filter.value}>
-                  订单状态：{filter.label}
+                  {filter.label}
                 </SelectItem>
               ))}
             </SelectGroup>
@@ -1333,30 +1268,22 @@ export function OrderManagementPanel({
           重置
         </button>
         <button
-          className="h-10 shrink-0 rounded-lg border border-[#cfe3d3] bg-[#eff8f1] px-5 text-sm font-semibold text-[#1f8f4f] disabled:opacity-50"
-          disabled={batchShipCount === 0}
-          onClick={openBatchShipPanel}
-          type="button"
-        >
-          批量发货
-        </button>
-        <button
-          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-[#cfe3d3] bg-white px-4 text-sm font-semibold text-[#1f8f4f] disabled:opacity-60"
-          disabled={!store || items.length === 0}
-          onClick={() => openPrintLabels()}
-          type="button"
-        >
-          <Printer className="h-4 w-4" />
-          面单预览
-        </button>
-        <button
           className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-[#cfe3d3] bg-[#eff8f1] px-4 text-sm font-semibold text-[#1f8f4f] disabled:opacity-60"
-          disabled={!store || cloudPrinting || items.length === 0}
+          disabled={!store || cloudPrinting || selectedPrintableCount === 0}
           onClick={() => void cloudPrintOrders()}
+          title={
+            selectedPrintableCount > 0
+              ? `为已勾选的 ${selectedPrintableCount} 个订单生成电子面单`
+              : "请先勾选待配送且未生成运单的订单"
+          }
           type="button"
         >
           <CloudUpload className="h-4 w-4" />
-          {cloudPrinting ? "云打印中" : "快递100云打印"}
+          {cloudPrinting
+            ? "生成中"
+            : selectedPrintableCount > 0
+              ? `电子面单 ${selectedPrintableCount}`
+              : "电子面单"}
         </button>
         <button
           className="h-10 shrink-0 rounded-lg border border-[#cfe3d3] bg-white px-4 text-sm font-semibold text-[#1f8f4f] disabled:opacity-60"
@@ -1368,9 +1295,14 @@ export function OrderManagementPanel({
         </button>
       </div>
 
-      {error && !modal && !batchShipOpen ? (
+      {error && !modal ? (
         <div className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
+        </div>
+      ) : null}
+      {successMessage && !modal ? (
+        <div className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {successMessage}
         </div>
       ) : null}
 
@@ -1394,6 +1326,16 @@ export function OrderManagementPanel({
           <table className="w-full min-w-[1020px] border-collapse text-left text-sm">
             <thead className="border-b border-[#dbe6dc] text-[#66756d]">
               <tr>
+                <th className="w-12 py-3 pr-4 font-medium">
+                  <input
+                    aria-label="选择当前页可生成电子面单的订单"
+                    checked={allPrintableSelected}
+                    className="h-4 w-4 rounded border-[#cfe3d3] accent-[#1f8f4f]"
+                    disabled={printableOrderIdsInView.length === 0 || cloudPrinting}
+                    onChange={(event) => toggleAllPrintableOrders(event.target.checked)}
+                    type="checkbox"
+                  />
+                </th>
                 <th className="py-3 pr-4 font-medium">订单号</th>
                 <th className="py-3 pr-4 font-medium">会员</th>
                 <th className="py-3 pr-4 font-medium">套餐</th>
@@ -1406,88 +1348,113 @@ export function OrderManagementPanel({
               </tr>
             </thead>
             <tbody className="divide-y divide-[#edf2ed]">
-              {items.map((order) => (
-                <tr key={order.id}>
-                  <td className="py-4 pr-4 font-semibold text-[#102017]">
-                    {order.orderNo}
-                  </td>
-                  <td className="py-4 pr-4">
-                    <div className="font-semibold">
-                      {order.user.nickname ?? "未命名会员"}
-                    </div>
-                    <div className="mt-1 text-xs text-[#66756d]">
-                      {maskPhone(order.user.phone)}
-                    </div>
-                  </td>
-                  <td className="py-4 pr-4 text-[#405248]">
-                    {order.userPackage.nameSnapshot}
-                  </td>
-                  <td className="py-4 pr-4 font-semibold">
-                    {formatJin(order.totalWeightJin)}斤
-                  </td>
-	                  <td className="py-4 pr-4 text-[#405248]">
-	                    <div className="max-w-32 truncate">
-	                      {[
-	                        ...order.items.map((item) => item.dishNameSnapshot),
-	                        ...order.benefitItems.map(
-	                          (benefit) => benefit.nameSnapshot,
-	                        ),
-	                      ].join(" / ")}
-	                    </div>
-	                  </td>
-	                  <td className="py-4 pr-4 text-[#405248]">
-	                    {logisticsText(order)}
-	                  </td>
-                  <td className="py-4 pr-4 text-[#405248]">
-                    {formatDateTime(order.createdAt)}
-                  </td>
-                  <td className="py-4 pr-4">
-                    <span className="rounded-full bg-[#e8f6ed] px-3 py-1 text-xs font-semibold text-[#1f8f4f]">
-                      {STATUS_LABELS[order.status]}
-                    </span>
-                  </td>
-                  <td className="py-4">
-                    <div className="flex items-center gap-3">
-                      <button
-                        className="text-sm font-semibold text-[#1f8f4f] hover:underline"
-                        onClick={() => openModal(order, "detail")}
-                        title="查看详情"
-                        type="button"
-                      >
-                        详情
-                      </button>
-                      <button
-                        className="text-sm font-semibold text-[#1f8f4f] hover:underline"
-                        onClick={() => openModal(order, "edit")}
-                        title="编辑备注"
-                        type="button"
-                      >
-                        编辑
-                      </button>
-                      <button
-                        className="text-sm font-semibold text-[#1f8f4f] hover:underline"
-                        onClick={() => openPrintLabels([order.id])}
-                        title="预览面单"
-                        type="button"
-                      >
-                        打印
-                      </button>
-                      <button
-                        className="text-sm font-semibold text-[#1f8f4f] hover:underline disabled:text-[#9bb6a5] disabled:no-underline"
-                        disabled={cloudPrinting}
-                        onClick={() => void cloudPrintOrders([order.id])}
-                        title="快递100云打印"
-                        type="button"
-                      >
-                        云打印
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {items.map((order) => {
+                const orderCanPrint = canCreateElectronicWaybill(order);
+                const orderSelected = selectedOrderIds.includes(order.id);
+
+                return (
+                  <tr key={order.id}>
+                    <td className="py-4 pr-4">
+                      <input
+                        aria-label={`选择订单 ${order.orderNo}`}
+                        checked={orderSelected}
+                        className="h-4 w-4 rounded border-[#cfe3d3] accent-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={!orderCanPrint || cloudPrinting}
+                        onChange={(event) =>
+                          toggleOrderSelection(order.id, event.target.checked)
+                        }
+                        title={
+                          orderCanPrint
+                            ? "勾选后可批量生成电子面单"
+                            : "仅待配送且未生成运单的订单可勾选"
+                        }
+                        type="checkbox"
+                      />
+                    </td>
+                    <td className="py-4 pr-4 font-semibold text-[#102017]">
+                      {order.orderNo}
+                    </td>
+                    <td className="py-4 pr-4">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <AdminMemberAvatar
+                          avatarUrl={order.user?.avatarUrl}
+                          name={order.user?.nickname}
+                          phone={order.user?.phone}
+                          size="sm"
+                        />
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold">
+                            {order.user?.nickname ?? "未命名会员"}
+                          </div>
+                          <div className="mt-1 text-xs text-[#66756d]">
+                            {displayPhone(order.user?.phone)}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-4 pr-4 text-[#405248]">
+                      {order.userPackage?.nameSnapshot ?? "无套餐"}
+                    </td>
+                    <td className="py-4 pr-4 font-semibold">
+                      {formatJin(order.totalWeightJin)}斤
+                    </td>
+                    <td className="py-4 pr-4 text-[#405248]">
+                      <div className="max-w-32 truncate">
+                        {pickOrderItemText(order) || "无商品信息"}
+                      </div>
+                    </td>
+                    <td className="py-4 pr-4 text-[#405248]">
+                      {logisticsText(order)}
+                    </td>
+                    <td className="py-4 pr-4 text-[#405248]">
+                      {formatDateTimeSecond(order.createdAt)}
+                    </td>
+                    <td className="py-4 pr-4">
+                      <span className="rounded-full bg-[#e8f6ed] px-3 py-1 text-xs font-semibold text-[#1f8f4f]">
+                        {STATUS_LABELS[order.status] ?? order.status}
+                      </span>
+                    </td>
+                    <td className="py-4">
+                      <div className="flex items-center gap-3">
+                        <button
+                          className="text-sm font-semibold text-[#1f8f4f] hover:underline"
+                          onClick={() => openModal(order, "detail")}
+                          title="查看详情"
+                          type="button"
+                        >
+                          详情
+                        </button>
+                        <button
+                          className="text-sm font-semibold text-[#1f8f4f] hover:underline"
+                          onClick={() => openModal(order, "edit")}
+                          title="编辑备注"
+                          type="button"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          className="text-sm font-semibold text-[#1f8f4f] hover:underline disabled:text-[#9bb6a5] disabled:no-underline"
+                          disabled={cloudPrinting || !orderCanPrint}
+                          onClick={() => void cloudPrintOrders([order.id])}
+                          title={
+                            orderCanPrint
+                              ? "生成电子面单"
+                              : hasGeneratedLogistics(order)
+                                ? "该订单已生成运单"
+                                : "仅待配送订单可生成电子面单"
+                          }
+                          type="button"
+                        >
+                          {hasGeneratedLogistics(order) ? "已生成" : "电子面单"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
               {items.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-[#66756d]" colSpan={9}>
+                  <td className="px-4 py-10 text-center text-[#66756d]" colSpan={10}>
                     {loadingList ? "订单加载中" : "没有符合条件的订单"}
                   </td>
                 </tr>
@@ -1501,167 +1468,6 @@ export function OrderManagementPanel({
         />
         </div>
       </div>
-
-      <div className="rounded-xl border border-[#dbe6dc] bg-white px-6 py-6 shadow-sm">
-        <h2 className="text-lg font-semibold tracking-normal">
-          库存风险与今日菜品重量
-        </h2>
-        <div className="mt-6 grid gap-10 md:grid-cols-2 xl:grid-cols-4">
-          {inventoryRiskItems.map((item) => (
-            <div key={item.label}>
-              <div className="text-sm font-medium text-[#66756d]">{item.label}</div>
-              <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#e8eee7]">
-                <div
-                  className={`h-full rounded-full ${
-                    item.risk ? "bg-[#b63b3b]" : "bg-[#1f6f3f]"
-                  }`}
-                  style={{ width: `${item.percent}%` }}
-                />
-              </div>
-            </div>
-          ))}
-          {inventoryRiskItems.length === 0 ? (
-            <div className="text-sm text-[#66756d]">暂无菜品库存数据</div>
-          ) : null}
-        </div>
-      </div>
-
-      {batchShipOpen ? (
-        <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
-          <div
-            aria-modal="true"
-            className={[
-              "mx-auto flex flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
-              fullscreen
-                ? "h-full w-full"
-                : "h-[66vh] w-[760px] max-w-full resize",
-            ].join(" ")}
-            role="dialog"
-            style={
-              fullscreen
-                ? undefined
-                : { transform: `translate(${offset.x}px, ${offset.y}px)` }
-            }
-          >
-            <div
-              className="flex cursor-move items-center justify-between border-b border-[#dbe6dc] px-6 py-4"
-              onPointerDown={handleHeaderPointerDown}
-              onPointerMove={handleHeaderPointerMove}
-              onPointerCancel={handleHeaderPointerUp}
-              onPointerUp={handleHeaderPointerUp}
-            >
-              <div className="min-w-0">
-                <div className="text-lg font-semibold">批量发货</div>
-                <div className="mt-1 text-sm text-[#66756d]">
-                  已选择 {batchShipOrders.length} 笔待配送订单
-                </div>
-              </div>
-              <div
-                className="flex items-center gap-2"
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                <button
-                  className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f]"
-                  onClick={() => setFullscreen((value) => !value)}
-                  title={fullscreen ? "退出全屏" : "全屏"}
-                  type="button"
-                >
-                  {fullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
-                </button>
-                <button
-                  className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 bg-red-50 text-red-600"
-                  onClick={closeBatchShipPanel}
-                  title="关闭"
-                  type="button"
-                >
-                  <X size={17} />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-auto p-6">
-              <div className="flex flex-col gap-3">
-                {batchShipOrders.map((order) => (
-                  <div
-                    className="grid gap-3 rounded-xl border border-[#edf2ed] bg-[#f8fbf7] p-3 md:grid-cols-[1fr_220px]"
-                    key={order.id}
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold">{order.orderNo}</div>
-                      <div className="mt-1 text-sm text-[#66756d]">
-                        {order.user.nickname ?? "未命名会员"} ·{" "}
-                        {maskPhone(order.user.phone)} · {order.totalWeightJin}斤
-                      </div>
-                    </div>
-                    <input
-                      className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm outline-none focus:border-[#1f8f4f]"
-                      onChange={(event) =>
-                        setBatchLogistics((value) => ({
-                          ...value,
-                          [order.id]: event.target.value,
-                        }))
-                      }
-                      placeholder="录入运单号"
-                      value={batchLogistics[order.id] ?? ""}
-                    />
-                  </div>
-                ))}
-              </div>
-
-              {batchResult ? (
-                <div className="mt-4 rounded-xl border border-[#cfe3d3] bg-[#f8fff8] p-4 text-sm">
-                  <div className="font-semibold text-[#12351f]">
-                    批量发货完成：成功 {batchResult.successCount} 笔，失败{" "}
-                    {batchResult.failureCount} 笔
-                  </div>
-                  {batchResult.failures.length ? (
-                    <div className="mt-3 flex flex-col gap-2">
-                      {batchResult.failures.map((failure) => {
-                        const order = batchShipOrders.find(
-                          (item) => item.id === failure.orderId,
-                        );
-                        return (
-                          <div
-                            className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-red-700"
-                            key={failure.orderId}
-                          >
-                            {order?.orderNo ?? failure.orderId}：{failure.message}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {error ? (
-                <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
-              <button
-                className="h-10 rounded-xl border border-[#dbe6dc] px-5"
-                disabled={saving}
-                onClick={closeBatchShipPanel}
-                type="button"
-              >
-                关闭
-              </button>
-              <button
-                className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
-                disabled={saving || batchShipOrders.length === 0}
-                onClick={submitBatchShip}
-                type="button"
-              >
-                {saving ? "发货中" : "确认批量发货"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {modal ? (
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
@@ -1730,14 +1536,25 @@ export function OrderManagementPanel({
                     <section>
                       <h3 className="text-base font-semibold">基础信息</h3>
                       <div className="mt-6 space-y-4 text-sm leading-6 text-[#405248]">
-                        <div>
-                          会员：{modal.item.user.nickname ?? "未命名会员"}{" "}
-                          {maskPhone(modal.item.user.phone)}
+                        <div className="flex items-center gap-3">
+                          <AdminMemberAvatar
+                            avatarUrl={modal.item.user?.avatarUrl}
+                            name={modal.item.user?.nickname}
+                            phone={modal.item.user?.phone}
+                          />
+                          <div className="min-w-0">
+                            <div className="font-semibold text-[#102017]">
+                              {modal.item.user?.nickname ?? "未命名会员"}
+                            </div>
+                            <div className="text-[#66756d]">
+                              {displayPhone(modal.item.user?.phone)}
+                            </div>
+                          </div>
                         </div>
                         <div>配送地址：{addressText(modal.item.addressSnapshot)}</div>
                         <div>
-                          套餐：{modal.item.userPackage.nameSnapshot} ·{" "}
-                          {STATUS_LABELS[modal.item.status]}
+                          套餐：{modal.item.userPackage?.nameSnapshot ?? "无套餐"} ·{" "}
+                          {STATUS_LABELS[modal.item.status] ?? modal.item.status}
                         </div>
                       </div>
 	                    </section>
@@ -1746,7 +1563,10 @@ export function OrderManagementPanel({
 	                      <h3 className="text-base font-semibold">菜品明细</h3>
                       <div className="mt-4 rounded-xl border border-[#dbe6dc] px-6 py-5">
                         <div className="flex flex-wrap gap-4">
-                          {modal.item.items.map((item) => (
+                          {(modal.item.items ?? []).length === 0 ? (
+                            <div className="text-sm text-[#66756d]">无菜品记录</div>
+                          ) : null}
+                          {(modal.item.items ?? []).map((item) => (
                             <div
                               className="flex min-w-[118px] items-center justify-center gap-4 rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-3 text-sm"
                               key={item.id}
@@ -1759,16 +1579,16 @@ export function OrderManagementPanel({
                               </span>
                             </div>
                           ))}
-                        </div>
-                        <div className="mt-5 border-t border-[#edf2ed] pt-4 text-sm text-[#405248]">
-	                          备注：{modal.item.userVisibleRemark || "不要香菜，配送前电话确认。"}
+	                        </div>
+	                        <div className="mt-5 border-t border-[#edf2ed] pt-4 text-sm text-[#405248]">
+	                          备注：{modal.item.userVisibleRemark || "无备注"}
 	                        </div>
 	                      </div>
-	                      {modal.item.benefitItems.length > 0 ? (
+	                      {(modal.item.benefitItems ?? []).length > 0 ? (
 	                        <div className="mt-3 rounded-xl border border-[#dbe6dc] bg-[#fffdf5] px-6 py-4">
 	                          <div className="text-sm font-semibold">附加权益</div>
 	                          <div className="mt-3 flex flex-wrap gap-3">
-	                            {modal.item.benefitItems.map((benefit) => (
+	                            {(modal.item.benefitItems ?? []).map((benefit) => (
 	                              <div
 	                                className="rounded-lg border border-[#f1e1b8] bg-white px-4 py-2 text-sm"
 	                                key={benefit.id}
@@ -1790,7 +1610,7 @@ export function OrderManagementPanel({
                     <section>
                       <div className="flex items-center justify-between gap-3">
                         <h3 className="text-base font-semibold">配送处理</h3>
-                        {modal.item.status === "PENDING_SHIPMENT" ? (
+                        {modalCanEditShipment ? (
                           <button
                             className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#cfe3d3] bg-white px-3 text-sm font-semibold text-[#1f8f4f] hover:bg-[#f4fbf5]"
                             disabled={loadingDetail || saving}
@@ -1811,13 +1631,17 @@ export function OrderManagementPanel({
                             <div className="mb-3 flex items-start gap-2">
                               <label className="min-w-0 flex-1 font-medium">
                                 <span className="mb-2 block text-[#405248]">
-                                  包裹名称
+                                  {modalCanEditShipment ? (
+                                    <RequiredLabel>包裹名称</RequiredLabel>
+                                  ) : (
+                                    "包裹名称"
+                                  )}
                                 </span>
                                 <input
                                   className="h-10 w-full rounded-lg border border-[#dbe6dc] bg-white px-3 text-sm outline-none focus:border-[#1f8f4f]"
                                   disabled={
                                     loadingDetail ||
-                                    modal.item?.status !== "PENDING_SHIPMENT"
+                                    !modalCanEditShipment
                                   }
                                   onChange={(event) =>
                                     setForm((value) => ({
@@ -1838,7 +1662,7 @@ export function OrderManagementPanel({
                                 />
                               </label>
                               {form.shipments.length > 1 &&
-                              modal.item?.status === "PENDING_SHIPMENT" ? (
+                              modalCanEditShipment ? (
                                 <button
                                   aria-label={`删除${shipment.packageName || "包裹"}`}
                                   className="mt-7 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-100 bg-white text-red-500 hover:bg-red-50"
@@ -1852,13 +1676,16 @@ export function OrderManagementPanel({
                             </div>
                             <label className="block font-medium">
                               <span className="mb-2 block text-[#405248]">
-                                运单号
+                                {modalCanEditShipment ? (
+                                  <RequiredLabel>运单号</RequiredLabel>
+                                ) : (
+                                  "运单号"
+                                )}
                               </span>
                               <input
                                 className="h-11 w-full rounded-lg border border-[#dbe6dc] bg-white px-4 text-sm outline-none focus:border-[#1f8f4f]"
                                 disabled={
-                                  loadingDetail ||
-                                  modal.item?.status !== "PENDING_SHIPMENT"
+                                  !modalCanEditShipment
                                 }
                                 onChange={(event) =>
                                   setForm((value) => ({
@@ -1885,7 +1712,7 @@ export function OrderManagementPanel({
                           </div>
                         ))}
                       </div>
-	                      {modal.mode === "edit" ? (
+                      {modal.mode === "edit" ? (
                         <label className="mt-5 flex max-w-xl flex-col gap-2 text-sm font-medium">
                           内部备注
                           <textarea
@@ -1900,6 +1727,13 @@ export function OrderManagementPanel({
                             value={form.internalRemark}
                           />
                         </label>
+                      ) : modal.item.internalRemark ? (
+                        <div className="mt-5 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4 text-sm">
+                          <div className="font-semibold text-[#102017]">内部备注</div>
+                          <div className="mt-2 whitespace-pre-wrap text-[#405248]">
+                            {modal.item.internalRemark}
+                          </div>
+                        </div>
                       ) : null}
                     </section>
                   </div>
@@ -1909,7 +1743,7 @@ export function OrderManagementPanel({
                     <section className="rounded-xl border border-[#dbe6dc] p-4">
                       <h3 className="font-semibold">会员与套餐</h3>
                       <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
-                        会员
+                        <RequiredLabel>会员</RequiredLabel>
                         <select
                           className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                           onChange={(event) =>
@@ -1924,7 +1758,7 @@ export function OrderManagementPanel({
                           {memberOptions.map((member) => (
                             <option key={member.id} value={member.id}>
                               {member.nickname ?? "未命名会员"} ·{" "}
-                              {maskPhone(member.phone)}
+                              {displayPhone(member.phone)}
                             </option>
                           ))}
                         </select>
@@ -1951,7 +1785,9 @@ export function OrderManagementPanel({
 
                     <section className="rounded-xl border border-[#dbe6dc] p-4">
                       <div className="flex items-center justify-between gap-3">
-                        <h3 className="font-semibold">选择菜品</h3>
+                        <h3 className="font-semibold">
+                          <RequiredLabel>选择菜品</RequiredLabel>
+                        </h3>
                         <div className="text-sm text-[#66756d]">
                           已选 {createTotalWeightJin.toFixed(1)} /{" "}
                           {createPackage?.weightLimitJin ?? 0}斤
@@ -2044,7 +1880,7 @@ export function OrderManagementPanel({
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
-              {modal.mode !== "create" ? (
+              {modal.mode === "edit" ? (
                 <button
                   className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
                   disabled={saving || loadingDetail || !store}
@@ -2060,7 +1896,7 @@ export function OrderManagementPanel({
                 onClick={closeModal}
                 type="button"
               >
-                取消
+                {modalIsReadOnly ? "关闭" : "取消"}
               </button>
               {modal.mode === "create" ? (
                 <button

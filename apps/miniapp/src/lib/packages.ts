@@ -1,3 +1,5 @@
+import { formatMiniDateTimeMinute } from "./datetime";
+
 export type PackagePurchaseActionInput = {
   enabled: boolean;
   purchaseStatus: string;
@@ -20,8 +22,28 @@ export type MiniappPackageCardState = {
   remainingTimes: number;
   status: string;
   totalTimes: number;
+  usageDetails?: MiniappPackageUsageState[];
   usedTimes: number;
   weightLimitJin: number;
+};
+
+export type MiniappPackageUsageState = {
+  benefits?: Array<{
+    id: string;
+    nameSnapshot: string;
+    quantity?: number | null;
+    unitSnapshot?: string | null;
+  }>;
+  createdAt?: string | null;
+  id: string;
+  items?: Array<{
+    dishNameSnapshot: string;
+    id: string;
+    weightJin?: number | null;
+  }>;
+  orderNo?: string | null;
+  status: string;
+  totalWeightJin?: number | null;
 };
 
 export function getPackagePurchaseAction({
@@ -88,6 +110,21 @@ export function getCurrentPackageItem<T extends MiniappPackageCardState>(
   );
 }
 
+export function getFirstPackageItem<T extends MiniappPackageCardState>(
+  items: T[] = [],
+) {
+  return items[0] ?? null;
+}
+
+export function getPackageSlidePosition(currentIndex: number, total: number) {
+  if (total <= 0) {
+    return "";
+  }
+
+  const safeIndex = Math.min(Math.max(currentIndex, 0), total - 1);
+  return `${safeIndex + 1} / ${total}`;
+}
+
 export function getPackageHeroView(packageInfo?: MiniappPackageCardState | null) {
   if (!packageInfo) {
     return {
@@ -133,4 +170,41 @@ export function getPackageHeroView(packageInfo?: MiniappPackageCardState | null)
 export function formatMiniappJin(value: number) {
   const rounded = Number(value.toFixed(1));
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+
+export function formatPackageUsageDate(value?: string | null) {
+  return formatMiniDateTimeMinute(value);
+}
+
+export function getPackageUsageStatusLabel(status: string) {
+  const statusLabels: Record<string, string> = {
+    CANCELED: "已取消",
+    PENDING_SHIPMENT: "待配送",
+    SHIPPED: "配送中",
+    SIGNED: "已签收",
+    VOIDED: "已作废",
+  };
+
+  return statusLabels[status] ?? status;
+}
+
+export function getPackageUsageWeightLabel(value?: number | null) {
+  const weight = Number(value ?? 0);
+  return weight > 0 ? `${formatMiniappJin(weight)}斤` : "附加权益";
+}
+
+export function getPackageUsageDetailText(usage: MiniappPackageUsageState) {
+  const dishTexts =
+    usage.items?.map((item) => {
+      const weight = Number(item.weightJin ?? 0);
+      return `${item.dishNameSnapshot} ${formatMiniappJin(weight)}斤`;
+    }) ?? [];
+  const benefitTexts =
+    usage.benefits?.map((benefit) => {
+      const quantity = Number(benefit.quantity ?? 0);
+      return `${benefit.nameSnapshot} ${formatMiniappJin(quantity)}${benefit.unitSnapshot ?? ""}`;
+    }) ?? [];
+  const details = [...dishTexts, ...benefitTexts].filter(Boolean);
+
+  return details.length > 0 ? details.join("、") : "暂无菜品明细";
 }

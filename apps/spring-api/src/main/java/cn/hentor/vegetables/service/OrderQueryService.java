@@ -136,6 +136,8 @@ public class OrderQueryService {
     String storeId,
     String status,
     String query,
+    String dateFrom,
+    String dateTo,
     long page,
     long pageSize
   ) {
@@ -148,6 +150,7 @@ public class OrderQueryService {
       .selectAs(OrderEntity::getTotalWeightJin, OrderListItem::getTotalWeightJin)
       .selectAs(OrderEntity::getLogisticsNo, OrderListItem::getLogisticsNo)
       .selectAs(OrderEntity::getCreatedAt, OrderListItem::getCreatedAt)
+      .selectAs(UserEntity::getAvatarUrl, OrderListItem::getUserAvatarUrl)
       .selectAs(UserEntity::getNickname, OrderListItem::getUserNickname)
       .selectAs(UserEntity::getPhone, OrderListItem::getUserPhone)
       .selectAs(UserPackageEntity::getNameSnapshot, OrderListItem::getPackageName)
@@ -162,7 +165,7 @@ public class OrderQueryService {
       .orderByDesc(OrderEntity::getCreatedAt);
 
     if (StringUtils.hasText(status) && !"ALL".equalsIgnoreCase(status)) {
-      wrapper.apply("t.\"status\" = {0}::\"OrderStatus\"", status.trim());
+      wrapper.eq(OrderEntity::getStatus, status.trim());
     }
 
     if (StringUtils.hasText(query)) {
@@ -174,6 +177,15 @@ public class OrderQueryService {
         .or()
         .like(UserEntity::getPhone, keyword)
       );
+    }
+
+    LocalDate from = parseDate(dateFrom, "dateFrom");
+    if (from != null) {
+      wrapper.ge(OrderEntity::getCreatedAt, from.atStartOfDay());
+    }
+    LocalDate to = parseDate(dateTo, "dateTo");
+    if (to != null) {
+      wrapper.lt(OrderEntity::getCreatedAt, to.plusDays(1).atStartOfDay());
     }
 
     Page<OrderListItem> result = orderMapper.selectJoinPage(
@@ -1019,7 +1031,7 @@ public class OrderQueryService {
       .last("LIMIT 1000");
 
     if (StringUtils.hasText(status) && !"ALL".equalsIgnoreCase(status)) {
-      wrapper.apply("t.\"status\" = {0}::\"OrderStatus\"", status.trim());
+      wrapper.eq(OrderEntity::getStatus, status.trim());
     }
 
     if (StringUtils.hasText(query)) {
@@ -1301,6 +1313,7 @@ public class OrderQueryService {
 
   private AdminOrderUserDto toUserDto(UserEntity user) {
     return new AdminOrderUserDto(
+      user.getAvatarUrl(),
       user.getId(),
       user.getNickname(),
       user.getPhone(),

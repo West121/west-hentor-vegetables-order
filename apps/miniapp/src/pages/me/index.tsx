@@ -2,12 +2,22 @@ import { Button, Form, Image, Input, Text, View } from "@tarojs/components";
 import Taro, { useDidShow } from "@tarojs/taro";
 import { useState } from "react";
 
+import {
+  MINI_SESSION_TOKEN_KEY,
+  getMiniSessionToken,
+  isUnauthorizedMiniResponse,
+  redirectToMiniLogin,
+  refreshMiniSessionToken,
+  requestWithMiniSession,
+} from "../../lib/auth";
 import { getAgreementEntry } from "../../lib/agreements";
 import { MiniCustomTop } from "../../components/mini-custom-top";
 import loginVegetablesImage from "../../assets/login-vegetables.jpg";
 import { getMemberLockNotice, getPackageUsageStats } from "../../lib/me";
 import {
   ACTIVE_STORE_CODE_KEY,
+  buildMiniappAccountAvatarUrl,
+  buildMiniappAccountUrl,
   buildMiniappMeUrl,
   buildStoreSettingsUrl,
   getActiveStoreCode,
@@ -42,6 +52,7 @@ type MeData = {
     receiverPhone: string;
   };
   member: null | {
+    avatarUrl?: string | null;
     bindingStatus?: string | null;
     disabledReason?: string | null;
     nickname: string | null;
@@ -77,12 +88,62 @@ type PublicSettings = {
   userAgreementUrl: string;
 };
 
+type AvatarChooseEvent = {
+  detail?: {
+    avatarUrl?: string;
+  };
+};
+
+type UploadImageData = {
+  image?: {
+    url?: string;
+  };
+};
+
 function maskPhone(phone?: string | null) {
   if (!phone || phone.length < 7) {
     return phone ?? "未绑定手机号";
   }
 
   return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
+}
+
+function memberStatusLabel(member?: MeData["member"]) {
+  if (member?.bindingStatus === "DISABLED" || member?.status === "DISABLED") {
+    return "已停用";
+  }
+
+  return "正常会员";
+}
+
+function resolveMediaUrl(url?: string | null) {
+  const normalized = url?.trim();
+  if (!normalized) {
+    return "";
+  }
+  if (
+    normalized.startsWith("http://") ||
+    normalized.startsWith("https://") ||
+    normalized.startsWith("wxfile://") ||
+    normalized.startsWith("data:")
+  ) {
+    return normalized;
+  }
+  if (normalized.startsWith("/")) {
+    return `${API_BASE_URL.replace(/\/+$/, "")}${normalized}`;
+  }
+  return normalized;
+}
+
+function parseUploadResponse(data: string) {
+  try {
+    return JSON.parse(data) as ApiResponse<UploadImageData>;
+  } catch {
+    return {
+      error: { code: "UPLOAD_RESPONSE_INVALID", message: "头像上传失败" },
+      success: false,
+    } satisfies ApiResponse<UploadImageData>;
+  }
 }
 
 export default function MePage() {
@@ -93,6 +154,8 @@ export default function MePage() {
   });
   const [loading, setLoading] = useState(true);
   const [nicknameModalOpen, setNicknameModalOpen] = useState(false);
+  const [avatarDraft, setAvatarDraft] = useState("");
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [nicknameSaving, setNicknameSaving] = useState(false);
 
@@ -123,32 +186,27 @@ export default function MePage() {
     setLoading(true);
 
     try {
-      const token = Taro.getStorageSync("mini_session_token");
-      if (!token) {
-        Taro.navigateTo({ url: "/pages/login/index" });
-        return;
-      }
       const storeCode = getActiveStoreCode(
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
 
-      const response = await Taro.request<ApiResponse<MeData>>({
-        header: { authorization: `Bearer ${token}` },
-        method: "GET",
-        url: buildMiniappMeUrl({
-          apiBaseUrl: API_BASE_URL,
-          storeCode,
-        }),
+      const response = await requestWithMiniSession<MeData>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<MeData>>({
+            header: { authorization: `Bearer ${token}` },
+            method: "GET",
+            url: buildMiniappMeUrl({
+              apiBaseUrl: API_BASE_URL,
+              storeCode,
+            }),
+          }),
       });
       const payload = response.data;
 
       if (!payload.success || !payload.data) {
-        if (payload.error?.code === "UNAUTHORIZED") {
-          Taro.navigateTo({ url: "/pages/login/index" });
-          return;
-        }
-
         throw new Error(payload.error?.message ?? "我的数据加载失败");
       }
 
@@ -172,7 +230,6 @@ export default function MePage() {
   const packageInfo = data?.currentPackage;
   const pendingOrder = data?.recentOrders.find((order) => order.canEdit);
   const lockNotice = getMemberLockNotice(data?.member);
-  const memberStatusText = lockNotice ? "服务已暂停" : "正常会员";
   const packageStats = getPackageUsageStats(
     packageInfo,
     pendingOrder?.totalWeightJin ?? 0,
@@ -199,6 +256,7 @@ export default function MePage() {
       onClick: () => void openAccountSettings(),
     },
   ];
+  const memberMeta = `${maskPhone(data?.member?.phone)} · ${memberStatusLabel(data?.member)}`;
 
   function openAgreement(label: string, url?: string | null) {
     const entry = getAgreementEntry(label, url);
@@ -213,15 +271,24 @@ export default function MePage() {
     Taro.navigateTo({ url: entry.url });
   }
 
+  function openProfileEditor() {
+    setAvatarDraft(data?.member?.avatarUrl ?? "");
+    setNicknameDraft(data?.member?.nickname ?? "");
+    setNicknameModalOpen(true);
+  }
+
+  function openNicknameEditor() {
+    openProfileEditor();
+  }
+
   async function openAccountSettings() {
     try {
       const result = await Taro.showActionSheet({
-        itemList: ["修改昵称", "用户协议", "隐私政策", "退出登录"],
+        itemList: ["编辑资料", "用户协议", "隐私政策", "退出登录"],
       });
 
       if (result.tapIndex === 0) {
-        setNicknameDraft(data?.member?.nickname ?? "");
-        setNicknameModalOpen(true);
+        openProfileEditor();
       }
       if (result.tapIndex === 1) {
         openAgreement("用户协议", settings.userAgreementUrl);
@@ -237,7 +304,80 @@ export default function MePage() {
     }
   }
 
-  async function saveNickname(value?: unknown) {
+  async function uploadAvatarOnce(filePath: string, token: string) {
+    const response = await Taro.uploadFile({
+      filePath,
+      header: { authorization: `Bearer ${token}` },
+      name: "file",
+      url: buildMiniappAccountAvatarUrl(API_BASE_URL),
+    });
+    const payload = parseUploadResponse(response.data);
+    return { payload, response };
+  }
+
+  async function uploadAvatar(filePath: string) {
+    const storeCode = getActiveStoreCode(
+      Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
+      DEFAULT_STORE_CODE,
+    );
+    let token = await getMiniSessionToken({
+      apiBaseUrl: API_BASE_URL,
+      storeCode,
+    });
+    let { payload, response } = await uploadAvatarOnce(filePath, token);
+    if (isUnauthorizedMiniResponse(payload)) {
+      try {
+        token = await refreshMiniSessionToken({
+          apiBaseUrl: API_BASE_URL,
+          storeCode,
+        });
+      } catch (error) {
+        redirectToMiniLogin();
+        throw error;
+      }
+      ({ payload, response } = await uploadAvatarOnce(filePath, token));
+    }
+    if (isUnauthorizedMiniResponse(payload)) {
+      redirectToMiniLogin();
+    }
+
+    const avatarUrl = payload.data?.image?.url;
+    if (
+      response.statusCode < 200 ||
+      response.statusCode >= 300 ||
+      !payload.success ||
+      !avatarUrl
+    ) {
+      throw new Error(payload.error?.message ?? `头像上传失败(${response.statusCode})`);
+    }
+    return avatarUrl;
+  }
+
+  async function handleAvatarChoose(event: AvatarChooseEvent) {
+    const tempAvatarUrl = event.detail?.avatarUrl?.trim();
+    if (!tempAvatarUrl) {
+      Taro.showToast({ icon: "none", title: "请选择头像" });
+      return;
+    }
+
+    setAvatarUploading(true);
+    Taro.showLoading({ title: "上传中" });
+    try {
+      const avatarUrl = await uploadAvatar(tempAvatarUrl);
+      setAvatarDraft(avatarUrl);
+      Taro.showToast({ icon: "success", title: "头像已选择" });
+    } catch (error) {
+      Taro.showToast({
+        icon: "none",
+        title: error instanceof Error ? error.message : "头像上传失败",
+      });
+    } finally {
+      Taro.hideLoading();
+      setAvatarUploading(false);
+    }
+  }
+
+  async function saveProfile(value?: unknown) {
     const nickname =
       typeof value === "string" && value.trim()
         ? value.trim()
@@ -259,14 +399,24 @@ export default function MePage() {
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
-      const response = await Taro.request<ApiResponse<{ member: { nickname: string } }>>({
-        data: {
-          nickname,
-          storeCode,
-        },
-        header: { authorization: `Bearer ${Taro.getStorageSync("mini_session_token")}` },
-        method: "PATCH",
-        url: `${API_BASE_URL}/api/v1/account`,
+      const response = await requestWithMiniSession<{
+        member: { avatarUrl?: string | null; nickname: string };
+      }>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<
+            ApiResponse<{ member: { avatarUrl?: string | null; nickname: string } }>
+          >({
+            data: {
+              avatarUrl: avatarDraft || data?.member?.avatarUrl || null,
+              nickname,
+              storeCode,
+            },
+            header: { authorization: `Bearer ${token}` },
+            method: "PATCH",
+            url: buildMiniappAccountUrl(API_BASE_URL),
+          }),
       });
 
       if (!response.data.success) {
@@ -275,11 +425,11 @@ export default function MePage() {
 
       setNicknameModalOpen(false);
       await loadMe();
-      Taro.showToast({ icon: "success", title: "昵称已更新" });
+      Taro.showToast({ icon: "success", title: "资料已更新" });
     } catch (error) {
       Taro.showToast({
         icon: "none",
-        title: error instanceof Error ? error.message : "昵称保存失败",
+        title: error instanceof Error ? error.message : "资料保存失败",
       });
     } finally {
       Taro.hideLoading();
@@ -288,23 +438,45 @@ export default function MePage() {
   }
 
   function logout() {
-    Taro.removeStorageSync("mini_session_token");
+    Taro.removeStorageSync(MINI_SESSION_TOKEN_KEY);
     Taro.removeStorageSync("editing_order_id");
     setData(null);
     Taro.showToast({ icon: "success", title: "已退出登录" });
     Taro.navigateTo({ url: "/pages/login/index" });
   }
 
+  const memberAvatarUrl = resolveMediaUrl(data?.member?.avatarUrl);
+
   return (
     <View className="me">
       <View className="profile-hero">
         <MiniCustomTop className="profile-hero__top" dark />
         <View className="profile-hero__content">
-          <View className="profile__avatar">{memberName.slice(0, 1)}</View>
-          <View className="profile__body">
-            <View className="profile__name">{memberName}</View>
-            <View className="profile__meta">
-              {maskPhone(data?.member?.phone)} · {memberStatusText}
+          <View className="profile__identity">
+            <View
+              className="profile__avatar"
+              hoverClass="profile__avatar--active"
+              onClick={openProfileEditor}
+            >
+              {memberAvatarUrl ? (
+                <Image
+                  className="profile__avatar-image"
+                  mode="aspectFill"
+                  src={memberAvatarUrl}
+                />
+              ) : (
+                <Text>{memberName.slice(0, 1)}</Text>
+              )}
+            </View>
+            <View className="profile__body">
+              <View
+                className="profile__name"
+                hoverClass="profile__name--active"
+                onClick={openNicknameEditor}
+              >
+                {memberName}
+              </View>
+              <View className="profile__meta">{memberMeta}</View>
             </View>
           </View>
         </View>
@@ -382,9 +554,9 @@ export default function MePage() {
             <View className="nickname-panel__handle" />
             <View className="nickname-panel__head">
               <View>
-                <View className="nickname-panel__title">修改昵称</View>
+                <View className="nickname-panel__title">编辑资料</View>
                 <View className="nickname-panel__meta">
-                  可使用微信昵称快捷填写，也可手动输入
+                  设置头像和昵称
                 </View>
               </View>
               <Text
@@ -394,15 +566,41 @@ export default function MePage() {
                 关闭
               </Text>
             </View>
-            <View className="nickname-panel__label">昵称</View>
             <Form
               onSubmit={(event) => {
                 const value = event.detail.value as { nickname?: string };
                 if (!nicknameSaving) {
-                  void saveNickname(value.nickname);
+                  void saveProfile(value.nickname);
                 }
               }}
             >
+              <View className="profile-editor__avatar-row">
+                <Button
+                  className="profile-editor__avatar-button"
+                  disabled={avatarUploading || nicknameSaving}
+                  openType="chooseAvatar"
+                  onChooseAvatar={handleAvatarChoose}
+                >
+                  {resolveMediaUrl(avatarDraft || data?.member?.avatarUrl) ? (
+                    <Image
+                      className="profile-editor__avatar-image"
+                      mode="aspectFill"
+                      src={resolveMediaUrl(avatarDraft || data?.member?.avatarUrl)}
+                    />
+                  ) : (
+                    <Text>{memberName.slice(0, 1)}</Text>
+                  )}
+                </Button>
+                <View className="profile-editor__avatar-copy">
+                  <View className="profile-editor__avatar-title">头像</View>
+                  <View className="profile-editor__avatar-meta">
+                    {avatarUploading ? "上传中" : "点击头像选择微信头像"}
+                  </View>
+                </View>
+              </View>
+              <View className="nickname-panel__label">
+                昵称<Text className="required-mark">*</Text>
+              </View>
               <Input
                 className="nickname-panel__input"
                 maxlength={24}
@@ -440,7 +638,7 @@ export default function MePage() {
                 disabled={nicknameSaving}
                 formType="submit"
               >
-                {nicknameSaving ? "保存中" : "保存昵称"}
+                {nicknameSaving ? "保存中" : "保存资料"}
               </Button>
             </Form>
           </View>

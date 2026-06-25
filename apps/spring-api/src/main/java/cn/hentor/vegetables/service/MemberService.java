@@ -120,6 +120,7 @@ public class MemberService {
         .selectAs(MemberStoreBindingEntity::getSource, MemberListItem::getSource)
         .selectAs(MemberStoreBindingEntity::getCreatedAt, MemberListItem::getCreatedAt)
         .selectAs(UserEntity::getNickname, MemberListItem::getNickname)
+        .selectAs(UserEntity::getAvatarUrl, MemberListItem::getAvatarUrl)
         .selectAs(UserEntity::getPhone, MemberListItem::getPhone)
         .selectAs(UserEntity::getStatus, MemberListItem::getUserStatus)
         .selectAs(UserEntity::getDisabledReason, MemberListItem::getDisabledReason)
@@ -148,6 +149,7 @@ public class MemberService {
       MemberListItem.class,
       wrapper
     );
+    enrichMemberListItems(storeId, result.getRecords());
 
     return toPageResult(result);
   }
@@ -246,6 +248,9 @@ public class MemberService {
     if (!BINDING_STATUSES.contains(request.status())) {
       throw new ApiException("INVALID_PARAMS", "会员状态不正确", HttpStatus.BAD_REQUEST);
     }
+    String disabledReason = "DISABLED".equals(request.status())
+      ? requireDisabledReason(request.disabledReason())
+      : null;
     MemberStoreBindingEntity binding = requireBinding(storeId, userId);
     UserEntity user = requireUser(userId);
     List<AddressEntity> addresses = addressMapper.selectList(
@@ -268,7 +273,6 @@ public class MemberService {
     bindingUpdate.setUpdatedAt(now);
     memberStoreBindingMapper.updateAdminBinding(bindingUpdate);
 
-    String disabledReason = "DISABLED".equals(request.status()) ? trimToNull(request.disabledReason()) : null;
     String remark = trimToNull(request.remark());
     userMapper.updateAdminMemberProfile(userId, disabledReason, remark, now);
 
@@ -582,9 +586,14 @@ public class MemberService {
       if (!BINDING_STATUSES.contains(status)) {
         status = "ACTIVE";
       }
+      String disabledReason = trimToNull(row.disabledReason());
+      if ("DISABLED".equals(status) && !StringUtils.hasText(disabledReason)) {
+        failures.add(new ImportFailureDto(phone, "停用会员时必须填写停用原因", rowNumber, null));
+        continue;
+      }
       seenPhones.add(phone);
       validRows.add(new MemberImportRow(
-        trimToNull(row.disabledReason()),
+        disabledReason,
         trimToNull(row.nickname()),
         phone,
         trimToNull(row.remark()),
@@ -593,6 +602,14 @@ public class MemberService {
       ));
     }
     return validRows;
+  }
+
+  private String requireDisabledReason(String disabledReason) {
+    String reason = trimToNull(disabledReason);
+    if (!StringUtils.hasText(reason)) {
+      throw new ApiException("DISABLED_REASON_REQUIRED", "停用会员时必须填写停用原因", HttpStatus.BAD_REQUEST);
+    }
+    return reason;
   }
 
   private UserEntity findImportUser(String storeId, String phone) {
@@ -680,6 +697,62 @@ public class MemberService {
       result.getTotal(),
       totalPages
     );
+  }
+
+  private void enrichMemberListItems(String storeId, List<MemberListItem> items) {
+    List<String> userIds = items
+      .stream()
+      .map(MemberListItem::getUserId)
+      .filter(StringUtils::hasText)
+      .distinct()
+      .toList();
+    if (userIds.isEmpty()) {
+      return;
+    }
+
+    Map<String, List<AddressEntity>> addressesByUser = addressMapper
+      .selectList(new LambdaQueryWrapper<AddressEntity>()
+        .eq(AddressEntity::getStoreId, storeId)
+        .in(AddressEntity::getUserId, userIds)
+        .orderByDesc(AddressEntity::getIsDefault)
+        .orderByDesc(AddressEntity::getCreatedAt))
+      .stream()
+      .collect(Collectors.groupingBy(AddressEntity::getUserId));
+
+    List<UserPackageEntity> packages = userPackageMapper.selectList(
+      new LambdaQueryWrapper<UserPackageEntity>()
+        .eq(UserPackageEntity::getStoreId, storeId)
+        .in(UserPackageEntity::getUserId, userIds)
+        .orderByDesc(UserPackageEntity::getUpdatedAt)
+    );
+    Map<String, PackageTemplateEntity> templateMap = loadTemplateMap(packages);
+    Map<String, List<MemberPackageDto>> activePackagesByUser = packages
+      .stream()
+      .filter(userPackage -> "ACTIVE".equals(userPackage.getStatus()))
+      .map(userPackage -> Map.entry(
+        userPackage.getUserId(),
+        toPackageDto(userPackage, templateMap.get(userPackage.getTemplateId()))
+      ))
+      .collect(Collectors.groupingBy(
+        Map.Entry::getKey,
+        Collectors.mapping(Map.Entry::getValue, Collectors.toList())
+      ));
+
+    Map<String, Long> orderCountByUser = orderMapper
+      .selectList(new LambdaQueryWrapper<OrderEntity>()
+        .eq(OrderEntity::getStoreId, storeId)
+        .in(OrderEntity::getUserId, userIds)
+        .isNull(OrderEntity::getDeletedByUserAt))
+      .stream()
+      .collect(Collectors.groupingBy(OrderEntity::getUserId, Collectors.counting()));
+
+    for (MemberListItem item : items) {
+      List<MemberPackageDto> activePackages = activePackagesByUser.getOrDefault(item.getUserId(), List.of());
+      item.setDefaultAddress(toAddressDto(defaultAddress(addressesByUser.getOrDefault(item.getUserId(), List.of()))));
+      item.setActivePackageCount(activePackages.size());
+      item.setLatestActivePackage(activePackages.isEmpty() ? null : activePackages.getFirst());
+      item.setOrderCount(Math.toIntExact(orderCountByUser.getOrDefault(item.getUserId(), 0L)));
+    }
   }
 
   private AdminUserEntity requireActiveOperator(String operatorId) {

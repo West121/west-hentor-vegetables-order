@@ -4,6 +4,7 @@ import cn.hentor.vegetables.common.ApiResponse;
 import cn.hentor.vegetables.dto.MiniDevLoginRequest;
 import cn.hentor.vegetables.dto.MiniLoginResponse;
 import cn.hentor.vegetables.dto.MiniWxPhoneLoginRequest;
+import cn.hentor.vegetables.dto.MiniWxSessionLoginRequest;
 import cn.hentor.vegetables.service.MiniAuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -32,5 +33,13 @@ public class MiniappAuthController {
     HttpServletRequest servletRequest
   ) {
     return ApiResponse.ok(miniAuthService.wxPhoneLogin(request, servletRequest));
+  }
+
+  @PostMapping("/wx-session")
+  public ApiResponse<MiniLoginResponse> wxSessionLogin(
+    @Valid @RequestBody MiniWxSessionLoginRequest request,
+    HttpServletRequest servletRequest
+  ) {
+    return ApiResponse.ok(miniAuthService.wxSessionLogin(request, servletRequest));
   }
 }

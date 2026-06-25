@@ -2,6 +2,7 @@
 
 import {
   Ban,
+  Download,
   Eye,
   Maximize2,
   Minimize2,
@@ -12,8 +13,13 @@ import {
   X,
 } from "lucide-react";
 import { useRef, useState, type ChangeEvent, type PointerEvent } from "react";
+import { utils, write } from "xlsx";
 
-import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  AdminPagination,
+  normalizeAdminListPayload,
+  type AdminPaginationMeta,
+} from "./admin-pagination";
 import {
   buildStoreScopedDetailPath,
   loadDetailResource,
@@ -25,6 +31,10 @@ import {
   hasUnsavedMemberModalChanges,
   type MemberFormState,
 } from "./member-modal-state";
+import { getImportResultFromApiPayload } from "./member-import-response";
+import { AdminMemberAvatar } from "./admin-member-avatar";
+import { formatDateOnly } from "./date-format";
+import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
   id: string;
@@ -71,6 +81,7 @@ export type MemberPanelItem = {
   } | null;
   nickname: string | null;
   orderCount: number;
+  userId?: string;
   packages?: Array<{
     id: string;
     nameSnapshot: string;
@@ -102,6 +113,11 @@ export type MemberPanelItem = {
   updatedAt: string;
 };
 
+type SpringMemberPanelItem = Partial<MemberPanelItem> & {
+  status?: string;
+  userStatus?: string;
+};
+
 type MemberManagementPanelProps = {
   initialItems: MemberPanelItem[];
   initialPagination: AdminPaginationMeta;
@@ -131,7 +147,9 @@ type MemberImportResult = {
 };
 
 type UserPackageImportResult = {
+  createdBindings: number;
   createdPackages: number;
+  createdUsers: number;
   failedRows: number;
   failures: Array<{
     phone: string | null;
@@ -150,6 +168,52 @@ type ImportResult = MemberImportResult | UserPackageImportResult;
 const IMPORT_FILE_ACCEPT =
   ".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv";
 
+const IMPORT_TEMPLATES: Record<
+  ImportMode,
+  { fileName: string; rows: string[][] }
+> = {
+  members: {
+    fileName: "会员导入模板.xlsx",
+    rows: [
+      ["手机号", "姓名", "备注", "状态", "停用原因"],
+      ["15295081992", "张三", "配送前电话确认", "正常", ""],
+      ["13800001111", "李四", "暂停配送", "停用", "长期不在家"],
+    ],
+  },
+  packages: {
+    fileName: "会员套餐导入模板.xlsx",
+    rows: [
+      ["手机号", "套餐名称", "总次数", "已用次数", "单次斤数", "状态", "备注"],
+      ["15295081992", "8斤周套餐", "8", "0", "8", "正常", "后台导入用户套餐"],
+    ],
+  },
+};
+
+function downloadImportTemplate(mode: ImportMode) {
+  const template = IMPORT_TEMPLATES[mode];
+  const workbook = utils.book_new();
+  const worksheet = utils.aoa_to_sheet(template.rows);
+  worksheet["!cols"] = template.rows[0]?.map((header) => ({
+    wch: Math.max(header.length + 6, 14),
+  }));
+  utils.book_append_sheet(workbook, worksheet, "导入模板");
+  const content = write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  }) as ArrayBuffer;
+  const blob = new Blob([content], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = template.fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function isPackageImportResult(
   result: ImportResult,
 ): result is UserPackageImportResult {
@@ -161,20 +225,8 @@ const STATUS_LABELS: Record<BindingStatus, string> = {
   DISABLED: "已停用",
 };
 
-function maskPhone(phone: string | null) {
-  if (!phone || phone.length < 7) {
-    return phone ?? "未绑定手机号";
-  }
-
-  return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date(value));
+function displayPhone(phone: string | null) {
+  return phone ?? "未绑定手机号";
 }
 
 function formatJin(value: number) {
@@ -205,13 +257,60 @@ function formatRecentOrder(order: NonNullable<MemberPanelItem["recentOrders"]>[n
   return `${order.orderNo} · ${itemSummary}`;
 }
 
+export function getMemberUserId(member: SpringMemberPanelItem) {
+  return member.id ?? member.userId ?? "";
+}
+
+export function normalizeMemberPanelItem(
+  member: SpringMemberPanelItem,
+): MemberPanelItem {
+  const bindingStatus = (member.bindingStatus ??
+    member.status ??
+    "ACTIVE") as BindingStatus;
+  const userStatus = member.userStatus ?? member.status ?? "ACTIVE";
+
+  return {
+    activePackageCount: Number(member.activePackageCount ?? 0),
+    addresses: member.addresses ?? [],
+    avatarUrl: member.avatarUrl ?? null,
+    bindingId: member.bindingId ?? "",
+    bindingStatus,
+    createdAt: member.createdAt ?? "",
+    defaultAddress: member.defaultAddress ?? null,
+    defaultStoreId: member.defaultStoreId ?? null,
+    disabledReason: member.disabledReason ?? null,
+    id: getMemberUserId(member),
+    isDefaultBinding: Boolean(member.isDefaultBinding),
+    latestActivePackage: member.latestActivePackage ?? null,
+    nickname: member.nickname ?? null,
+    orderCount: Number(member.orderCount ?? 0),
+    packages: member.packages ?? [],
+    phone: member.phone ?? null,
+    recentOrders: member.recentOrders ?? [],
+    remark: member.remark ?? null,
+    source: member.source ?? null,
+    status: userStatus,
+    store: member.store ?? {
+      code: "",
+      id: "",
+      name: "",
+    },
+    updatedAt: member.updatedAt ?? member.createdAt ?? "",
+    userId: member.userId ?? member.id ?? "",
+  };
+}
+
+export function normalizeMemberPanelItems(items: SpringMemberPanelItem[]) {
+  return items.map(normalizeMemberPanelItem);
+}
+
 export function MemberManagementPanel({
   initialItems,
   initialPagination,
   initialSummary,
   store,
 }: MemberManagementPanelProps) {
-  const [items, setItems] = useState(initialItems);
+  const [items, setItems] = useState(() => normalizeMemberPanelItems(initialItems));
   const [pagination, setPagination] = useState(initialPagination);
   const [summary, setSummary] = useState(initialSummary);
   const [modalMember, setModalMember] = useState<MemberPanelItem | null>(null);
@@ -280,9 +379,14 @@ export function MemberManagementPanel({
         throw new Error(result.error?.message ?? "加载会员失败");
       }
 
-      setItems(result.data.items);
-      setPagination(result.data.pagination);
-      setSummary(result.data.summary);
+      const nextList = normalizeAdminListPayload(
+        result.data,
+        initialSummary,
+        pagination.pageSize,
+      );
+      setItems(normalizeMemberPanelItems(nextList.items));
+      setPagination(nextList.pagination);
+      setSummary(nextList.summary);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "加载会员失败");
     } finally {
@@ -297,36 +401,39 @@ export function MemberManagementPanel({
   }
 
   function openModal(member: MemberPanelItem) {
-    const nextForm = buildMemberFormState(member);
+    const normalizedMember = normalizeMemberPanelItem(member);
+    const nextForm = buildMemberFormState(normalizedMember);
 
     setModalMode("edit");
-    setModalMember(member);
+    setModalMember(normalizedMember);
     setForm(nextForm);
     setInitialForm(nextForm);
     setFullscreen(false);
     setOffset({ x: 0, y: 0 });
     setError(null);
-    void hydrateMemberDetail(member);
+    void hydrateMemberDetail(normalizedMember);
   }
 
   function openDetailModal(member: MemberPanelItem) {
-    const nextForm = buildMemberFormState(member);
+    const normalizedMember = normalizeMemberPanelItem(member);
+    const nextForm = buildMemberFormState(normalizedMember);
 
     setModalMode("detail");
-    setModalMember(member);
+    setModalMember(normalizedMember);
     setForm(nextForm);
     setInitialForm(nextForm);
     setFullscreen(false);
     setOffset({ x: 0, y: 0 });
     setError(null);
-    void hydrateMemberDetail(member);
+    void hydrateMemberDetail(normalizedMember);
   }
 
   function openModalWithStatus(member: MemberPanelItem, status: BindingStatus) {
-    const nextInitialForm = buildMemberFormState(member);
+    const normalizedMember = normalizeMemberPanelItem(member);
+    const nextInitialForm = buildMemberFormState(normalizedMember);
 
     setModalMode("edit");
-    setModalMember(member);
+    setModalMember(normalizedMember);
     setForm({
       ...nextInitialForm,
       status,
@@ -335,7 +442,7 @@ export function MemberManagementPanel({
     setFullscreen(false);
     setOffset({ x: 0, y: 0 });
     setError(null);
-    void hydrateMemberDetail(member, status);
+    void hydrateMemberDetail(normalizedMember, status);
   }
 
   async function hydrateMemberDetail(
@@ -349,9 +456,11 @@ export function MemberManagementPanel({
     setLoadingDetail(true);
 
     try {
-      const detail = await loadDetailResource<MemberPanelItem>(
-        buildStoreScopedDetailPath("members", member.id, store.id),
-        "member",
+      const detail = normalizeMemberPanelItem(
+        await loadDetailResource<MemberPanelItem>(
+          buildStoreScopedDetailPath("members", member.id, store.id),
+          "member",
+        ),
       );
 
       setItems((value) => replaceItemById(value, detail));
@@ -438,6 +547,11 @@ export function MemberManagementPanel({
 
   async function submitModal() {
     if (modalMode === "detail" || !modalMember || !form || !store) {
+      return;
+    }
+
+    if (form.status === "DISABLED" && !form.disabledReason.trim()) {
+      setError("停用会员时必须填写停用原因");
       return;
     }
 
@@ -568,17 +682,18 @@ export function MemberManagementPanel({
         },
       );
       const result = (await response.json()) as {
-        data?: { result: ImportResult };
+        data?: ImportResult | { result?: ImportResult | null } | null;
         error?: { message: string };
         success: boolean;
       };
+      const importPayload = getImportResultFromApiPayload<ImportResult>(result);
 
-      if (!response.ok || !result.success || !result.data?.result) {
+      if (!response.ok || !result.success || !importPayload) {
         throw new Error(result.error?.message ?? "导入失败");
       }
 
-      setImportResult(result.data.result);
-      if (result.data.result.importedRows > 0) {
+      setImportResult(importPayload);
+      if (importPayload.importedRows > 0) {
         await reloadMembers(1);
       }
     } catch (submitError) {
@@ -593,14 +708,14 @@ export function MemberManagementPanel({
   const isPackageImport = importMode === "packages";
   const importTitle = isPackageImport ? "导入会员套餐" : "导入会员";
   const importDescription = isPackageImport
-    ? "上传 Excel 或 CSV 后，按手机号匹配会员，按套餐名称匹配模板。"
+    ? "上传 Excel 或 CSV 后，按手机号查找或自动创建会员，按套餐名称匹配模板。"
     : "上传 Excel 或 CSV 后，按手机号创建或更新会员资料。";
   const importRecommendedHeaders = isPackageImport
     ? "推荐表头：手机号、套餐名称、总次数、已用次数、单次斤数、状态、备注"
     : "推荐表头：手机号、姓名、备注、状态、停用原因";
   const importRules = isPackageImport
     ? [
-        "手机号和套餐名称必填，会员必须已存在并绑定当前数据范围。",
+        "手机号和套餐名称必填；会员不存在时会自动创建，并绑定当前数据范围。",
         "套餐名称优先精确匹配，匹配多个模板时会标记失败。",
         "导入会新增用户套餐，不覆盖旧套餐；总次数、已用次数、单次斤数可留空，留空时使用模板值。",
         "状态可填：正常、冻结、已用完、过期。",
@@ -616,6 +731,8 @@ export function MemberManagementPanel({
       ? [
           ["总行数", importResult.totalRows],
           ["成功", importResult.importedRows],
+          ["新建会员", importResult.createdUsers],
+          ["新建绑定", importResult.createdBindings],
           ["开通套餐", importResult.createdPackages],
           ["更新套餐", importResult.updatedPackages],
           ["失败", importResult.failedRows],
@@ -747,11 +864,21 @@ export function MemberManagementPanel({
             {items.map((member) => (
               <tr key={member.id}>
                 <td className="px-4 py-4">
-                  <div className="font-semibold">
-                    {member.nickname ?? "未命名会员"}
-                  </div>
-                  <div className="mt-1 text-xs text-[#66756d]">
-                    {maskPhone(member.phone)} · {formatDate(member.createdAt)}
+                  <div className="flex min-w-0 items-center gap-3">
+                    <AdminMemberAvatar
+                      avatarUrl={member.avatarUrl}
+                      name={member.nickname}
+                      phone={member.phone}
+                      size="sm"
+                    />
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold">
+                        {member.nickname ?? "未命名会员"}
+                      </div>
+                      <div className="mt-1 text-xs text-[#66756d]">
+                        {displayPhone(member.phone)} · {formatDateOnly(member.createdAt)}
+                      </div>
+                    </div>
                   </div>
                 </td>
                 <td className="px-4 py-4">
@@ -776,7 +903,7 @@ export function MemberManagementPanel({
                   </div>
                   <div className="mt-1 text-xs text-[#66756d]">
                     {member.defaultAddress?.receiverName ?? "-"} ·{" "}
-                    {maskPhone(member.defaultAddress?.receiverPhone ?? null)}
+                    {displayPhone(member.defaultAddress?.receiverPhone ?? null)}
                   </div>
                 </td>
                 <td className="px-4 py-4">
@@ -874,7 +1001,9 @@ export function MemberManagementPanel({
               <div className="grid gap-4 md:grid-cols-[1fr_240px]">
                 <div>
                   <div className="rounded-2xl border border-dashed border-[#cfe3d3] bg-[#f8fbf7] p-5">
-                    <div className="text-sm font-semibold">导入文件</div>
+                    <div className="text-sm font-semibold">
+                      <RequiredLabel>导入文件</RequiredLabel>
+                    </div>
                     <div className="mt-2 text-sm leading-6 text-[#66756d]">
                       支持 .xlsx、.xls、.csv，单个文件不超过 5MB。
                     </div>
@@ -887,19 +1016,29 @@ export function MemberManagementPanel({
                         <span className="text-[#8a9a90]">尚未选择文件</span>
                       )}
                     </div>
-                    <label className="mt-4 inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-[#cfe3d3] px-4 text-sm font-semibold text-[#1f8f4f]">
-                      <Upload size={16} />
-                      选择文件
-                      <input
-                        accept={IMPORT_FILE_ACCEPT}
-                        className="hidden"
-                        onChange={handleImportFile}
-                        type="file"
-                      />
-                    </label>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-[#cfe3d3] px-4 text-sm font-semibold text-[#1f8f4f]">
+                        <Upload size={16} />
+                        选择文件
+                        <input
+                          accept={IMPORT_FILE_ACCEPT}
+                          className="hidden"
+                          onChange={handleImportFile}
+                          type="file"
+                        />
+                      </label>
+                      <button
+                        className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#cfe3d3] bg-white px-4 text-sm font-semibold text-[#1f8f4f]"
+                        onClick={() => downloadImportTemplate(importMode)}
+                        type="button"
+                      >
+                        <Download size={16} />
+                        下载模板
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-3 text-xs leading-5 text-[#66756d]">
-                    {importRecommendedHeaders}
+                    {importRecommendedHeaders}。模板为 xlsx 文件，可下载后直接填写导入。
                   </div>
                 </div>
 
@@ -1032,12 +1171,26 @@ export function MemberManagementPanel({
             <div className="grid flex-1 gap-5 overflow-auto p-6 md:grid-cols-[1fr_280px]">
               <div className="flex flex-col gap-4">
                 <section className="rounded-xl border border-[#dbe6dc] p-4">
-                  <h3 className="font-semibold">基础信息</h3>
+                  <div className="flex items-center gap-3">
+                    <AdminMemberAvatar
+                      avatarUrl={modalMember.avatarUrl}
+                      name={modalMember.nickname}
+                      phone={modalMember.phone}
+                    />
+                    <div className="min-w-0">
+                      <h3 className="truncate font-semibold">
+                        {modalMember.nickname ?? "未命名会员"}
+                      </h3>
+                      <div className="mt-1 text-sm text-[#66756d]">
+                        {displayPhone(modalMember.phone)}
+                      </div>
+                    </div>
+                  </div>
                   <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
                     <div>
                       <div className="text-[#66756d]">手机号</div>
                       <div className="mt-1 font-medium">
-                        {maskPhone(modalMember.phone)}
+                        {displayPhone(modalMember.phone)}
                       </div>
                     </div>
                     <div>
@@ -1065,7 +1218,7 @@ export function MemberManagementPanel({
                   <h3 className="font-semibold">默认地址</h3>
                   <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
                     <label className="flex flex-col gap-2 font-medium">
-                      收货人
+                      <RequiredLabel>收货人</RequiredLabel>
                       <input
                         className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>
@@ -1086,7 +1239,7 @@ export function MemberManagementPanel({
                       />
                     </label>
                     <label className="flex flex-col gap-2 font-medium">
-                      联系电话
+                      <RequiredLabel>联系电话</RequiredLabel>
                       <input
                         className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>
@@ -1107,7 +1260,7 @@ export function MemberManagementPanel({
                       />
                     </label>
                     <label className="flex flex-col gap-2 font-medium">
-                      省
+                      <RequiredLabel>省</RequiredLabel>
                       <input
                         className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>
@@ -1129,7 +1282,7 @@ export function MemberManagementPanel({
                       />
                     </label>
                     <label className="flex flex-col gap-2 font-medium">
-                      市
+                      <RequiredLabel>市</RequiredLabel>
                       <input
                         className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>
@@ -1151,7 +1304,7 @@ export function MemberManagementPanel({
                       />
                     </label>
                     <label className="flex flex-col gap-2 font-medium">
-                      区
+                      <RequiredLabel>区</RequiredLabel>
                       <input
                         className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>
@@ -1173,7 +1326,7 @@ export function MemberManagementPanel({
                       />
                     </label>
                     <label className="flex flex-col gap-2 font-medium md:col-span-2">
-                      详细地址
+                      <RequiredLabel>详细地址</RequiredLabel>
                       <input
                         className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>
@@ -1230,7 +1383,9 @@ export function MemberManagementPanel({
 
               <aside className="flex flex-col gap-4">
                 <div className="rounded-xl border border-[#cfe3d3] bg-[#f8fff8] p-4">
-                  <h3 className="font-semibold">服务状态</h3>
+                  <h3 className="font-semibold">
+                    <RequiredLabel>服务状态</RequiredLabel>
+                  </h3>
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     {(["ACTIVE", "DISABLED"] as const).map((status) => (
                       <button
@@ -1267,7 +1422,12 @@ export function MemberManagementPanel({
                     />
                   </label>
                   <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
-                    停用原因
+                    <span>
+                      停用原因
+                      {form.status === "DISABLED" ? (
+                        <span className="ml-1 text-red-500">*</span>
+                      ) : null}
+                    </span>
                     <textarea
                       className="min-h-20 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
                       disabled={modalMode === "detail" || form.status === "ACTIVE"}
@@ -1278,7 +1438,11 @@ export function MemberManagementPanel({
                             : value,
                         )
                       }
+                      placeholder={
+                        form.status === "DISABLED" ? "请输入停用原因" : ""
+                      }
                       readOnly={modalMode === "detail"}
+                      required={form.status === "DISABLED"}
                       value={form.disabledReason}
                     />
                   </label>

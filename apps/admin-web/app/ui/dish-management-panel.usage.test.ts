@@ -52,6 +52,8 @@ describe("dish management modal usage", () => {
     );
 
     expect(source).toContain("toggleDishStatus");
+    expect(source).toContain("已上架");
+    expect(source).toContain("已下架");
     expect(source).toContain("快捷下架");
     expect(source).toContain("快捷上架");
     expect(source).toContain("PowerOff");
@@ -76,5 +78,17 @@ describe("dish management modal usage", () => {
     expect(source).toContain("const reason = inventoryForm.reason.trim()");
     expect(source).toContain("changeJin,");
     expect(source).toContain("reason,");
+  });
+
+  it("uses system dictionary category options instead of hard-coded category labels", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/dish-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("categoryOptions?: DishCategoryOption[]");
+    expect(source).toContain("resolvedCategoryOptions");
+    expect(source).toContain("categoryLabelByCode");
+    expect(source).not.toContain("CATEGORY_LABELS");
   });
 });

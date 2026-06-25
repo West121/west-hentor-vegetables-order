@@ -417,15 +417,16 @@ describe("miniapp address management", () => {
         storeId: fixture.store.id,
         userId: fixture.user.id,
       }),
-    ).rejects.toMatchObject({
-      code: "DETAIL_TOO_SHORT",
-      message: "详细地址至少 8 个字",
+    ).resolves.toMatchObject({
+      address: expect.objectContaining({
+        detail: "3栋602",
+      }),
     });
     await expect(
       prisma.address.count({
         where: { storeId: fixture.store.id, userId: fixture.user.id },
       }),
-    ).resolves.toBe(0);
+    ).resolves.toBe(1);
 
     await expect(
       addressOperations.createMiniappAddress({

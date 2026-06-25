@@ -39,7 +39,6 @@ import cn.hentor.vegetables.mapper.UserPackageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -118,7 +117,7 @@ public class MiniReservationService {
 
   @Transactional
   public MiniReservationResponse submit(MiniSessionContext session, MiniReservationRequest request) {
-    return saveReservation(session, request, request.orderId());
+    return saveReservation(session, request, null);
   }
 
   @Transactional
@@ -142,7 +141,10 @@ public class MiniReservationService {
     LocalDateTime now = LocalDateTime.now(BUSINESS_ZONE);
     StoreEntity store = miniAuthService.findAvailableStore(request.storeCode());
     TaskEntity activeTask = loadActiveTask(store.getId(), now);
-    if (isPastCutoff(activeTask == null ? store.getCutoffTime() : activeTask.getCutoffTime(), now)) {
+    if (activeTask == null) {
+      throw reservationError("TASK_NOT_AVAILABLE", "今日暂无可预订任务");
+    }
+    if (isPastCutoff(activeTask.getCutoffTime(), now)) {
       throw reservationError("ORDER_CUTOFF_PASSED", "今日已截单，不能提交预订");
     }
 
@@ -168,7 +170,6 @@ public class MiniReservationService {
 
     if (!StringUtils.hasText(orderId)) {
       ensureCurrentPackage(session.userId(), store.getId(), userPackage.getId());
-      ensureNoTodayOrder(session.userId(), store.getId(), today);
       if (safeInt(userPackage.getUsedTimes()) >= safeInt(userPackage.getTotalTimes())) {
         throw reservationError("PACKAGE_USED_UP", "套餐次数已用完");
       }
@@ -340,7 +341,7 @@ public class MiniReservationService {
 
   private void validateTaskDishes(TaskEntity activeTask, List<String> dishIds) {
     if (activeTask == null) {
-      return;
+      throw reservationError("TASK_NOT_AVAILABLE", "今日暂无可预订任务");
     }
 
     Set<String> taskDishIds = taskDishMapper.selectList(
@@ -391,21 +392,6 @@ public class MiniReservationService {
       .orElse(null);
     if (firstUsable != null && !Objects.equals(firstUsable.getId(), userPackageId)) {
       throw reservationError("PACKAGE_NOT_CURRENT", "请刷新后使用最早可用套餐预订");
-    }
-  }
-
-  private void ensureNoTodayOrder(String userId, String storeId, LocalDate today) {
-    Long existingCount = orderMapper.selectCount(
-      new LambdaQueryWrapper<OrderEntity>()
-        .eq(OrderEntity::getUserId, userId)
-        .eq(OrderEntity::getStoreId, storeId)
-        .ge(OrderEntity::getCreatedAt, today.atStartOfDay())
-        .lt(OrderEntity::getCreatedAt, today.plusDays(1).atStartOfDay())
-        .isNull(OrderEntity::getDeletedByUserAt)
-        .apply("\"status\" not in ('CANCELED', 'VOIDED')")
-    );
-    if (existingCount != null && existingCount > 0) {
-      throw reservationError("ORDER_ALREADY_EXISTS", "今日已提交预订，请修改今日预订");
     }
   }
 
@@ -807,7 +793,10 @@ public class MiniReservationService {
   }
 
   private boolean isPastCutoff(String cutoffTime, LocalDateTime now) {
-    String normalized = StringUtils.hasText(cutoffTime) ? cutoffTime.trim() : "18:00";
+    String normalized = StringUtils.hasText(cutoffTime) ? cutoffTime.trim() : "";
+    if (!StringUtils.hasText(normalized)) {
+      return false;
+    }
     String[] parts = normalized.split(":");
     if (parts.length != 2) {
       return false;
@@ -825,30 +814,15 @@ public class MiniReservationService {
   }
 
   private void validateDeliveryRange(AddressEntity address, StoreEntity store) {
-    List<String> provinces = readJsonStringArray(store.getDeliveryProvinces());
-    List<String> cities = readJsonStringArray(store.getDeliveryCities());
-    if (!provinces.isEmpty() && !provinces.contains(normalizeNullableText(address.getProvince()))) {
-      throw reservationError("ADDRESS_OUT_OF_DELIVERY_RANGE", "当前门店仅配送：" + String.join("、", provinces));
-    }
-    if (!cities.isEmpty() && !cities.contains(normalizeNullableText(address.getCity()))) {
-      throw reservationError("ADDRESS_OUT_OF_DELIVERY_RANGE", "当前门店仅配送城市：" + String.join("、", cities));
-    }
-  }
-
-  private List<String> readJsonStringArray(String value) {
-    if (!StringUtils.hasText(value)) {
-      return List.of();
-    }
-    try {
-      List<String> raw = objectMapper.readValue(value, new TypeReference<>() {});
-      return raw
-        .stream()
-        .map(this::normalizeNullableText)
-        .filter(StringUtils::hasText)
-        .distinct()
-        .toList();
-    } catch (JsonProcessingException error) {
-      return List.of();
+    List<String> provinces = DeliveryRangeSupport.readJsonStringArray(objectMapper, store.getDeliveryProvinces());
+    List<String> cities = DeliveryRangeSupport.readJsonStringArray(objectMapper, store.getDeliveryCities());
+    String province = normalizeNullableText(address.getProvince());
+    String city = normalizeNullableText(address.getCity());
+    if (!DeliveryRangeSupport.allows(province, city, provinces, cities)) {
+      throw reservationError(
+        "ADDRESS_OUT_OF_DELIVERY_RANGE",
+        "当前地址不在配送范围内，仅配送：" + DeliveryRangeSupport.rangeText(provinces, cities)
+      );
     }
   }
 
@@ -914,7 +888,6 @@ public class MiniReservationService {
     }
     if (
       "PACKAGE_UNAVAILABLE".equals(code) ||
-      "ORDER_ALREADY_EXISTS".equals(code) ||
       "ORDER_NOT_EDITABLE".equals(code)
     ) {
       return HttpStatus.CONFLICT;

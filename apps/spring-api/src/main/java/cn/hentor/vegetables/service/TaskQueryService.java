@@ -89,8 +89,7 @@ public class TaskQueryService {
     Page<TaskEntity> result = taskMapper.selectPage(
       new Page<>(normalizedPage, normalizedPageSize),
       buildListWrapper(storeId, status, query)
-        .orderByAsc(TaskEntity::getStatus)
-        .orderByDesc(TaskEntity::getStartsAt)
+        .orderByDesc(TaskEntity::getCreatedAt)
     );
     StoreEntity store = requireStore(storeId);
     Map<String, List<TaskDishEntity>> linksByTask = loadTaskDishLinks(result.getRecords());
@@ -129,6 +128,7 @@ public class TaskQueryService {
     AdminUserEntity operator = requireActiveOperator(session.adminUserId());
     StoreEntity store = requireStore(request.storeId());
     NormalizedTaskInput input = normalizeTaskInput(request);
+    ensureTaskTimeRangeAvailable(request.storeId(), input.startsAt(), input.endsAt(), input.status(), null);
     ensureTaskDishes(request.storeId(), input.dishIds());
 
     LocalDateTime now = LocalDateTime.now();
@@ -170,6 +170,13 @@ public class TaskQueryService {
     }
 
     NormalizedTaskInput input = normalizeTaskInput(request);
+    ensureTaskTimeRangeAvailable(
+      request.storeId(),
+      input.startsAt(),
+      input.endsAt(),
+      input.status(),
+      existing.getId()
+    );
     ensureTaskDishes(request.storeId(), input.dishIds());
 
     TaskEntity update = new TaskEntity();
@@ -215,6 +222,7 @@ public class TaskQueryService {
         request.tag()
       )
     );
+    ensureTaskTimeRangeAvailable(request.storeId(), input.startsAt(), input.endsAt(), input.status(), null);
     ensureTaskDishes(request.storeId(), input.dishIds());
 
     LocalDateTime now = LocalDateTime.now();
@@ -242,6 +250,47 @@ public class TaskQueryService {
     );
 
     return new TaskResponse(toDto(copied, store, loadLinks(copied.getId()), loadDishesByIds(input.dishIds()), true));
+  }
+
+  @Transactional
+  public TaskResponse cancel(String taskId, String storeId, AdminSessionDto session) {
+    AdminUserEntity operator = requireActiveOperator(session.adminUserId());
+    StoreEntity store = requireStore(storeId);
+    TaskEntity existing = requireTask(storeId, taskId);
+    if ("DISABLED".equals(existing.getStatus())) {
+      List<TaskDishEntity> links = loadLinks(existing.getId());
+      return new TaskResponse(
+        toDto(existing, store, links, loadDishesById(Map.of(existing.getId(), links)), true)
+      );
+    }
+    if (existing.getEndsAt() != null && existing.getEndsAt().isBefore(LocalDateTime.now())) {
+      throw new ApiException("TASK_ALREADY_ENDED", "任务已结束，不能取消", HttpStatus.BAD_REQUEST);
+    }
+
+    List<TaskDishEntity> beforeLinks = loadLinks(existing.getId());
+    TaskEntity update = new TaskEntity();
+    update.setId(existing.getId());
+    update.setName(existing.getName());
+    update.setStatus("DISABLED");
+    update.setStartsAt(existing.getStartsAt());
+    update.setEndsAt(existing.getEndsAt());
+    update.setCutoffTime(existing.getCutoffTime());
+    update.setTag(existing.getTag());
+    update.setUpdatedAt(LocalDateTime.now());
+    taskMapper.updateAdminTask(update);
+
+    TaskEntity canceled = requireTask(storeId, existing.getId());
+    List<TaskDishEntity> afterLinks = loadLinks(canceled.getId());
+    writeOperationLog(
+      operator.getId(),
+      storeId,
+      existing.getId(),
+      "TASK_CANCELED",
+      taskLogValue(existing, beforeLinks),
+      taskLogValue(canceled, afterLinks)
+    );
+
+    return new TaskResponse(toDto(canceled, store, afterLinks, loadDishesById(Map.of(canceled.getId(), afterLinks)), true));
   }
 
   private LambdaQueryWrapper<TaskEntity> buildListWrapper(
@@ -438,6 +487,37 @@ public class TaskQueryService {
     );
     if (count == null || count != dishIds.size()) {
       throw new ApiException("DISH_NOT_FOUND", "菜品不存在或不属于当前门店", HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  private void ensureTaskTimeRangeAvailable(
+    String storeId,
+    LocalDateTime startsAt,
+    LocalDateTime endsAt,
+    String status,
+    String excludeTaskId
+  ) {
+    if ("DISABLED".equals(status)) {
+      return;
+    }
+
+    LambdaQueryWrapper<TaskEntity> wrapper = new LambdaQueryWrapper<TaskEntity>()
+      .eq(TaskEntity::getStoreId, storeId)
+      .ne(TaskEntity::getStatus, "DISABLED")
+      .lt(TaskEntity::getStartsAt, endsAt)
+      .gt(TaskEntity::getEndsAt, startsAt);
+
+    if (StringUtils.hasText(excludeTaskId)) {
+      wrapper.ne(TaskEntity::getId, excludeTaskId);
+    }
+
+    Long conflictCount = taskMapper.selectCount(wrapper);
+    if (conflictCount != null && conflictCount > 0) {
+      throw new ApiException(
+        "TASK_TIME_RANGE_CONFLICT",
+        "同一时间段已存在任务，请调整任务开始或结束时间",
+        HttpStatus.CONFLICT
+      );
     }
   }
 

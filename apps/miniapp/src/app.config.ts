@@ -4,6 +4,7 @@ export default defineAppConfig({
     "pages/me/index",
     "pages/addresses/index",
     "pages/orders/index",
+    "pages/order-edit/index",
     "pages/packages/index",
     "pages/login/index",
     "pages/webview/index",

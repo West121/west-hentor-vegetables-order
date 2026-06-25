@@ -20,6 +20,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -54,7 +55,11 @@ public class MiniAccountService {
   @Transactional
   public MiniAccountUpdateResponse updateProfile(MiniSessionContext session, MiniAccountUpdateRequest request) {
     long startedAt = System.currentTimeMillis();
-    String nickname = normalizeNickname(request.nickname());
+    String nickname = normalizeOptionalNickname(request.nickname());
+    String avatarUrl = normalizeAvatarUrl(request.avatarUrl());
+    if (!StringUtils.hasText(nickname) && !StringUtils.hasText(avatarUrl)) {
+      throw new ApiException("INVALID_PARAMS", "请填写昵称或选择头像", HttpStatus.BAD_REQUEST);
+    }
     StoreEntity store = miniAuthService.findAvailableStore(request.storeCode());
     UserEntity before = userMapper.selectById(session.userId());
     if (before == null) {
@@ -62,7 +67,12 @@ public class MiniAccountService {
     }
 
     LocalDateTime now = LocalDateTime.now(BUSINESS_ZONE);
-    userMapper.updateMiniNickname(before.getId(), nickname, now);
+    if (StringUtils.hasText(nickname)) {
+      userMapper.updateMiniNickname(before.getId(), nickname, now);
+    }
+    if (StringUtils.hasText(avatarUrl)) {
+      userMapper.updateMiniAvatarUrl(before.getId(), avatarUrl, now);
+    }
     UserEntity after = userMapper.selectById(before.getId());
 
     writeLog(
@@ -71,17 +81,17 @@ public class MiniAccountService {
       before.getId(),
       store.getId(),
       before.getId(),
-      Map.of("nickname", before.getNickname() == null ? "" : before.getNickname()),
-      Map.of("nickname", after.getNickname() == null ? "" : after.getNickname()),
-      Map.of("nickname", nickname, "storeCode", request.storeCode() == null ? "" : request.storeCode()),
-      Map.of("member", Map.of("id", after.getId(), "nickname", after.getNickname() == null ? "" : after.getNickname())),
+      miniProfileLogValue(before),
+      miniProfileLogValue(after),
+      miniProfileRequestValue(nickname, avatarUrl, request.storeCode()),
+      Map.of("member", miniProfileLogValue(after)),
       "PATCH",
       "/api/spring/v1/account",
       (int) (System.currentTimeMillis() - startedAt)
     );
 
     return new MiniAccountUpdateResponse(
-      new MiniAccountMemberDto(after.getId(), after.getNickname(), after.getPhone())
+      new MiniAccountMemberDto(after.getAvatarUrl(), after.getId(), after.getNickname(), after.getPhone())
     );
   }
 
@@ -136,12 +146,61 @@ public class MiniAccountService {
     return new MiniAccountCancelResponse(result);
   }
 
-  private String normalizeNickname(String value) {
-    String nickname = normalizeRequiredText(value, "INVALID_PARAMS", "昵称不能为空，最多 24 个字符");
+  private String normalizeOptionalNickname(String value) {
+    String nickname = value == null ? "" : value.trim();
+    if (!StringUtils.hasText(nickname)) {
+      return null;
+    }
     if (nickname.length() > 24) {
       throw new ApiException("INVALID_PARAMS", "昵称不能为空，最多 24 个字符", HttpStatus.BAD_REQUEST);
     }
     return nickname;
+  }
+
+  private String normalizeAvatarUrl(String value) {
+    String avatarUrl = value == null ? "" : value.trim();
+    if (!StringUtils.hasText(avatarUrl)) {
+      return null;
+    }
+    if (avatarUrl.length() > 1000) {
+      throw new ApiException("INVALID_PARAMS", "头像地址过长", HttpStatus.BAD_REQUEST);
+    }
+    if (
+      !avatarUrl.startsWith("/uploads/") &&
+      !avatarUrl.startsWith("https://") &&
+      !avatarUrl.startsWith("http://")
+    ) {
+      throw new ApiException("INVALID_PARAMS", "头像地址不合法", HttpStatus.BAD_REQUEST);
+    }
+    return avatarUrl;
+  }
+
+  private Map<String, Object> miniProfileLogValue(UserEntity user) {
+    Map<String, Object> value = new LinkedHashMap<>();
+    value.put("avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl());
+    value.put("id", user.getId());
+    value.put("nickname", user.getNickname() == null ? "" : user.getNickname());
+    value.put("phone", maskPhone(user.getPhone()));
+    return value;
+  }
+
+  private Map<String, Object> miniProfileRequestValue(String nickname, String avatarUrl, String storeCode) {
+    Map<String, Object> value = new LinkedHashMap<>();
+    if (StringUtils.hasText(avatarUrl)) {
+      value.put("avatarUrl", avatarUrl);
+    }
+    if (StringUtils.hasText(nickname)) {
+      value.put("nickname", nickname);
+    }
+    value.put("storeCode", storeCode == null ? "" : storeCode);
+    return value;
+  }
+
+  private String maskPhone(String phone) {
+    if (!StringUtils.hasText(phone) || phone.length() < 7) {
+      return phone;
+    }
+    return phone.replaceFirst("^(\\d{3})\\d{4}(\\d{4})$", "$1****$2");
   }
 
   private String normalizeRequiredText(String value, String code, String message) {

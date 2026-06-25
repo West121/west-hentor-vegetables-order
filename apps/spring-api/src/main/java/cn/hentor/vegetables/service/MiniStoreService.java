@@ -78,6 +78,8 @@ public class MiniStoreService {
     return new MiniStorePublicSettingsDto(
       readJsonText(configs.get("about_text")),
       store.getCustomerServiceTel(),
+      DeliveryRangeSupport.readJsonStringArray(objectMapper, store.getDeliveryCities()),
+      DeliveryRangeSupport.readJsonStringArray(objectMapper, store.getDeliveryProvinces()),
       readJsonText(configs.get("login_image_url")),
       readJsonText(configs.get("login_subtitle")),
       readJsonText(configs.get("login_title")),

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Check,
   Eye,
   LockKeyhole,
   Maximize2,
@@ -9,6 +10,7 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -21,8 +23,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
-import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  AdminPagination,
+  normalizeAdminListPayload,
+  type AdminPaginationMeta,
+} from "./admin-pagination";
 import {
   buildStoreScopedDetailPath,
   loadDetailResource,
@@ -35,6 +46,9 @@ import {
   normalizePackagePanelItems,
   type PackagePanelItem,
 } from "./package-management-model";
+import { AdminMemberAvatar } from "./admin-member-avatar";
+import { formatDateOnly } from "./date-format";
+import { RequiredLabel } from "./required-mark";
 
 export type { PackagePanelItem } from "./package-management-model";
 
@@ -53,6 +67,7 @@ type PackageManagementPanelProps = {
     total: number;
   };
   memberOptions: Array<{
+    avatarUrl?: string | null;
     id: string;
     nickname: string | null;
     phone: string | null;
@@ -92,24 +107,8 @@ const STATUS_LABELS: Record<PackagePanelItem["status"], string> = {
   USED_UP: "已用完",
 };
 
-function maskPhone(phone: string | null) {
-  if (!phone || phone.length < 7) {
-    return phone ?? "未绑定手机号";
-  }
-
-  return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
-}
-
-function formatDate(value: string | null) {
-  if (!value) {
-    return "未设置";
-  }
-
-  return new Intl.DateTimeFormat("zh-CN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date(value));
+function displayPhone(phone: string | null) {
+  return phone ?? "未绑定手机号";
 }
 
 function buildFormState(item: PackagePanelItem): FormState {
@@ -141,7 +140,7 @@ function formatMemberOption(member: {
   nickname: string | null;
   phone: string | null;
 }) {
-  return `${member.nickname ?? "未命名会员"} · ${maskPhone(member.phone)}`;
+  return `${member.nickname ?? "未命名会员"} · ${displayPhone(member.phone)}`;
 }
 
 export function PackageManagementPanel({
@@ -162,6 +161,10 @@ export function PackageManagementPanel({
   const [createForm, setCreateForm] = useState<CreateFormState>(() =>
     buildCreateFormState(memberOptions, packageTemplateOptions),
   );
+  const [memberPickerOpen, setMemberPickerOpen] = useState(false);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [templateSearch, setTemplateSearch] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -220,9 +223,14 @@ export function PackageManagementPanel({
         throw new Error(result.error?.message ?? "加载套餐失败");
       }
 
-      setItems(normalizePackagePanelItems(result.data.items));
-      setPagination(result.data.pagination);
-      setSummary(result.data.summary);
+      const nextList = normalizeAdminListPayload(
+        result.data,
+        initialSummary,
+        pagination.pageSize,
+      );
+      setItems(normalizePackagePanelItems(nextList.items));
+      setPagination(nextList.pagination);
+      setSummary(nextList.summary);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "加载套餐失败");
     } finally {
@@ -238,6 +246,10 @@ export function PackageManagementPanel({
 
   function openCreateModal() {
     setCreateForm(buildCreateFormState(memberOptions, packageTemplateOptions));
+    setMemberSearch("");
+    setMemberPickerOpen(false);
+    setTemplateSearch("");
+    setTemplatePickerOpen(false);
     setCreateOpen(true);
     setError(null);
   }
@@ -248,6 +260,8 @@ export function PackageManagementPanel({
     }
 
     setCreateOpen(false);
+    setMemberPickerOpen(false);
+    setTemplatePickerOpen(false);
     setError(null);
   }
 
@@ -261,6 +275,18 @@ export function PackageManagementPanel({
         ? String(template.weightLimitJin)
         : value.weightLimitJin,
     }));
+  }
+
+  function selectCreateMember(userId: string) {
+    setCreateForm((current) => ({ ...current, userId }));
+    setMemberPickerOpen(false);
+    setMemberSearch("");
+  }
+
+  function selectCreateTemplate(templateId: string) {
+    updateCreateTemplate(templateId);
+    setTemplatePickerOpen(false);
+    setTemplateSearch("");
   }
 
   function openModal(item: PackagePanelItem, mode: ModalMode) {
@@ -486,6 +512,29 @@ export function PackageManagementPanel({
       : modal?.mode === "freeze"
         ? "冻结用户套餐"
         : "解冻用户套餐";
+  const selectedCreateMember =
+    memberOptions.find((member) => member.id === createForm.userId) ?? null;
+  const selectedCreateTemplate =
+    packageTemplateOptions.find((template) => template.id === createForm.templateId) ??
+    null;
+  const normalizedMemberSearch = memberSearch.trim().toLowerCase();
+  const filteredMemberOptions = normalizedMemberSearch
+    ? memberOptions.filter((member) =>
+        [member.nickname ?? "", member.phone ?? "", member.id]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedMemberSearch),
+      )
+    : memberOptions;
+  const normalizedTemplateSearch = templateSearch.trim().toLowerCase();
+  const filteredPackageTemplateOptions = normalizedTemplateSearch
+    ? packageTemplateOptions.filter((template) =>
+        [template.name, template.totalTimes, template.weightLimitJin]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedTemplateSearch),
+      )
+    : packageTemplateOptions;
 
   return (
     <section className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
@@ -618,11 +667,21 @@ export function PackageManagementPanel({
             {items.map((item) => (
               <tr key={item.id}>
                 <td className="px-4 py-4">
-                  <div className="font-semibold">
-                    {item.user.nickname ?? "未命名会员"}
-                  </div>
-                  <div className="mt-1 text-xs text-[#66756d]">
-                    {maskPhone(item.user.phone)}
+                  <div className="flex min-w-0 items-center gap-3">
+                    <AdminMemberAvatar
+                      avatarUrl={item.user.avatarUrl}
+                      name={item.user.nickname}
+                      phone={item.user.phone}
+                      size="sm"
+                    />
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold">
+                        {item.user.nickname ?? "未命名会员"}
+                      </div>
+                      <div className="mt-1 text-xs text-[#66756d]">
+                        {displayPhone(item.user.phone)}
+                      </div>
+                    </div>
                   </div>
                 </td>
                 <td className="px-4 py-4">
@@ -643,7 +702,7 @@ export function PackageManagementPanel({
                   </div>
                 </td>
                 <td className="px-4 py-4">
-                  <div className="font-semibold">{formatDate(item.createdAt)}</div>
+                  <div className="font-semibold">{formatDateOnly(item.createdAt)}</div>
                   <div className="mt-1 text-xs text-[#66756d]">
                     先进先用
                   </div>
@@ -750,45 +809,130 @@ export function PackageManagementPanel({
             <div className="flex-1 overflow-auto p-6">
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2 text-sm font-medium">
-                  会员
-                  <Select
-                    onValueChange={(value) =>
-                      setCreateForm((current) => ({ ...current, userId: value }))
-                    }
-                    value={createForm.userId}
+                  <RequiredLabel>会员</RequiredLabel>
+                  <Popover
+                    open={memberPickerOpen}
+                    onOpenChange={setMemberPickerOpen}
                   >
-                    <SelectTrigger className="h-11 rounded-xl border-[#dbe6dc]">
-                      <SelectValue placeholder="选择会员" />
-                    </SelectTrigger>
-                    <SelectContent align="start">
-                      {memberOptions.map((member) => (
-                        <SelectItem key={member.id} value={member.id}>
-                          {formatMemberOption(member)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <PopoverTrigger asChild>
+                      <button
+                        className="flex h-11 w-full items-center justify-between rounded-xl border border-[#dbe6dc] bg-white px-3 text-left text-base font-normal text-[#102017] outline-none transition focus:border-[#1f8f4f] focus:ring-4 focus:ring-[#1f8f4f]/10"
+                        type="button"
+                      >
+                        <span className="min-w-0 truncate">
+                          {selectedCreateMember
+                            ? formatMemberOption(selectedCreateMember)
+                            : "选择会员"}
+                        </span>
+                        <Search className="ml-3 h-4 w-4 shrink-0 text-[#66756d]" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="z-[70] w-[var(--radix-popover-trigger-width)] p-2"
+                    >
+                      <div className="flex h-10 items-center gap-2 rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-3">
+                        <Search className="h-4 w-4 shrink-0 text-[#66756d]" />
+                        <input
+                          className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none"
+                          onChange={(event) => setMemberSearch(event.target.value)}
+                          placeholder="搜索昵称 / 手机号"
+                          value={memberSearch}
+                        />
+                      </div>
+                      <div className="mt-2 max-h-64 overflow-auto">
+                        {filteredMemberOptions.map((member) => (
+                          <button
+                            className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-[#eff8f1]"
+                            key={member.id}
+                            onClick={() => selectCreateMember(member.id)}
+                            type="button"
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              <AdminMemberAvatar
+                                avatarUrl={member.avatarUrl}
+                                name={member.nickname}
+                                phone={member.phone}
+                                size="sm"
+                              />
+                              <span className="min-w-0 truncate">
+                                {formatMemberOption(member)}
+                              </span>
+                            </span>
+                            {member.id === createForm.userId ? (
+                              <Check className="ml-3 h-4 w-4 shrink-0 text-[#1f8f4f]" />
+                            ) : null}
+                          </button>
+                        ))}
+                        {filteredMemberOptions.length === 0 ? (
+                          <div className="px-3 py-6 text-center text-sm text-[#66756d]">
+                            没有匹配会员
+                          </div>
+                        ) : null}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </label>
                 <label className="flex flex-col gap-2 text-sm font-medium">
-                  套餐模板
-                  <Select
-                    onValueChange={updateCreateTemplate}
-                    value={createForm.templateId}
+                  <RequiredLabel>套餐模板</RequiredLabel>
+                  <Popover
+                    open={templatePickerOpen}
+                    onOpenChange={setTemplatePickerOpen}
                   >
-                    <SelectTrigger className="h-11 rounded-xl border-[#dbe6dc]">
-                      <SelectValue placeholder="选择套餐模板" />
-                    </SelectTrigger>
-                    <SelectContent align="start">
-                      {packageTemplateOptions.map((template) => (
-                        <SelectItem key={template.id} value={template.id}>
-                          {template.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <PopoverTrigger asChild>
+                      <button
+                        className="flex h-11 w-full items-center justify-between rounded-xl border border-[#dbe6dc] bg-white px-3 text-left text-base font-normal text-[#102017] outline-none transition focus:border-[#1f8f4f] focus:ring-4 focus:ring-[#1f8f4f]/10"
+                        type="button"
+                      >
+                        <span className="min-w-0 truncate">
+                          {selectedCreateTemplate
+                            ? selectedCreateTemplate.name
+                            : "选择套餐模板"}
+                        </span>
+                        <Search className="ml-3 h-4 w-4 shrink-0 text-[#66756d]" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="z-[70] w-[var(--radix-popover-trigger-width)] p-2"
+                    >
+                      <div className="flex h-10 items-center gap-2 rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-3">
+                        <Search className="h-4 w-4 shrink-0 text-[#66756d]" />
+                        <input
+                          className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none"
+                          onChange={(event) => setTemplateSearch(event.target.value)}
+                          placeholder="搜索套餐名称"
+                          value={templateSearch}
+                        />
+                      </div>
+                      <div className="mt-2 max-h-64 overflow-auto">
+                        {filteredPackageTemplateOptions.map((template) => (
+                          <button
+                            className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-[#eff8f1]"
+                            key={template.id}
+                            onClick={() => selectCreateTemplate(template.id)}
+                            type="button"
+                          >
+                            <span className="min-w-0 truncate">
+                              {template.name} · {template.totalTimes}次 · 每次{" "}
+                              {template.weightLimitJin}斤
+                            </span>
+                            {template.id === createForm.templateId ? (
+                              <Check className="ml-3 h-4 w-4 shrink-0 text-[#1f8f4f]" />
+                            ) : null}
+                          </button>
+                        ))}
+                        {filteredPackageTemplateOptions.length === 0 ? (
+                          <div className="px-3 py-6 text-center text-sm text-[#66756d]">
+                            没有匹配套餐模板
+                          </div>
+                        ) : null}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </label>
                 <label className="flex flex-col gap-2 text-sm font-medium">
-                  总次数
+                  <RequiredLabel>总次数</RequiredLabel>
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     min={1}
@@ -803,7 +947,7 @@ export function PackageManagementPanel({
                   />
                 </label>
                 <label className="flex flex-col gap-2 text-sm font-medium">
-                  已用次数
+                  <RequiredLabel>已用次数</RequiredLabel>
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     min={0}
@@ -818,7 +962,7 @@ export function PackageManagementPanel({
                   />
                 </label>
                 <label className="flex flex-col gap-2 text-sm font-medium">
-                  单次斤数
+                  <RequiredLabel>单次斤数</RequiredLabel>
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     min={0.5}
@@ -836,7 +980,7 @@ export function PackageManagementPanel({
               </div>
 
               <label className="mt-5 flex flex-col gap-2 text-sm font-medium">
-                操作原因
+                <RequiredLabel>操作原因</RequiredLabel>
                 <textarea
                   className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
                   onChange={(event) =>
@@ -943,10 +1087,20 @@ export function PackageManagementPanel({
 
             <div className="flex-1 overflow-auto p-6">
               <div className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4 text-sm leading-7">
-                <div className="font-semibold">{modal.item.nameSnapshot}</div>
-                <div className="text-[#66756d]">
-                  {maskPhone(modal.item.user.phone)} · 当前{" "}
-                  {modal.item.remainingTimes}/{modal.item.totalTimes} 次
+                <div className="flex items-center gap-3">
+                  <AdminMemberAvatar
+                    avatarUrl={modal.item.user.avatarUrl}
+                    name={modal.item.user.nickname}
+                    phone={modal.item.user.phone}
+                  />
+                  <div className="min-w-0">
+                    <div className="font-semibold">{modal.item.nameSnapshot}</div>
+                    <div className="truncate text-[#66756d]">
+                      {modal.item.user.nickname ?? "未命名会员"} ·{" "}
+                      {displayPhone(modal.item.user.phone)} · 当前{" "}
+                      {modal.item.remainingTimes}/{modal.item.totalTimes} 次
+                    </div>
+                  </div>
                 </div>
                 <div className="mt-2 grid gap-2 text-xs text-[#66756d] md:grid-cols-2">
                   <span>
@@ -975,7 +1129,7 @@ export function PackageManagementPanel({
               {modal.mode === "adjust" ? (
                 <div className="mt-5 grid gap-4 md:grid-cols-2">
                   <label className="flex flex-col gap-2 text-sm font-medium">
-                    总次数
+                    <RequiredLabel>总次数</RequiredLabel>
                     <input
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       min={1}
@@ -989,7 +1143,7 @@ export function PackageManagementPanel({
                     />
                   </label>
                   <label className="flex flex-col gap-2 text-sm font-medium">
-                    已用次数
+                    <RequiredLabel>已用次数</RequiredLabel>
                     <input
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       min={0}
@@ -1003,7 +1157,7 @@ export function PackageManagementPanel({
                     />
                   </label>
                   <label className="flex flex-col gap-2 text-sm font-medium">
-                    单次斤数
+                    <RequiredLabel>单次斤数</RequiredLabel>
                     <input
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       min={0.5}
@@ -1024,7 +1178,7 @@ export function PackageManagementPanel({
 
               {modal.mode !== "detail" ? (
                 <label className="mt-5 flex flex-col gap-2 text-sm font-medium">
-                  操作原因
+                  <RequiredLabel>操作原因</RequiredLabel>
                   <textarea
                     className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
                     onChange={(event) =>

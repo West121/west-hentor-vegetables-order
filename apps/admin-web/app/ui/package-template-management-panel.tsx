@@ -11,7 +11,11 @@ import {
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
 
-import { AdminPagination, type AdminPaginationMeta } from "./admin-pagination";
+import {
+  AdminPagination,
+  normalizeAdminListPayload,
+  type AdminPaginationMeta,
+} from "./admin-pagination";
 import {
   buildStoreScopedDetailPath,
   loadDetailResource,
@@ -19,6 +23,7 @@ import {
 } from "./detail-loaders";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import { hasAdminFormChanges } from "./admin-form-dirty";
+import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
   id: string;
@@ -116,6 +121,34 @@ function formatBenefitQuantity(value: number) {
   return Number(value.toFixed(2)).toString();
 }
 
+function normalizeIntegerInputText(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (!digits) {
+    return "";
+  }
+  return digits.replace(/^0+(?=\d)/, "");
+}
+
+function normalizeDecimalInputText(value: string) {
+  const [integer = "", ...decimalParts] = value
+    .replace(/[^\d.]/g, "")
+    .split(".");
+  const decimal = decimalParts.join("");
+  if (!integer && !decimal) {
+    return "";
+  }
+  const normalizedInteger = integer.replace(/^0+(?=\d)/, "") || "0";
+  return decimalParts.length > 0
+    ? `${normalizedInteger}.${decimal}`
+    : normalizedInteger;
+}
+
+function normalizeDecimalInputNumber(value: string) {
+  const normalized = normalizeDecimalInputText(value);
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function formatTemplateBenefits(item: PackageTemplatePanelItem) {
   const core = `蔬菜 ${item.totalTimes} 次 × ${formatBenefitQuantity(
     item.weightLimitJin,
@@ -125,6 +158,35 @@ function formatTemplateBenefits(item: PackageTemplatePanelItem) {
       `${benefit.name} ${formatBenefitQuantity(benefit.totalQuantity)}${benefit.unit}`,
   );
   return [core, ...extras];
+}
+
+function generateBenefitKind(name: string, index: number, usedKinds = new Set<string>()) {
+  const trimmed = name.trim();
+  let base = "EXTRA";
+  if (trimmed.includes("鸡蛋")) {
+    base = "EGG";
+  } else if (
+    trimmed.includes("老母鸡") ||
+    trimmed.includes("母鸡") ||
+    trimmed.includes("鸡")
+  ) {
+    base = "HEN";
+  } else {
+    const normalized = trimmed
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    base = normalized || "EXTRA";
+  }
+
+  let kind = base;
+  let suffix = index + 1;
+  while (usedKinds.has(kind)) {
+    suffix += 1;
+    kind = `${base}_${suffix}`;
+  }
+  usedKinds.add(kind);
+  return kind;
 }
 
 function nowIso() {
@@ -203,9 +265,14 @@ export function PackageTemplateManagementPanel({
         throw new Error(result.error?.message ?? "加载套餐模板失败");
       }
 
-      setItems(result.data.items);
-      setPagination(result.data.pagination);
-      setSummary(result.data.summary);
+      const nextList = normalizeAdminListPayload(
+        result.data,
+        initialSummary,
+        pagination.pageSize,
+      );
+      setItems(nextList.items);
+      setPagination(nextList.pagination);
+      setSummary(nextList.summary);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "加载套餐模板失败");
     } finally {
@@ -391,9 +458,10 @@ export function PackageTemplateManagementPanel({
     setSaving(true);
     setError(null);
 
+    const usedBenefitKinds = new Set<string>();
     const payload = {
       benefits: form.benefits.map((benefit, index) => ({
-        kind: benefit.kind,
+        kind: generateBenefitKind(benefit.name, index, usedBenefitKinds),
         name: benefit.name,
         sortOrder: Number.isFinite(benefit.sortOrder) ? benefit.sortOrder : index,
         totalQuantity: benefit.totalQuantity,
@@ -474,10 +542,17 @@ export function PackageTemplateManagementPanel({
       setModal(null);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "保存失败");
-    } finally {
+  } finally {
       setSaving(false);
     }
   }
+
+  const benefitKindPreview = (() => {
+    const usedKinds = new Set<string>();
+    return form.benefits.map((benefit, index) =>
+      generateBenefitKind(benefit.name, index, usedKinds),
+    );
+  })();
 
   return (
     <section className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
@@ -511,6 +586,7 @@ export function PackageTemplateManagementPanel({
             </div>
           ))}
           <button
+            aria-label="微信支付购买套餐预留"
             className="grid h-[58px] w-[58px] place-items-center rounded-xl border border-dashed border-[#b8d8bf] bg-[#f8fff8] text-[#1f8f4f] disabled:opacity-60"
             disabled
             title="微信支付购买套餐预留"
@@ -624,6 +700,7 @@ export function PackageTemplateManagementPanel({
                 <td className="px-4 py-4">
                   <div className="flex justify-end gap-2">
                     <button
+                      aria-label="查看套餐详情"
                       className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                       onClick={() => openDetailModal(item)}
                       title="查看详情"
@@ -632,6 +709,7 @@ export function PackageTemplateManagementPanel({
                       <Eye size={16} />
                     </button>
                     <button
+                      aria-label="编辑套餐"
                       className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
                       onClick={() => openEditModal(item)}
                       title="编辑套餐"
@@ -700,6 +778,7 @@ export function PackageTemplateManagementPanel({
                 onPointerDown={(event) => event.stopPropagation()}
               >
                 <button
+                  aria-label={fullscreen ? "退出全屏" : "全屏"}
                   className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f]"
                   onClick={() => setFullscreen((value) => !value)}
                   title={fullscreen ? "退出全屏" : "全屏"}
@@ -708,6 +787,7 @@ export function PackageTemplateManagementPanel({
                   {fullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
                 </button>
                 <button
+                  aria-label="关闭"
                   className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 bg-red-50 text-red-600"
                   onClick={closeModal}
                   title="关闭"
@@ -737,7 +817,7 @@ export function PackageTemplateManagementPanel({
               ) : null}
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-                  套餐名称
+                  <RequiredLabel>套餐名称</RequiredLabel>
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     onChange={(event) => updateForm("name", event.target.value)}
@@ -746,42 +826,58 @@ export function PackageTemplateManagementPanel({
                   />
                 </label>
                 <label className="flex flex-col gap-2 text-sm font-medium">
-                  总次数
+                  <RequiredLabel>总次数</RequiredLabel>
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    inputMode="numeric"
                     min={1}
-                    onChange={(event) => updateForm("totalTimes", event.target.value)}
+                    onChange={(event) =>
+                      updateForm(
+                        "totalTimes",
+                        normalizeIntegerInputText(event.target.value),
+                      )
+                    }
                     readOnly={modal.mode === "detail"}
-                    type="number"
+                    type="text"
                     value={form.totalTimes}
                   />
                 </label>
                 <label className="flex flex-col gap-2 text-sm font-medium">
-                  单次斤数
+                  <RequiredLabel>单次斤数</RequiredLabel>
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    inputMode="decimal"
                     min={0.5}
                     onChange={(event) =>
-                      updateForm("weightLimitJin", event.target.value)
+                      updateForm(
+                        "weightLimitJin",
+                        normalizeDecimalInputText(event.target.value),
+                      )
                     }
                     readOnly={modal.mode === "detail"}
                     step={0.5}
-                    type="number"
+                    type="text"
                     value={form.weightLimitJin}
                   />
                 </label>
                 <label className="flex flex-col gap-2 text-sm font-medium">
-                  排序
+                  <RequiredLabel>排序</RequiredLabel>
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                    onChange={(event) => updateForm("sortOrder", event.target.value)}
+                    inputMode="numeric"
+                    onChange={(event) =>
+                      updateForm(
+                        "sortOrder",
+                        normalizeIntegerInputText(event.target.value),
+                      )
+                    }
                     readOnly={modal.mode === "detail"}
-                    type="number"
+                    type="text"
                     value={form.sortOrder}
                   />
                 </label>
 	                <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-	                  状态
+	                  <RequiredLabel>状态</RequiredLabel>
 	                  <select
                     className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
                     disabled={modal.mode === "detail"}
@@ -817,24 +913,13 @@ export function PackageTemplateManagementPanel({
 	                <div className="mt-4 space-y-3">
 	                  {form.benefits.map((benefit, index) => (
 	                    <div
-	                      className="grid gap-3 rounded-xl border border-[#dbe6dc] bg-white p-3 md:grid-cols-[110px_1fr_110px_90px_92px]"
+	                      className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(112px,1fr))] gap-3 rounded-xl border border-[#dbe6dc] bg-white p-3"
 	                      key={`${benefit.id ?? "benefit"}-${index}`}
 	                    >
-	                      <label className="flex flex-col gap-1 text-xs font-semibold text-[#66756d]">
-	                        类型编码
+	                      <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+	                        <RequiredLabel>权益名称</RequiredLabel>
 	                        <input
-	                          className="h-10 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-	                          onChange={(event) =>
-	                            updateBenefit(index, "kind", event.target.value)
-	                          }
-	                          readOnly={modal.mode === "detail"}
-	                          value={benefit.kind}
-	                        />
-	                      </label>
-	                      <label className="flex flex-col gap-1 text-xs font-semibold text-[#66756d]">
-	                        权益名称
-	                        <input
-	                          className="h-10 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+	                          className="h-10 w-full min-w-0 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
 	                          onChange={(event) =>
 	                            updateBenefit(index, "name", event.target.value)
 	                          }
@@ -842,28 +927,29 @@ export function PackageTemplateManagementPanel({
 	                          value={benefit.name}
 	                        />
 	                      </label>
-	                      <label className="flex flex-col gap-1 text-xs font-semibold text-[#66756d]">
-	                        总数量
+	                      <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+	                        <RequiredLabel>总数量</RequiredLabel>
 	                        <input
-	                          className="h-10 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+	                          className="h-10 w-full min-w-0 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+	                          inputMode="decimal"
 	                          min={0.01}
 	                          onChange={(event) =>
 	                            updateBenefit(
 	                              index,
 	                              "totalQuantity",
-	                              Number(event.target.value || 0),
+	                              normalizeDecimalInputNumber(event.target.value),
 	                            )
 	                          }
 	                          readOnly={modal.mode === "detail"}
 	                          step={0.01}
-	                          type="number"
-	                          value={benefit.totalQuantity}
+	                          type="text"
+	                          value={formatBenefitQuantity(benefit.totalQuantity)}
 	                        />
 	                      </label>
-	                      <label className="flex flex-col gap-1 text-xs font-semibold text-[#66756d]">
-	                        单位
+	                      <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+	                        <RequiredLabel>单位</RequiredLabel>
 	                        <input
-	                          className="h-10 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+	                          className="h-10 w-full min-w-0 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
 	                          onChange={(event) =>
 	                            updateBenefit(index, "unit", event.target.value)
 	                          }
@@ -871,33 +957,45 @@ export function PackageTemplateManagementPanel({
 	                          value={benefit.unit}
 	                        />
 	                      </label>
-	                      <div className="flex items-end gap-2">
-	                        <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-semibold text-[#66756d]">
-	                          排序
-	                          <input
-	                            className="h-10 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-	                            onChange={(event) =>
-	                              updateBenefit(
-	                                index,
-	                                "sortOrder",
-	                                Number(event.target.value || 0),
-	                              )
-	                            }
-	                            readOnly={modal.mode === "detail"}
-	                            type="number"
-	                            value={benefit.sortOrder}
-	                          />
-	                        </label>
-	                        {modal.mode !== "detail" ? (
+	                      <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+	                        <RequiredLabel>排序</RequiredLabel>
+	                        <input
+	                          className="h-10 w-full rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+	                          inputMode="numeric"
+	                          onChange={(event) =>
+	                            updateBenefit(
+	                              index,
+	                              "sortOrder",
+	                              Number(
+	                                normalizeIntegerInputText(event.target.value) ||
+	                                  0,
+	                              ),
+	                            )
+	                          }
+	                          readOnly={modal.mode === "detail"}
+	                          type="text"
+	                          value={String(benefit.sortOrder)}
+	                        />
+	                      </label>
+	                      <div className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+	                        类型编码
+	                        <div className="flex h-10 items-center rounded-lg border border-[#dbe6dc] bg-[#f5f8f3] px-3 font-mono text-sm font-normal text-[#405248]">
+	                          {benefitKindPreview[index]}
+	                        </div>
+	                      </div>
+	                      {modal.mode !== "detail" ? (
+	                        <div className="flex min-w-0 items-end">
 	                          <button
-	                            className="h-10 rounded-lg border border-red-100 bg-red-50 px-3 text-xs font-semibold text-red-600"
+	                            className="h-10 w-full min-w-0 rounded-lg border border-red-100 bg-red-50 px-3 text-xs font-semibold text-red-600"
 	                            onClick={() => removeBenefit(index)}
 	                            type="button"
 	                          >
 	                            删除
 	                          </button>
-	                        ) : null}
-	                      </div>
+	                        </div>
+	                      ) : (
+	                        <div className="hidden md:block" />
+	                      )}
 	                    </div>
 	                  ))}
 	                  {form.benefits.length === 0 ? (

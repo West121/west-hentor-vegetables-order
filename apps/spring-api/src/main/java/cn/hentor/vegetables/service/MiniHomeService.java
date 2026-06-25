@@ -10,6 +10,7 @@ import cn.hentor.vegetables.dto.MiniMemberDto;
 import cn.hentor.vegetables.dto.MiniPackageBenefitDto;
 import cn.hentor.vegetables.dto.MiniPackageDto;
 import cn.hentor.vegetables.dto.MiniSessionContext;
+import cn.hentor.vegetables.dto.MiniStoreDto;
 import cn.hentor.vegetables.dto.MiniTaskDto;
 import cn.hentor.vegetables.dto.ReservationSummaryDto;
 import cn.hentor.vegetables.entity.AddressEntity;
@@ -109,7 +110,7 @@ public class MiniHomeService {
     );
 
     return new MiniHomeData(
-      miniAuthService.toStoreDto(store),
+      toHomeStoreDto(store, activeTask),
       activeTask == null
         ? null
         : new MiniTaskDto(
@@ -124,6 +125,7 @@ public class MiniHomeService {
       binding == null || user == null
         ? null
         : new MiniMemberDto(
+          user.getAvatarUrl(),
           binding.getStatus(),
           user.getDisabledReason(),
           user.getId(),
@@ -192,6 +194,7 @@ public class MiniHomeService {
       selected.getStatus(),
       selected.getFrozenReason(),
       benefits,
+      List.of(),
       zeroIfNull(selected.getWeightLimitJin())
     );
   }
@@ -225,19 +228,23 @@ public class MiniHomeService {
     );
   }
 
+  private MiniStoreDto toHomeStoreDto(StoreEntity store, TaskEntity activeTask) {
+    MiniStoreDto base = miniAuthService.toStoreDto(store);
+    return new MiniStoreDto(
+      base.id(),
+      base.code(),
+      base.name(),
+      activeTask == null ? null : activeTask.getCutoffTime(),
+      base.customerServiceTel(),
+      base.deliveryCities(),
+      base.deliveryProvinces(),
+      base.homeDishColumns()
+    );
+  }
+
   private List<MiniHomeDishDto> loadDishes(String storeId, TaskEntity activeTask) {
     if (activeTask == null) {
-      return dishMapper.selectList(
-          new LambdaQueryWrapper<DishEntity>()
-            .eq(DishEntity::getStoreId, storeId)
-            .isNull(DishEntity::getDeletedAt)
-            .apply("\"status\" = 'ON_SALE'")
-            .orderByAsc(DishEntity::getSortOrder)
-            .orderByAsc(DishEntity::getCreatedAt)
-        )
-        .stream()
-        .map(this::toDishDto)
-        .toList();
+      return List.of();
     }
 
     List<TaskDishEntity> taskDishes = taskDishMapper.selectList(

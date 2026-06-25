@@ -142,7 +142,7 @@ export const ADMIN_RUNTIME_SECTION_TARGETS = [
     name: "section-system-settings",
     section: "system-settings",
     type: "section",
-    requiredTexts: ["系统设置", "编辑设置", "每日截单", "客服电话"],
+    requiredTexts: ["系统设置", "编辑设置", "客服电话", "配送范围"],
   },
 ];
 
@@ -201,7 +201,7 @@ export const ADMIN_RUNTIME_MODAL_TARGETS = [
     section: "system-settings",
     triggerText: "编辑设置",
     type: "modal",
-    requiredTexts: ["编辑系统设置", "截单时间", "用户协议链接"],
+    requiredTexts: ["编辑系统设置", "客服电话", "用户协议链接"],
   },
 ];
 

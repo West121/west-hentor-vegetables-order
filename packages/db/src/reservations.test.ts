@@ -1398,8 +1398,10 @@ describe("shipOrder", () => {
     ]);
     expect(result.copyText).toContain("发货统计：1 单，1 斤");
     expect(result.copyText).toContain("菠菜 1斤");
+    expect(result.copyText).not.toContain("地址汇总");
     expect(result.csvText).toContain("类型,名称,订单数,重量(斤)");
     expect(result.csvText).toContain("菜品,菠菜,1,1");
+    expect(result.csvText).not.toContain("地址,");
   });
 
   it("exports filtered store orders as csv", async () => {

@@ -4,6 +4,7 @@ import cn.hentor.vegetables.common.ApiException;
 import cn.hentor.vegetables.common.ApiResponse;
 import cn.hentor.vegetables.dto.AdminSessionDto;
 import cn.hentor.vegetables.dto.StoreDto;
+import cn.hentor.vegetables.dto.TaskCancelRequest;
 import cn.hentor.vegetables.dto.TaskCopyRequest;
 import cn.hentor.vegetables.dto.TaskListResponse;
 import cn.hentor.vegetables.dto.TaskRequest;
@@ -118,6 +119,20 @@ public class TaskController {
     requirePermission(session, "tasks.write");
     requireStoreAccess(session, request.storeId());
     return ApiResponse.ok(taskQueryService.copy(taskId, request, session));
+  }
+
+  @PostMapping("/{taskId}/cancel")
+  public ApiResponse<TaskResponse> cancel(
+    @PathVariable String taskId,
+    @Valid @RequestBody TaskCancelRequest request,
+    @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
+    @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
+  ) {
+    AdminSessionDto session = requireSession(authorization, tokenHeader, tokenCookie);
+    requirePermission(session, "tasks.write");
+    requireStoreAccess(session, request.storeId());
+    return ApiResponse.ok(taskQueryService.cancel(taskId, request.storeId(), session));
   }
 
   private AdminSessionDto requireSession(String authorization, String tokenHeader, String tokenCookie) {

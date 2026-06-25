@@ -39,7 +39,8 @@ describe("admin operation log coverage", () => {
     expect(panelSource).toContain("responseData");
     expect(panelSource).toContain("durationMs");
     expect(panelSource).toContain("statusCode");
-    expect(panelSource).toContain('`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`');
+    expect(panelSource).toContain("formatDateTimeSecond");
+    expect(panelSource).toContain('"./date-format"');
     expect(pageSource).toContain("initialLogs={data.operationLogs}");
   });
 

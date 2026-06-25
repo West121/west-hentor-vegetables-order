@@ -35,6 +35,25 @@ describe("admin detail loaders", () => {
     expect(calls).toEqual(["/api/admin/members/member-1?storeId=store-1"]);
   });
 
+  it("loads an unkeyed spring detail resource from a successful response", async () => {
+    const fetcher = async () =>
+      new Response(
+        JSON.stringify({
+          data: { id: "package-1", nameSnapshot: "8斤周套餐" },
+          success: true,
+        }),
+        { status: 200 },
+      );
+
+    await expect(
+      loadDetailResource<{ id: string; nameSnapshot: string }>(
+        "/api/admin/user-packages/package-1?storeId=store-1",
+        "userPackage",
+        fetcher,
+      ),
+    ).resolves.toEqual({ id: "package-1", nameSnapshot: "8斤周套餐" });
+  });
+
   it("throws the api error message when loading fails", async () => {
     const fetcher = async () =>
       new Response(

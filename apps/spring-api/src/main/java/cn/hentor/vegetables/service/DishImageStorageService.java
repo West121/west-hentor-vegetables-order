@@ -10,6 +10,7 @@ import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.SetBucketPolicyArgs;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,6 +29,7 @@ public class DishImageStorageService {
   private static final long MAX_IMAGE_SIZE = 3L * 1024L * 1024L;
   private static final Set<String> ALLOWED_TYPES = Set.of(
     "image/avif",
+    "image/jpg",
     "image/jpeg",
     "image/png",
     "image/webp"
@@ -35,6 +37,8 @@ public class DishImageStorageService {
   private static final Map<String, String> MIME_EXTENSIONS = Map.of(
     "image/avif",
     "avif",
+    "image/jpg",
+    "jpg",
     "image/jpeg",
     "jpg",
     "image/png",
@@ -58,11 +62,19 @@ public class DishImageStorageService {
   }
 
   public DishImageUploadResponse upload(MultipartFile file) {
+    return upload(file, "dishes");
+  }
+
+  public DishImageUploadResponse uploadAvatar(MultipartFile file) {
+    return upload(file, "avatars");
+  }
+
+  private DishImageUploadResponse upload(MultipartFile file, String folder) {
     if (file == null || file.isEmpty()) {
       throw new ApiException("INVALID_PARAMS", "请选择图片", HttpStatus.BAD_REQUEST);
     }
 
-    String contentType = file.getContentType();
+    String contentType = resolveContentType(file);
     if (!StringUtils.hasText(contentType) || !ALLOWED_TYPES.contains(contentType)) {
       throw new ApiException(
         "IMAGE_TYPE_INVALID",
@@ -75,7 +87,7 @@ public class DishImageStorageService {
       throw new ApiException("IMAGE_TOO_LARGE", "图片不能超过 3MB", HttpStatus.BAD_REQUEST);
     }
 
-    String key = createDishImageObjectKey(contentType);
+    String key = createImageObjectKey(folder, contentType);
     try {
       if (isLocalStorage()) {
         putLocalObject(file, key);
@@ -89,6 +101,79 @@ public class DishImageStorageService {
     return new DishImageUploadResponse(
       new DishImageDto(key, contentType, file.getSize(), buildPublicUrl(key))
     );
+  }
+
+  private String resolveContentType(MultipartFile file) {
+    String contentType = file.getContentType();
+    if (StringUtils.hasText(contentType) && ALLOWED_TYPES.contains(contentType)) {
+      return contentType;
+    }
+
+    String fileName = file.getOriginalFilename();
+    if (!StringUtils.hasText(fileName) || !fileName.contains(".")) {
+      return detectContentType(file, contentType);
+    }
+
+    String extension = fileName.substring(fileName.lastIndexOf(".") + 1).toLowerCase();
+    return switch (extension) {
+      case "avif" -> "image/avif";
+      case "jpeg", "jpg" -> "image/jpeg";
+      case "png" -> "image/png";
+      case "webp" -> "image/webp";
+      default -> detectContentType(file, contentType);
+    };
+  }
+
+  private String detectContentType(MultipartFile file, String fallback) {
+    byte[] header = new byte[16];
+    try (InputStream inputStream = file.getInputStream()) {
+      int read = inputStream.read(header);
+      if (read >= 3 && (header[0] & 0xff) == 0xff && (header[1] & 0xff) == 0xd8 && (header[2] & 0xff) == 0xff) {
+        return "image/jpeg";
+      }
+      if (
+        read >= 8 &&
+        (header[0] & 0xff) == 0x89 &&
+        header[1] == 0x50 &&
+        header[2] == 0x4e &&
+        header[3] == 0x47 &&
+        header[4] == 0x0d &&
+        header[5] == 0x0a &&
+        header[6] == 0x1a &&
+        header[7] == 0x0a
+      ) {
+        return "image/png";
+      }
+      if (
+        read >= 12 &&
+        header[0] == 0x52 &&
+        header[1] == 0x49 &&
+        header[2] == 0x46 &&
+        header[3] == 0x46 &&
+        header[8] == 0x57 &&
+        header[9] == 0x45 &&
+        header[10] == 0x42 &&
+        header[11] == 0x50
+      ) {
+        return "image/webp";
+      }
+      if (
+        read >= 12 &&
+        header[4] == 0x66 &&
+        header[5] == 0x74 &&
+        header[6] == 0x79 &&
+        header[7] == 0x70 &&
+        header[8] == 0x61 &&
+        header[9] == 0x76 &&
+        header[10] == 0x69 &&
+        header[11] == 0x66
+      ) {
+        return "image/avif";
+      }
+    } catch (IOException ignored) {
+      return fallback;
+    }
+    return fallback;
   }
 
   private boolean isLocalStorage() {
@@ -155,10 +240,11 @@ public class DishImageStorageService {
       """.formatted(bucket);
   }
 
-  private String createDishImageObjectKey(String contentType) {
+  private String createImageObjectKey(String folder, String contentType) {
     LocalDate today = LocalDate.now(ZoneOffset.UTC);
     String ext = MIME_EXTENSIONS.getOrDefault(contentType, "jpg");
-    return "dishes/%d/%02d/%02d/%s.%s".formatted(
+    return "%s/%d/%02d/%02d/%s.%s".formatted(
+      folder,
       today.getYear(),
       today.getMonthValue(),
       today.getDayOfMonth(),

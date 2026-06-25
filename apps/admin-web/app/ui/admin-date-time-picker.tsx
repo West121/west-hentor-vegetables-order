@@ -1,6 +1,5 @@
 "use client";
 
-import { format } from "date-fns";
 import { CalendarIcon, ClockIcon } from "lucide-react";
 import { useId, useState } from "react";
 
@@ -14,6 +13,9 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
+import { formatDateOnly } from "./date-format";
+import { RequiredMark } from "./required-mark";
+
 const HOURS = Array.from({ length: 24 }, (_, index) => index);
 const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
 
@@ -22,6 +24,7 @@ type PickerShellProps = {
   className?: string;
   id: string;
   label?: string;
+  required?: boolean;
 };
 
 type DatePickerProps = {
@@ -34,6 +37,7 @@ type DatePickerProps = {
   onChange: (value: string) => void;
   placeholder?: string;
   readOnly?: boolean;
+  required?: boolean;
   value: string;
 };
 
@@ -65,7 +69,7 @@ function parseTimeValue(value: string, fallback = "18:00") {
 }
 
 function formatDateValue(date: Date) {
-  return format(date, "yyyy-MM-dd");
+  return formatDateOnly(date);
 }
 
 function formatDateTimeValue(date: Date, time: string) {
@@ -73,17 +77,26 @@ function formatDateTimeValue(date: Date, time: string) {
 }
 
 function formatDisplayDate(date: Date) {
-  return format(date, "yyyy年M月d日");
+  return formatDateOnly(date);
 }
 
-function PickerShell({ children, className, id, label }: PickerShellProps) {
+function PickerShell({
+  children,
+  className,
+  id,
+  label,
+  required,
+}: PickerShellProps) {
   if (!label) {
     return children;
   }
 
   return (
     <Field className={className}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <FieldLabel htmlFor={id}>
+        {label}
+        {required ? <RequiredMark /> : null}
+      </FieldLabel>
       {children}
     </Field>
   );
@@ -155,6 +168,7 @@ export function AdminDatePicker({
   onChange,
   placeholder = "选择日期",
   readOnly,
+  required,
   value,
 }: DatePickerProps) {
   const generatedId = useId();
@@ -212,7 +226,12 @@ export function AdminDatePicker({
   );
 
   return (
-    <PickerShell className={className} id={controlId} label={label}>
+    <PickerShell
+      className={className}
+      id={controlId}
+      label={label}
+      required={required}
+    >
       {control}
     </PickerShell>
   );
@@ -229,6 +248,7 @@ export function AdminTimePicker({
   onChange,
   placeholder = "选择时间",
   readOnly,
+  required,
   value,
 }: TimePickerProps) {
   const generatedId = useId();
@@ -270,7 +290,12 @@ export function AdminTimePicker({
   );
 
   return (
-    <PickerShell className={className} id={controlId} label={label}>
+    <PickerShell
+      className={className}
+      id={controlId}
+      label={label}
+      required={required}
+    >
       {control}
     </PickerShell>
   );
@@ -287,6 +312,7 @@ export function AdminDateTimePicker({
   onChange,
   placeholder = "选择日期时间",
   readOnly,
+  required,
   value,
 }: DateTimePickerProps) {
   const generatedId = useId();
@@ -353,7 +379,12 @@ export function AdminDateTimePicker({
   );
 
   return (
-    <PickerShell className={className} id={controlId} label={label}>
+    <PickerShell
+      className={className}
+      id={controlId}
+      label={label}
+      required={required}
+    >
       {control}
     </PickerShell>
   );

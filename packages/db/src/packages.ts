@@ -287,6 +287,9 @@ export async function getUserPackage(input: GetUserPackageInput) {
       orders: {
         take: 10,
         orderBy: { createdAt: "desc" },
+        where: {
+          status: { notIn: ["CANCELED", "VOIDED"] },
+        },
         select: {
           createdAt: true,
           id: true,

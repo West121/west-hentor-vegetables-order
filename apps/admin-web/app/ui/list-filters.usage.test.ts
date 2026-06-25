@@ -59,6 +59,8 @@ describe("admin list filters", () => {
     expect(source).toContain('params.set("dateTo"');
     expect(source).toContain("resetFilters");
     expect(source).toContain("重置");
+    expect(source).toContain("按菜品汇总");
+    expect(source).not.toContain("地址汇总");
   });
 
   it("adds detailed operation log filters for audit lookup", () => {

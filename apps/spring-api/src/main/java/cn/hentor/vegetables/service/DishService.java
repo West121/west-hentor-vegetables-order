@@ -43,13 +43,6 @@ import org.springframework.util.StringUtils;
 
 @Service
 public class DishService {
-  private static final Set<String> CATEGORIES = Set.of(
-    "LEAFY",
-    "FRUIT",
-    "ROOT",
-    "MUSHROOM",
-    "ACTIVITY"
-  );
   private static final Set<String> STATUSES = Set.of("ON_SALE", "OFF_SALE");
 
   private final AdminOperationLogMapper adminOperationLogMapper;
@@ -58,6 +51,7 @@ public class DishService {
   private final InventoryLogMapper inventoryLogMapper;
   private final ObjectMapper objectMapper;
   private final StoreMapper storeMapper;
+  private final SystemDictionaryService systemDictionaryService;
 
   public DishService(
     AdminOperationLogMapper adminOperationLogMapper,
@@ -65,7 +59,8 @@ public class DishService {
     DishMapper dishMapper,
     InventoryLogMapper inventoryLogMapper,
     ObjectMapper objectMapper,
-    StoreMapper storeMapper
+    StoreMapper storeMapper,
+    SystemDictionaryService systemDictionaryService
   ) {
     this.adminOperationLogMapper = adminOperationLogMapper;
     this.adminUserMapper = adminUserMapper;
@@ -73,6 +68,7 @@ public class DishService {
     this.inventoryLogMapper = inventoryLogMapper;
     this.objectMapper = objectMapper;
     this.storeMapper = storeMapper;
+    this.systemDictionaryService = systemDictionaryService;
   }
 
   public DishListResponse list(
@@ -84,15 +80,12 @@ public class DishService {
     long pageSize
   ) {
     validateStore(storeId);
-    validateOptionalCategory(category);
+    validateOptionalCategory(storeId, category);
     validateOptionalStatus(status);
 
     long normalizedPage = Math.max(page, 1);
     long normalizedPageSize = Math.min(Math.max(pageSize, 1), 100);
     LambdaQueryWrapper<DishEntity> wrapper = buildListWrapper(storeId, category, status, query)
-      .orderByAsc(DishEntity::getStatus)
-      .orderByAsc(DishEntity::getCategory)
-      .orderByAsc(DishEntity::getSortOrder)
       .orderByDesc(DishEntity::getCreatedAt);
     Page<DishEntity> result = dishMapper.selectPage(
       new Page<>(normalizedPage, normalizedPageSize),
@@ -357,7 +350,7 @@ public class DishService {
     if (!StringUtils.hasText(request.category())) {
       throw new ApiException("CATEGORY_INVALID", "菜品分类不正确", HttpStatus.BAD_REQUEST);
     }
-    validateOptionalCategory(request.category());
+    validateOptionalCategory(request.storeId(), request.category());
     validateOptionalStatus(request.status());
     if (request.stepJin() == null || request.stepJin().compareTo(BigDecimal.ZERO) <= 0) {
       throw new ApiException("STEP_JIN_INVALID", "起订步进不正确", HttpStatus.BAD_REQUEST);
@@ -390,8 +383,13 @@ public class DishService {
     }
   }
 
-  private void validateOptionalCategory(String category) {
-    if (StringUtils.hasText(category) && !CATEGORIES.contains(category)) {
+  private void validateOptionalCategory(String storeId, String category) {
+    if (
+      StringUtils.hasText(category) &&
+      !systemDictionaryService
+        .enabledCodes(storeId, SystemDictionaryService.DISH_CATEGORY_TYPE)
+        .contains(category.trim().toUpperCase())
+    ) {
       throw new ApiException("CATEGORY_INVALID", "菜品分类不正确", HttpStatus.BAD_REQUEST);
     }
   }

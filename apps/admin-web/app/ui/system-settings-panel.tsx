@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
 
-import { AdminTimePicker } from "./admin-date-time-picker";
+import { CHINA_PROVINCE_REGIONS } from "@hentor/shared";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import { hasAdminFormChanges } from "./admin-form-dirty";
 import {
@@ -19,6 +19,7 @@ import {
   canSubmitSystemSettings,
   type SystemSettingsFormState,
 } from "./system-settings-form";
+import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
   id: string;
@@ -50,10 +51,10 @@ type ApiResponse<T> = {
 function buildForm(settings: SystemSettingsPanelItem | null): SystemSettingsFormState {
   return {
     aboutText: settings?.aboutText ?? "",
-    cutoffTime: settings?.cutoffTime ?? "18:00",
     customerServiceTel: settings?.customerServiceTel ?? "",
-    deliveryCities: settings?.deliveryCities?.join("、") ?? "",
-    deliveryProvinces: settings?.deliveryProvinces?.join("、") ?? "",
+    deliveryCities: settings?.deliveryCities ?? [],
+    deliveryProvinces: settings?.deliveryProvinces ?? [],
+    homeDishColumns: settings?.homeDishColumns ?? 3,
     loginImageUrl: settings?.loginImageUrl ?? "",
     loginSubtitle: settings?.loginSubtitle ?? "",
     loginTitle: settings?.loginTitle ?? "",
@@ -67,8 +68,171 @@ function linkStatus(value: string) {
   return value.trim() ? "已配置" : "未配置";
 }
 
-function rangeStatus(value: string) {
-  return value.trim() ? value : "不限";
+function rangeStatus(values: string[]) {
+  return values.length > 0 ? values.join("、") : "不限";
+}
+
+function removeValue(values: string[], value: string) {
+  return values.filter((item) => item !== value);
+}
+
+function toggleValue(values: string[], value: string) {
+  return values.includes(value) ? removeValue(values, value) : [...values, value];
+}
+
+function deliveryScopeText(provinces: string[], cities: string[]) {
+  const parts = [
+    ...provinces.map((province) => `${province}全省`),
+    ...cities,
+  ];
+  return parts.length > 0 ? parts.join("、") : "全国不限";
+}
+
+function DeliveryRangePicker({
+  cities,
+  disabled,
+  onChange,
+  provinces,
+}: {
+  cities: string[];
+  disabled?: boolean;
+  onChange: (next: { cities: string[]; provinces: string[] }) => void;
+  provinces: string[];
+}) {
+  const [activeProvince, setActiveProvince] = useState(
+    provinces[0] ?? CHINA_PROVINCE_REGIONS[0]?.province ?? "",
+  );
+  const activeRegion =
+    CHINA_PROVINCE_REGIONS.find((region) => region.province === activeProvince) ??
+    CHINA_PROVINCE_REGIONS[0] ??
+    { cities: [], province: "" };
+
+  function toggleProvince(province: string) {
+    if (disabled) {
+      return;
+    }
+
+    const provinceCities =
+      CHINA_PROVINCE_REGIONS.find((region) => region.province === province)
+        ?.cities ?? [];
+    const selected = provinces.includes(province);
+    onChange({
+      cities: selected
+        ? cities
+        : cities.filter((city) => !provinceCities.includes(city)),
+      provinces: toggleValue(provinces, province),
+    });
+  }
+
+  function toggleCity(city: string) {
+    if (disabled || provinces.includes(activeRegion.province)) {
+      return;
+    }
+
+    onChange({
+      cities: toggleValue(cities, city),
+      provinces,
+    });
+  }
+
+  return (
+    <div className="rounded-2xl border border-[#dbe6dc] bg-[#f8fbf7] p-4 lg:col-span-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-[#102017]">配送范围</div>
+          <div className="mt-1 text-xs leading-5 text-[#66756d]">
+            选中省份表示该省全部城市可配送；不选省份时，可展开省份单独选择城市。
+          </div>
+        </div>
+        <button
+          className="h-8 rounded-lg border border-[#cfe3d3] bg-white px-3 text-xs font-semibold text-[#1f8f4f] disabled:opacity-50"
+          disabled={disabled || (provinces.length === 0 && cities.length === 0)}
+          onClick={() => onChange({ cities: [], provinces: [] })}
+          type="button"
+        >
+          清空范围
+        </button>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-[#dbe6dc] bg-white p-3 text-sm text-[#405248]">
+        当前范围：{deliveryScopeText(provinces, cities)}
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr]">
+        <div className="max-h-72 overflow-auto rounded-xl border border-[#dbe6dc] bg-white p-2">
+          {CHINA_PROVINCE_REGIONS.map((region) => {
+            const selected = provinces.includes(region.province);
+            const cityCount = region.cities.filter((city) =>
+              cities.includes(city),
+            ).length;
+            return (
+              <button
+                className={[
+                  "mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
+                  activeProvince === region.province
+                    ? "bg-[#e7f4eb] text-[#1f8f4f]"
+                    : "text-[#405248] hover:bg-[#f3f7f1]",
+                ].join(" ")}
+                key={region.province}
+                onClick={() => setActiveProvince(region.province)}
+                type="button"
+              >
+                <span className="font-semibold">{region.province}</span>
+                <span className="text-xs text-[#66756d]">
+                  {selected ? "全省" : cityCount ? `${cityCount}市` : ""}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="rounded-xl border border-[#dbe6dc] bg-white p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-semibold text-[#102017]">
+              {activeRegion.province}
+            </div>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#cfe3d3] px-3 py-2 text-xs font-semibold text-[#1f8f4f]">
+              <input
+                checked={provinces.includes(activeRegion.province)}
+                className="accent-[#1f8f4f]"
+                disabled={disabled}
+                onChange={() => toggleProvince(activeRegion.province)}
+                type="checkbox"
+              />
+              全省配送
+            </label>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {activeRegion.cities.map((city) => {
+              const provinceSelected = provinces.includes(activeRegion.province);
+              return (
+                <label
+                  className={[
+                    "inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+                    provinceSelected
+                      ? "border-[#e2ece4] bg-[#f6faf7] text-[#9aa89f]"
+                      : cities.includes(city)
+                        ? "border-[#b8d8bf] bg-[#eff8f1] text-[#1f8f4f]"
+                        : "border-[#dbe6dc] text-[#405248]",
+                  ].join(" ")}
+                  key={city}
+                >
+                  <input
+                    checked={provinceSelected || cities.includes(city)}
+                    className="accent-[#1f8f4f]"
+                    disabled={disabled || provinceSelected}
+                    onChange={() => toggleCity(city)}
+                    type="checkbox"
+                  />
+                  <span className="truncate">{city}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function SystemSettingsPanel({
@@ -259,7 +423,7 @@ export function SystemSettingsPanel({
             基础配置
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#66756d]">
-          配置截单时间、客服电话、小程序协议链接和配送范围。
+          配置客服电话、小程序展示、协议链接和配送范围。
           </p>
         </div>
         <div className="flex gap-2">
@@ -286,10 +450,10 @@ export function SystemSettingsPanel({
 
       <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
-          ["每日截单", currentForm.cutoffTime],
           ["客服电话", currentForm.customerServiceTel || "未配置"],
           ["配送省份", rangeStatus(currentForm.deliveryProvinces)],
           ["配送城市", rangeStatus(currentForm.deliveryCities)],
+          ["首页菜品列数", `每行 ${currentForm.homeDishColumns} 个`],
           ["登录页", currentForm.loginTitle || "默认标题"],
           ["协议链接", `用户协议${linkStatus(currentForm.userAgreementUrl)} / 隐私${linkStatus(currentForm.privacyPolicyUrl)}`],
         ].map(([label, value]) => (
@@ -347,7 +511,7 @@ export function SystemSettingsPanel({
                   编辑系统设置
                 </div>
                 <div className="mt-1 truncate text-sm text-[#66756d]">
-                  设置保存后会影响小程序登录、协议、客服和截单规则
+                  设置保存后会影响小程序登录、协议、客服和展示规则
                 </div>
               </div>
               <div
@@ -375,12 +539,6 @@ export function SystemSettingsPanel({
 
             <div className="flex-1 overflow-auto p-6">
               <div className="grid gap-4 lg:grid-cols-2">
-                <AdminTimePicker
-                  buttonClassName="h-11 w-full"
-                  label="每日截单时间"
-                  onChange={(value) => updateField("cutoffTime", value)}
-                  value={form.cutoffTime}
-                />
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   客服电话
                   <input
@@ -392,28 +550,39 @@ export function SystemSettingsPanel({
                     value={form.customerServiceTel}
                   />
                 </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  配送省份
-                  <input
-                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 text-sm outline-none focus:border-[#1f8f4f]"
-                    onChange={(event) =>
-                      updateField("deliveryProvinces", event.target.value)
-                    }
-                    placeholder="例如 江苏省、安徽省；为空表示不限省份"
-                    value={form.deliveryProvinces}
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  配送城市
-                  <input
-                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 text-sm outline-none focus:border-[#1f8f4f]"
-                    onChange={(event) =>
-                      updateField("deliveryCities", event.target.value)
-                    }
-                    placeholder="例如 南京市、合肥市；为空表示不限城市"
-                    value={form.deliveryCities}
-                  />
-                </label>
+                <DeliveryRangePicker
+                  cities={form.deliveryCities}
+                  onChange={(next) => {
+                    updateField("deliveryProvinces", next.provinces);
+                    updateField("deliveryCities", next.cities);
+                  }}
+                  provinces={form.deliveryProvinces}
+                />
+                <div className="rounded-2xl border border-[#dbe6dc] bg-[#f8fbf7] p-4">
+                  <div className="text-sm font-semibold text-[#102017]">
+                    <RequiredLabel>首页菜品每行数量</RequiredLabel>
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-[#66756d]">
+                    控制小程序首页菜品宫格展示密度，默认每行 3 个。
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    {[2, 3, 4].map((columns) => (
+                      <button
+                        className={[
+                          "h-10 rounded-xl border text-sm font-semibold transition",
+                          form.homeDishColumns === columns
+                            ? "border-[#1f8f4f] bg-[#1f8f4f] text-white"
+                            : "border-[#cfe3d3] bg-white text-[#405248] hover:border-[#1f8f4f]",
+                        ].join(" ")}
+                        key={columns}
+                        onClick={() => updateField("homeDishColumns", columns)}
+                        type="button"
+                      >
+                        {columns} 个
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   登录页主标题
                   <input
@@ -480,13 +649,6 @@ export function SystemSettingsPanel({
                     value={form.privacyPolicyUrl}
                   />
                 </label>
-                <div className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4 text-sm leading-6 text-[#66756d] lg:col-span-2">
-                  <div className="mb-1 font-semibold text-[#102017]">
-                    配送范围限制
-                  </div>
-                  配送范围按当前业务规则生效。省份为空时不限制省份；城市为空时不限制城市。
-                  例如只允许南京地址，可填写省份“江苏省”、城市“南京市”。
-                </div>
                 <label className="flex flex-col gap-2 text-sm font-medium lg:col-span-2">
                   关于我们
                   <textarea

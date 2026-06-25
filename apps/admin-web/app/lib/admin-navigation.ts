@@ -7,6 +7,7 @@ export type AdminNavIcon =
   | "file-clock"
   | "folder-tree"
   | "package"
+  | "settings-2"
   | "settings"
   | "shield"
   | "store"
@@ -28,6 +29,7 @@ export const ADMIN_SECTION_IDS = [
   "admin-users",
   "roles",
   "menus",
+  "dictionaries",
   "operation-logs",
   "system-settings",
 ] as const;
@@ -96,6 +98,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { icon: "user", label: "后台用户", section: "admin-users" },
       { icon: "badge-check", label: "角色管理", section: "roles" },
       { icon: "folder-tree", label: "菜单管理", section: "menus" },
+      { icon: "settings-2", label: "系统字典", section: "dictionaries" },
       { icon: "file-clock", label: "操作日志", section: "operation-logs" },
       { icon: "settings", label: "系统设置", section: "system-settings" },
     ],
@@ -107,6 +110,7 @@ const systemSectionIdSet = new Set<AdminSectionId>([
   "admin-users",
   "roles",
   "menus",
+  "dictionaries",
   "operation-logs",
   "system-settings",
 ]);

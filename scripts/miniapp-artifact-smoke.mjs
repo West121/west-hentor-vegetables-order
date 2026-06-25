@@ -7,6 +7,7 @@ export const REQUIRED_MINIAPP_PAGES = [
   "pages/me/index",
   "pages/addresses/index",
   "pages/orders/index",
+  "pages/order-edit/index",
   "pages/packages/index",
   "pages/login/index",
   "pages/webview/index",
@@ -41,6 +42,10 @@ const MAX_TAB_BAR_ICON_PX = 81;
 const MIN_TAB_BAR_ICON_PX = 24;
 const PAGE_WXSS_MIN_BYTES = new Map([
   ["pages/webview/index", 1],
+]);
+const OPTIONAL_PAGE_WXSS = new Set([
+  "pages/home/index",
+  "pages/order-edit/index",
 ]);
 
 export const EXPECTED_MINIAPP_TAB_BAR_TABS = [
@@ -204,6 +209,17 @@ async function collectKnownFileSizes(rootDir, paths) {
   return files;
 }
 
+async function readTextFileIfExists(filePath) {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
 function extractRuleBlockAfterSelector(scss, selector) {
   const selectorIndex = scss.indexOf(selector);
   if (selectorIndex < 0) {
@@ -220,6 +236,15 @@ function extractRuleBlockAfterSelector(scss, selector) {
 }
 
 function extractPxDeclaration(block, property) {
+  const match = block.match(new RegExp(`${property}\\s*:\\s*(\\d+)px`));
+  if (!match) {
+    throw new Error(`MINIAPP_HOME_GRID_PROTOTYPE_MISMATCH: missing ${property}`);
+  }
+
+  return Number(match[1]);
+}
+
+function extractCssVariablePxDeclaration(block, property) {
   const match = block.match(new RegExp(`${property}\\s*:\\s*(\\d+)px`));
   if (!match) {
     throw new Error(`MINIAPP_HOME_GRID_PROTOTYPE_MISMATCH: missing ${property}`);
@@ -388,10 +413,6 @@ function getHomeThreeColumnCardContentFreeSpace(scss) {
     scss,
     ".dish-grid--cols-3 .dish-card__actions",
   );
-  const stepButtonBlock = extractRuleBlockAfterSelector(
-    scss,
-    ".dish-grid--cols-3 .step-btn",
-  );
   const padding = extractVerticalPadding(cardBlock);
   const cardHeight = extractPxDeclaration(cardBlock, "height");
   const mediaHeight = extractPxDeclaration(mediaBlock, "height");
@@ -399,7 +420,10 @@ function getHomeThreeColumnCardContentFreeSpace(scss) {
   const nameLineHeight = extractPxDeclaration(nameBlock, "line-height");
   const nameMarginTop = extractPxDeclaration(nameBlock, "margin-top");
   const actionsMarginTop = extractPxDeclaration(actionsBlock, "margin-top");
-  const stepButtonHeight = extractPxDeclaration(stepButtonBlock, "height");
+  const stepButtonHeight = extractCssVariablePxDeclaration(
+    cardBlock,
+    "--dish-step-size",
+  );
 
   return {
     cardContentFreeSpacePx:
@@ -508,17 +532,25 @@ function getMinimumWxssBytes(page) {
 
 export function assertMiniappPageArtifacts(files, pages = REQUIRED_MINIAPP_PAGES) {
   for (const page of pages) {
-    for (const ext of ["js", "wxml", "wxss"]) {
+    for (const ext of ["js", "wxml"]) {
       const fileName = `${page}.${ext}`;
       if (!files.has(fileName)) {
         throw new Error(`MINIAPP_ARTIFACT_MISSING: ${fileName}`);
       }
     }
 
-    const wxssSize = files.get(`${page}.wxss`) ?? 0;
+    const wxssName = `${page}.wxss`;
+    if (!files.has(wxssName)) {
+      if (!OPTIONAL_PAGE_WXSS.has(page)) {
+        throw new Error(`MINIAPP_ARTIFACT_MISSING: ${wxssName}`);
+      }
+      continue;
+    }
+
+    const wxssSize = files.get(wxssName) ?? 0;
     const minWxssBytes = getMinimumWxssBytes(page);
     if (wxssSize < minWxssBytes) {
-      throw new Error(`MINIAPP_WXSS_TOO_SMALL: ${page}.wxss has ${wxssSize} bytes`);
+      throw new Error(`MINIAPP_WXSS_TOO_SMALL: ${wxssName} has ${wxssSize} bytes`);
     }
   }
 
@@ -852,9 +884,7 @@ export function assertMiniappDistRuntimeStructure({ commonWxss, pages }) {
         "profile-hero__top",
         "profile-hero__image",
         "member-card__usage",
-        "today-card",
         "service-grid",
-        "recent-card",
       ],
       wxss: [
         ".profile-hero",
@@ -863,7 +893,6 @@ export function assertMiniappDistRuntimeStructure({ commonWxss, pages }) {
         ".member-card__usage",
         ".service-grid",
         ".service-item__icon--order",
-        ".recent-card",
       ],
     },
     orders: {
@@ -913,21 +942,25 @@ export function assertMiniappDistRuntimeStructure({ commonWxss, pages }) {
     packages: {
       js: [
         "packages__custom-top",
+        "package-switcher",
+        "package-swiper",
+        "package-dots",
         "hero-card__photo",
         "benefit-card__dot--orange",
         "cycle-card__track",
-        "payment-reserve__button",
-        "payment-reserve__button--disabled",
+        "usage-card__title",
       ],
       wxss: [
         ".packages__custom-top",
+        ".package-switcher",
+        ".package-swiper",
+        ".package-dots",
         ".hero-card",
         ".hero-card__photo",
         ".benefit-grid",
         ".cycle-card",
+        ".usage-card",
         ".primary-button",
-        ".payment-reserve",
-        ".payment-reserve__button--disabled",
       ],
     },
   };
@@ -1037,25 +1070,10 @@ export function assertMiniappLoginPrototypeSource({ scss, tsx }) {
 export function assertMiniappMePrototypeSource({ scss, tsx }) {
   const requiredTsxSnippets = [
     "login-vegetables.jpg",
-    "getOrderStatusLabel",
     "getPackageUsageStats",
-    "getTodayOrderMeta",
     "查看套餐",
-    "今日已预订",
-    "去修改",
     "showActionSheet",
-    "账号注销",
-    "切换门店",
-    "当前只有一家可用门店",
-    "openStoreSwitchSheet",
-    "loadStores",
-    "/api/v1/stores/current",
-    "/api/v1/stores/switch",
-    "shouldShowStoreSwitcher",
-    "getStoreSwitchToast",
-    "storeData.stores.map",
-    'Taro.setStorageSync("mini_session_token", nextToken)',
-    "Taro.setStorageSync(ACTIVE_STORE_CODE_KEY, nextStore.code)",
+    "退出登录",
     'Taro.removeStorageSync("editing_order_id")',
     "await loadMe()",
     "/pages/orders/index",
@@ -1063,18 +1081,11 @@ export function assertMiniappMePrototypeSource({ scss, tsx }) {
     'className="profile-hero"',
     'className="member-card"',
     'className="member-card__usage"',
-    'className="today-card"',
-    'className="current-store-card"',
-    'className="current-store-card__name"',
-    'className="current-store-card__action"',
     'className="service-card"',
     'className="service-grid"',
     'service-item__icon--',
-    'className="recent-card"',
     'label: "订单"',
-    'label: "修改预订"',
     'label: "地址管理"',
-    'label: "联系客服"',
     'label: "套餐"',
     'label: "账号设置"',
   ];
@@ -1089,10 +1100,7 @@ export function assertMiniappMePrototypeSource({ scss, tsx }) {
     [
       'className="profile-hero"',
       'className="member-card"',
-      'className="today-card"',
-      'className="current-store-card"',
       'className="service-card"',
-      'className="recent-card"',
     ],
     "MINIAPP_ME_PROTOTYPE_MISMATCH",
   );
@@ -1100,9 +1108,7 @@ export function assertMiniappMePrototypeSource({ scss, tsx }) {
     tsx,
     [
       'label: "订单"',
-      'label: "修改预订"',
       'label: "地址管理"',
-      'label: "联系客服"',
       'label: "套餐"',
       'label: "账号设置"',
     ],
@@ -1115,21 +1121,14 @@ export function assertMiniappMePrototypeSource({ scss, tsx }) {
     ".member-card",
     ".member-card__usage",
     ".member-card__progress",
-    ".current-store-card",
-    ".current-store-card__icon",
-    ".current-store-card__name",
-    ".current-store-card__action",
     ".service-grid",
     ".service-item__icon",
     ".service-item__icon--order",
-    ".service-item__icon--edit",
     ".service-item__icon--pin",
-    ".service-item__icon--phone",
     ".service-item__icon--card",
     ".service-item__icon--user",
     "grid-template-columns: repeat(3, 96px)",
     "height: 82px",
-    ".recent-card",
   ];
   for (const snippet of requiredScssSnippets) {
     if (!scss.includes(snippet)) {
@@ -1199,18 +1198,6 @@ export function assertMiniappMePrototypeSource({ scss, tsx }) {
     throw new Error("MINIAPP_ME_FIGMA_LAYOUT_MISMATCH: package progress");
   }
 
-  const currentStoreBlock = extractRuleBlockAfterSelector(
-    scss,
-    ".current-store-card {",
-  );
-  if (
-    extractPxDeclaration(currentStoreBlock, "border-radius") !== 14 ||
-    extractPxDeclaration(currentStoreBlock, "margin-top") !== 14 ||
-    extractPxDeclaration(currentStoreBlock, "min-height") !== 78
-  ) {
-    throw new Error("MINIAPP_ME_FIGMA_LAYOUT_MISMATCH: current store");
-  }
-
   const serviceBlock = extractRuleBlockAfterSelector(scss, ".service-card {");
   const serviceGridBlock = extractRuleBlockAfterSelector(scss, ".service-grid");
   const serviceItemBlock = extractRuleBlockAfterSelector(scss, ".service-item");
@@ -1231,6 +1218,14 @@ export function assertMiniappMePrototypeSource({ scss, tsx }) {
     "我的套餐",
     "当前套餐剩余次数",
     "待发货，可修改",
+    "今日已预订",
+    "去修改",
+    "账号注销",
+    'label: "修改预订"',
+    'label: "联系客服"',
+    'className="today-card"',
+    'className="current-store-card"',
+    'className="recent-card"',
     'className="entry"',
     'className="entry__main"',
     'className="member-card__meta"',
@@ -1276,10 +1271,10 @@ export function assertMiniappMePrototypeSource({ scss, tsx }) {
 
   return {
     hasCustomerServiceEntry: true,
-    hasEditReservationEntry: true,
+    hasEditReservationEntry: false,
     hasOrdersEntry: true,
     hasPackagesEntry: true,
-    hasStoreSwitchFlow: true,
+    hasStoreSwitchFlow: false,
     heroHeight: FIGMA_ME_HERO_HEIGHT_PX,
     heroImageHeight,
     heroImageWidth,
@@ -1292,18 +1287,24 @@ export function assertMiniappMePrototypeSource({ scss, tsx }) {
 export function assertMiniappPackagesPrototypeSource({ scss, tsx }) {
   const requiredTsxSnippets = [
     "login-vegetables.jpg",
-    "getCurrentPackageItem",
+    "Swiper",
+    "SwiperItem",
+    "getFirstPackageItem",
     "getPackageHeroView",
+    "getPackageSlidePosition",
     "Hentor Fresh",
+    "我的套餐",
+    "左右滑动切换",
     "套餐权益",
     "本周期用量",
+    "套餐使用明细",
     "去首页预订",
-    "购买/续费套餐",
-    "payment-reserve",
+    "package-switcher",
+    "package-swiper",
+    "package-dots",
     "hero-card",
     "benefit-grid",
     "cycle-card",
-    "reservePurchase(purchaseTemplate.id)",
   ];
   for (const snippet of requiredTsxSnippets) {
     if (!tsx.includes(snippet)) {
@@ -1314,12 +1315,14 @@ export function assertMiniappPackagesPrototypeSource({ scss, tsx }) {
   const requiredScssSnippets = [
     ".hero-card",
     ".hero-card__photo",
+    ".package-switcher",
+    ".package-swiper",
+    ".package-dots",
     ".benefit-grid",
     "grid-template-columns: repeat(2, minmax(0, 1fr))",
     ".cycle-card",
+    ".usage-card",
     ".primary-button",
-    ".payment-reserve",
-    ".payment-reserve__button",
   ];
   for (const snippet of requiredScssSnippets) {
     if (!scss.includes(snippet)) {
@@ -1339,6 +1342,9 @@ export function assertMiniappPackagesPrototypeSource({ scss, tsx }) {
     ".reserve__title",
     "更多功能",
     "更多功能暂未开放",
+    "购买/续费套餐",
+    "payment-reserve",
+    "reservePurchase(purchaseTemplate.id)",
   ];
   for (const snippet of forbiddenSnippets) {
     if (tsx.includes(snippet) || scss.includes(snippet)) {
@@ -1348,7 +1354,8 @@ export function assertMiniappPackagesPrototypeSource({ scss, tsx }) {
 
   return {
     hasBenefitGrid: true,
-    hasPaymentReserve: true,
+    hasPackageSwiper: true,
+    hasUsageDetails: true,
   };
 }
 
@@ -1391,12 +1398,9 @@ export function assertMiniappHomePrototypeSource({ scss, tsx }) {
     ".package-card__empty-title",
     ".package-card__empty-meta",
     ".package-card__empty-reserve",
-    ".package-card__edit",
-    ".package-card__edit-badge",
-    ".package-card__edit-exit",
     ".reservation-confirm",
-    ".confirm-summary",
-    ".confirm-changes",
+    ".confirm-dish-list",
+    ".confirm-dish-item",
     ".confirm-address",
     ".confirm-notice",
     ".confirm-primary",
@@ -1409,7 +1413,7 @@ export function assertMiniappHomePrototypeSource({ scss, tsx }) {
 
   const requiredTsxSnippets = [
     "dish-grid",
-    "TARO_APP_HOME_DISH_COLUMNS",
+    "homeData?.store.homeDishColumns",
     "getPackageUsageProgressPercent",
     "getReservationConfirmView",
     "buildSetDefaultAddressUrl",
@@ -1438,9 +1442,8 @@ export function assertMiniappHomePrototypeSource({ scss, tsx }) {
     'className="package-card__empty-meta"',
     'className="package-card__empty-reserve"',
     "微信支付入口已预留",
-    'className="package-card__edit"',
-    'className="package-card__edit-badge"',
-    'className="package-card__edit-exit"',
+    'className="confirm-dish-list"',
+    'className="confirm-dish-item"',
     'className="summary"',
     'className="summary__address"',
     'className="summary__address-action"',
@@ -1448,12 +1451,14 @@ export function assertMiniappHomePrototypeSource({ scss, tsx }) {
     'className="address-switch-modal__mask"',
     'className="address-switch-panel"',
     'className="address-option__tag"',
-    "修改中",
-    "exitEditing",
-    "保存修改",
+    "今天已有订单",
+    "仍然提交",
+    "提交订单",
+    "确认修改",
     "confirmationView.title",
     "confirmationView.secondaryText",
-    "getDishFallbackImageKey",
+    "getDishDisplayImage",
+    "getDishImage",
     'reservationAddress.id ? "切换" : "新增地址"',
   ];
   for (const snippet of requiredTsxSnippets) {
@@ -1498,7 +1503,7 @@ export function assertMiniappHomePrototypeSource({ scss, tsx }) {
     throw new Error("MINIAPP_HOME_PACKAGE_CARD_HAS_DECORATIVE_IMAGE");
   }
 
-  if (tsx.includes("Taro.showModal({")) {
+  if (tsx.includes("Taro.showModal({") && !tsx.includes("underLimitConfirm")) {
     throw new Error("MINIAPP_HOME_CONFIRMATION_USES_SYSTEM_MODAL");
   }
 
@@ -1547,12 +1552,16 @@ export function assertMiniappHomePrototypeSource({ scss, tsx }) {
     );
   }
 
+  const cutoffBlock = extractRuleBlockAfterSelector(
+    scss,
+    ".package-card__cutoff",
+  );
   if (
-    !/\.package-card__cutoff\s*\{[^}]*position:\s*absolute[^}]*right:\s*\d+px[^}]*top:\s*\d+px/s.test(
-      scss,
-    )
+    cutoffBlock.includes("position: absolute") ||
+    cutoffBlock.includes("right:") ||
+    cutoffBlock.includes("top:")
   ) {
-    throw new Error("MINIAPP_HOME_PACKAGE_CARD_CUTOFF_NOT_TOP_RIGHT");
+    throw new Error("MINIAPP_HOME_PACKAGE_CARD_CUTOFF_OVERLAPS_STATS");
   }
 
   if (!/\.summary__address-action\s*\{[^}]*white-space:\s*nowrap/s.test(scss)) {
@@ -1648,6 +1657,9 @@ export function assertMiniappOrdersPrototypeSource({ lib, scss, tsx }) {
     'className="header__refresh"',
     'className="header__meta"',
     'className="order__weight"',
+    "openPendingActions",
+    "showActionSheet",
+    'itemList: ["取消预订", "修改预订"]',
     "刷新",
     "待发货 {statusCounts",
   ];
@@ -1663,8 +1675,11 @@ export function assertMiniappOrdersPrototypeSource({ lib, scss, tsx }) {
     'title="订单"',
     "ORDER_STATUS_TABS.map",
     "filterOrdersByStatus",
-    "openPendingActions",
-    'itemList: ["取消预订", "修改预订"]',
+    "editOrder",
+    "/pages/order-edit/index?orderId=",
+    "cancelOrder",
+    "Taro.showModal",
+    "取消后会返还本次套餐次数和菜品库存",
     "copyLogisticsNo",
     "Taro.setClipboardData",
     "data: logisticsNo",
@@ -1673,7 +1688,8 @@ export function assertMiniappOrdersPrototypeSource({ lib, scss, tsx }) {
     "hideOrder",
     'order.status === "CANCELED" || order.status === "VOIDED"',
     "void hideOrder(order.id)",
-    "可取消",
+    "修改",
+    "取消",
     "复制运单",
     "删除",
   ];
@@ -1695,7 +1711,8 @@ export function assertMiniappOrdersPrototypeSource({ lib, scss, tsx }) {
     "min-height: 138px",
     ".order__button",
     "height: 36px",
-    "width: 92px",
+    "min-width: 60px",
+    "padding: 0 12px",
   ];
   for (const snippet of requiredScssSnippets) {
     if (!scss.includes(snippet)) {
@@ -1707,7 +1724,7 @@ export function assertMiniappOrdersPrototypeSource({ lib, scss, tsx }) {
     hasCanceledHideAction: true,
     hasFourStatusTabs: true,
     hasLogisticsClipboardAction: true,
-    hasPendingActionSheet: true,
+    hasPendingActionSheet: false,
   };
 }
 
@@ -1862,15 +1879,20 @@ export async function runMiniappArtifactSmoke(options = {}) {
   const webviewNavigation = assertMiniappWebviewNavigationConfig(
     await readJson(join(miniappDir, "dist/pages/webview/index.json")),
   );
+  const distCommonJs = await readTextFileIfExists(join(miniappDir, "dist/common.js"));
+  const distCommonWxss = await readFile(join(miniappDir, "dist/common.wxss"), "utf8");
   const distRuntime = assertMiniappDistRuntimeStructure({
-    commonWxss: await readFile(join(miniappDir, "dist/common.wxss"), "utf8"),
+    commonWxss: distCommonWxss,
     pages: {
       home: {
-        js: await readFile(join(miniappDir, "dist/pages/home/index.js"), "utf8"),
-        wxss: await readFile(
-          join(miniappDir, "dist/pages/home/index.wxss"),
-          "utf8",
-        ),
+        js: [
+          await readFile(join(miniappDir, "dist/pages/home/index.js"), "utf8"),
+          distCommonJs,
+        ].join("\n"),
+        wxss: [
+          await readTextFileIfExists(join(miniappDir, "dist/pages/home/index.wxss")),
+          distCommonWxss,
+        ].join("\n"),
       },
       login: {
         js: await readFile(

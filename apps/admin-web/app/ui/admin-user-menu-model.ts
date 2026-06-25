@@ -1,6 +1,7 @@
 export type AdminUserMenuItemKey =
   | "profile"
   | "role-switch"
+  | "layout-settings"
   | "operation-logs"
   | "logout";
 
@@ -28,6 +29,12 @@ export function buildAdminUserMenuItems({
       helper: "查看当前角色范围",
       key: "role-switch",
       label: "切换角色",
+    },
+    {
+      disabled: false,
+      helper: "调整后台布局",
+      key: "layout-settings",
+      label: "布局设置",
     },
     {
       disabled: !canOpenOperationLogs,

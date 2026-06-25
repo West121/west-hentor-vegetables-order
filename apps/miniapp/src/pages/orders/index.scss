@@ -127,7 +127,9 @@
 }
 
 .order__actions {
+  display: flex;
   flex: 0 0 auto;
+  gap: 8px;
 }
 
 .order__button {
@@ -140,7 +142,8 @@
   height: 36px;
   justify-content: center;
   line-height: 18px;
-  width: 92px;
+  min-width: 60px;
+  padding: 0 12px;
 }
 
 .order__button--primary {

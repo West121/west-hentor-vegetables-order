@@ -176,8 +176,8 @@ public class ShipmentStatsService {
     );
     return new ShipmentStatsResponse(
       addresses,
-      copyText(summary, dishes, addresses),
-      csvText(dishes, addresses),
+      copyText(summary, dishes),
+      csvText(dishes),
       dishes,
       summary
     );
@@ -185,7 +185,7 @@ public class ShipmentStatsService {
 
   private ShipmentStatsResponse emptyStats() {
     ShipmentStatsSummaryDto summary = new ShipmentStatsSummaryDto(0, BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
-    return new ShipmentStatsResponse(List.of(), copyText(summary, List.of(), List.of()), csvText(List.of(), List.of()), List.of(), summary);
+    return new ShipmentStatsResponse(List.of(), copyText(summary, List.of()), csvText(List.of()), List.of(), summary);
   }
 
   private void validateStatus(String status) {
@@ -208,8 +208,7 @@ public class ShipmentStatsService {
 
   private String copyText(
     ShipmentStatsSummaryDto summary,
-    List<ShipmentStatsDishDto> dishes,
-    List<ShipmentStatsAddressDto> addresses
+    List<ShipmentStatsDishDto> dishes
   ) {
     List<String> lines = new java.util.ArrayList<>();
     lines.add("发货统计：" + summary.orderCount() + " 单，" + formatWeight(summary.totalWeightJin()) + " 斤");
@@ -217,16 +216,11 @@ public class ShipmentStatsService {
     dishes.forEach(dish ->
       lines.add("- " + dish.dishName() + " " + formatWeight(dish.totalWeightJin()) + "斤（" + dish.orderCount() + "单）")
     );
-    lines.add("地址汇总：");
-    addresses.forEach(address ->
-      lines.add("- " + address.address() + " " + formatWeight(address.totalWeightJin()) + "斤（" + address.orderCount() + "单）")
-    );
     return String.join("\n", lines);
   }
 
   private String csvText(
-    List<ShipmentStatsDishDto> dishes,
-    List<ShipmentStatsAddressDto> addresses
+    List<ShipmentStatsDishDto> dishes
   ) {
     List<String> lines = new java.util.ArrayList<>();
     lines.add("类型,名称,订单数,重量(斤)");
@@ -236,13 +230,6 @@ public class ShipmentStatsService {
       csvCell(dish.dishName()),
       Long.toString(dish.orderCount()),
       formatWeight(dish.totalWeightJin())
-    )));
-    addresses.forEach(address -> lines.add(String.join(
-      ",",
-      "地址",
-      csvCell(address.address()),
-      Long.toString(address.orderCount()),
-      formatWeight(address.totalWeightJin())
     )));
     return String.join("\n", lines);
   }

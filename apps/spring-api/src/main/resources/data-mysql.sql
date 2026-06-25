@@ -81,9 +81,29 @@ INSERT IGNORE INTO `SystemConfig` (`id`, `storeId`, `key`, `value`, `createdAt`,
 VALUES ('seed-config-cutoff-time', 'seed-store-lotus', 'cutoff_time', JSON_QUOTE('18:00'), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
 INSERT IGNORE INTO `SystemConfig` (`id`, `storeId`, `key`, `value`, `createdAt`, `updatedAt`) VALUES
+  ('seed-config-home-dish-columns', 'seed-store-lotus', 'home_dish_columns', JSON_QUOTE('3'), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
   ('seed-config-login-title', 'seed-store-lotus', 'login_title', JSON_QUOTE('Hentor Fresh'), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
   ('seed-config-login-subtitle', 'seed-store-lotus', 'login_subtitle', JSON_QUOTE('社区鲜蔬会员'), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
   ('seed-config-login-welcome', 'seed-store-lotus', 'login_welcome', JSON_QUOTE('欢迎来到蔬菜预订'), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
   ('seed-config-login-image-url', 'seed-store-lotus', 'login_image_url', JSON_QUOTE(''), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+
+INSERT IGNORE INTO `SystemConfig` (`id`, `storeId`, `key`, `value`, `createdAt`, `updatedAt`) VALUES
+  ('seed-config-dict-index', 'seed-store-lotus', 'dict.index', JSON_ARRAY(
+    JSON_OBJECT(
+      'code', 'DISH_CATEGORY',
+      'builtIn', true,
+      'description', '菜品管理、任务选菜使用的菜品分类。',
+      'enabled', true,
+      'name', '菜品类型',
+      'sortOrder', 1
+    )
+  ), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('seed-config-dict-dish-category', 'seed-store-lotus', 'dict.DISH_CATEGORY', JSON_ARRAY(
+    JSON_OBJECT('code', 'LEAFY', 'enabled', true, 'name', '叶菜', 'sortOrder', 1),
+    JSON_OBJECT('code', 'FRUIT', 'enabled', true, 'name', '茄果', 'sortOrder', 2),
+    JSON_OBJECT('code', 'ROOT', 'enabled', true, 'name', '根茎', 'sortOrder', 3),
+    JSON_OBJECT('code', 'MUSHROOM', 'enabled', true, 'name', '菌菇', 'sortOrder', 4),
+    JSON_OBJECT('code', 'ACTIVITY', 'enabled', true, 'name', '活动', 'sortOrder', 5)
+  ), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
 SET FOREIGN_KEY_CHECKS = 1;

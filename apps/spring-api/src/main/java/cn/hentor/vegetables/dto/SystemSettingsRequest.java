@@ -6,10 +6,10 @@ import java.util.List;
 
 public record SystemSettingsRequest(
   @NotNull String aboutText,
-  @NotBlank String cutoffTime,
   @NotNull String customerServiceTel,
   List<String> deliveryCities,
   List<String> deliveryProvinces,
+  Integer homeDishColumns,
   @NotNull String loginImageUrl,
   @NotNull String loginSubtitle,
   @NotNull String loginTitle,

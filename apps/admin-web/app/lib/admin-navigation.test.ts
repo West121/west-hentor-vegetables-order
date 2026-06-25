@@ -31,6 +31,7 @@ describe("admin navigation", () => {
     expect(sections).toContain("admin-users");
     expect(sections).toContain("roles");
     expect(sections).toContain("menus");
+    expect(sections).toContain("dictionaries");
   });
 
   it("makes every first-level group collapsible in the two-level sidebar", () => {
@@ -75,6 +76,7 @@ describe("admin navigation", () => {
     expect(sections).not.toContain("admin-users");
     expect(sections).not.toContain("roles");
     expect(sections).not.toContain("menus");
+    expect(sections).not.toContain("dictionaries");
     expect(sections).not.toContain("operation-logs");
     expect(sections).not.toContain("system-settings");
   });
@@ -88,6 +90,7 @@ describe("admin navigation", () => {
     expect(sections).toContain("admin-users");
     expect(sections).toContain("roles");
     expect(sections).toContain("menus");
+    expect(sections).toContain("dictionaries");
     expect(sections).toContain("operation-logs");
     expect(sections).toContain("system-settings");
   });
@@ -96,8 +99,12 @@ describe("admin navigation", () => {
     expect(resolveAdminSection("admin-users", [])).toBe("overview");
     expect(resolveAdminSection("roles", [])).toBe("overview");
     expect(resolveAdminSection("menus", [])).toBe("overview");
+    expect(resolveAdminSection("dictionaries", [])).toBe("overview");
     expect(resolveAdminSection("admin-users", ["system.manage"])).toBe(
       "admin-users",
+    );
+    expect(resolveAdminSection("dictionaries", ["system.manage"])).toBe(
+      "dictionaries",
     );
   });
 
@@ -181,6 +188,7 @@ describe("admin navigation", () => {
       "admin-users",
       "roles",
       "menus",
+      "dictionaries",
       "operation-logs",
       "system-settings",
     ]);

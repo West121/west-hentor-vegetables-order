@@ -1,3 +1,8 @@
+import {
+  getChinaCityRegion,
+  getChinaProvinceRegionsForDeliveryRange,
+} from "@hentor/shared";
+
 export type DefaultAddressSwitchInput = {
   addressCount: number;
   editingIsDefault?: boolean;
@@ -47,7 +52,12 @@ export type AddressFullAddressInput = AddressRegionInput & {
   fullAddress?: string | null;
 };
 
-const MIN_ADDRESS_DETAIL_LENGTH = 8;
+export type DeliveryRangeInput = {
+  deliveryCities?: Array<string | null | undefined> | null;
+  deliveryProvinces?: Array<string | null | undefined> | null;
+};
+
+export type AddressRegionPickerValue = [number, number, number];
 
 function normalizeOptionalText(value?: string | null) {
   const normalized = value?.trim();
@@ -114,10 +124,6 @@ export function getAddressDetailError(value: string) {
     return "请输入详细地址";
   }
 
-  if (normalized.length < MIN_ADDRESS_DETAIL_LENGTH) {
-    return "详细地址至少 8 个字";
-  }
-
   return null;
 }
 
@@ -131,6 +137,74 @@ export function getAddressRegionError({
   }
 
   return null;
+}
+
+function normalizeRangeValues(values?: Array<string | null | undefined> | null) {
+  return Array.from(
+    new Set(
+      (values ?? [])
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+}
+
+export function normalizeDeliveryRange(range?: DeliveryRangeInput | null) {
+  return {
+    deliveryCities: normalizeRangeValues(range?.deliveryCities),
+    deliveryProvinces: normalizeRangeValues(range?.deliveryProvinces),
+  };
+}
+
+export function hasDeliveryRangeLimit(range?: DeliveryRangeInput | null) {
+  const normalized = normalizeDeliveryRange(range);
+  return (
+    normalized.deliveryCities.length > 0 ||
+    normalized.deliveryProvinces.length > 0
+  );
+}
+
+export function formatDeliveryRangeText(range?: DeliveryRangeInput | null) {
+  const normalized = normalizeDeliveryRange(range);
+  const scopes = [
+    ...normalized.deliveryProvinces.map((province) => `${province}全省`),
+    ...normalized.deliveryCities,
+  ];
+
+  return scopes.length > 0 ? scopes.join("、") : "全国不限";
+}
+
+export function isAddressInDeliveryRange(
+  region: Pick<AddressRegionInput, "city" | "province">,
+  range?: DeliveryRangeInput | null,
+) {
+  const normalized = normalizeDeliveryRange(range);
+  if (
+    normalized.deliveryCities.length === 0 &&
+    normalized.deliveryProvinces.length === 0
+  ) {
+    return true;
+  }
+
+  const province = region.province?.trim();
+  const city = region.city?.trim();
+  return Boolean(
+    (province && normalized.deliveryProvinces.includes(province)) ||
+      (city && normalized.deliveryCities.includes(city)),
+  );
+}
+
+export function getAddressDeliveryRangeError(
+  region: Pick<AddressRegionInput, "city" | "province">,
+  range?: DeliveryRangeInput | null,
+) {
+  if (!region.province?.trim() || !region.city?.trim()) {
+    return null;
+  }
+
+  return isAddressInDeliveryRange(region, range)
+    ? null
+    : `该地区暂不配送，仅配送：${formatDeliveryRangeText(range)}`;
 }
 
 export function formatAddressRegion(input: AddressRegionInput) {
@@ -156,6 +230,111 @@ export function parseAddressRegionPickerValue(value?: string[]) {
     district: district.trim(),
     province: province.trim(),
   };
+}
+
+function clampPickerIndex(index: number | undefined, length: number) {
+  if (length <= 0) {
+    return 0;
+  }
+
+  if (typeof index !== "number" || Number.isNaN(index)) {
+    return 0;
+  }
+
+  return Math.min(Math.max(index, 0), length - 1);
+}
+
+export function buildAddressRegionMultiPickerModel(
+  input: AddressRegionInput,
+  deliveryRange?: DeliveryRangeInput | null,
+) {
+  const provinces = getChinaProvinceRegionsForDeliveryRange(deliveryRange);
+  const provinceNames = provinces.map((province) => province.province);
+  const selectedProvince = input.province?.trim();
+  const provinceIndex = clampPickerIndex(
+    selectedProvince
+      ? provinceNames.findIndex((province) => province === selectedProvince)
+      : 0,
+    provinceNames.length,
+  );
+  const province = provinces[provinceIndex] ?? { cities: [], province: "" };
+  const cityNames = province.cities;
+  const selectedCity = input.city?.trim();
+  const cityIndex = clampPickerIndex(
+    selectedCity ? cityNames.findIndex((city) => city === selectedCity) : 0,
+    cityNames.length,
+  );
+  const city = cityNames[cityIndex] ?? "";
+  const districtNames =
+    getChinaCityRegion(province.province, city)?.districtNames ?? [];
+  const selectedDistrict = input.district?.trim();
+  const districtIndex = clampPickerIndex(
+    selectedDistrict
+      ? districtNames.findIndex((district) => district === selectedDistrict)
+      : 0,
+    districtNames.length,
+  );
+
+  return {
+    range: [provinceNames, cityNames, districtNames] as [
+      string[],
+      string[],
+      string[],
+    ],
+    region: {
+      city,
+      district: districtNames[districtIndex] ?? "",
+      province: province.province,
+    },
+    value: [provinceIndex, cityIndex, districtIndex] as AddressRegionPickerValue,
+  };
+}
+
+export function parseAddressRegionMultiPickerValue(
+  value?: number[],
+  deliveryRange?: DeliveryRangeInput | null,
+) {
+  const provinces = getChinaProvinceRegionsForDeliveryRange(deliveryRange);
+  const provinceIndex = clampPickerIndex(value?.[0], provinces.length);
+  const province = provinces[provinceIndex] ?? { cities: [], province: "" };
+  const cityIndex = clampPickerIndex(value?.[1], province.cities.length);
+  const city = province.cities[cityIndex] ?? "";
+  const districtNames =
+    getChinaCityRegion(province.province, city)?.districtNames ?? [];
+  const districtIndex = clampPickerIndex(value?.[2], districtNames.length);
+
+  return {
+    city,
+    district: districtNames[districtIndex] ?? "",
+    province: province.province,
+  };
+}
+
+export function parseAddressRegionMultiPickerColumnChange({
+  column,
+  current,
+  deliveryRange,
+  value,
+}: {
+  column: number;
+  current: AddressRegionInput;
+  deliveryRange?: DeliveryRangeInput | null;
+  value: number;
+}) {
+  const model = buildAddressRegionMultiPickerModel(current, deliveryRange);
+  const nextValue: AddressRegionPickerValue = [...model.value];
+  const columnIndex = clampPickerIndex(column, nextValue.length);
+
+  nextValue[columnIndex] = value;
+
+  if (columnIndex === 0) {
+    nextValue[1] = 0;
+    nextValue[2] = 0;
+  } else if (columnIndex === 1) {
+    nextValue[2] = 0;
+  }
+
+  return parseAddressRegionMultiPickerValue(nextValue, deliveryRange);
 }
 
 export function isValidReceiverPhone(value: string) {
