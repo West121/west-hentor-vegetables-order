@@ -25,6 +25,7 @@ import {
   loadDetailResource,
   replaceItemById,
 } from "./detail-loaders";
+import { AdminAlertDialog } from "./admin-confirm-dialog";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import {
   buildMemberFormState,
@@ -1052,12 +1053,6 @@ export function MemberManagementPanel({
                 </aside>
               </div>
 
-              {importError ? (
-                <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {importError}
-                </div>
-              ) : null}
-
               {importResult ? (
                 <div className="mt-4 rounded-2xl border border-[#dbe6dc] p-4">
                   <div className="flex flex-wrap gap-3 text-sm">
@@ -1448,11 +1443,6 @@ export function MemberManagementPanel({
                   </label>
                 </div>
 
-                {error ? (
-                  <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {error}
-                  </div>
-                ) : null}
               </aside>
             </div>
 
@@ -1478,6 +1468,16 @@ export function MemberManagementPanel({
             </div>
           </div>
         </div>
+      ) : null}
+      {modalMember && error ? (
+        <AdminAlertDialog message={error} onClose={() => setError(null)} />
+      ) : null}
+      {importOpen && importError ? (
+        <AdminAlertDialog
+          message={importError}
+          onClose={() => setImportError(null)}
+          title="导入失败"
+        />
       ) : null}
     </section>
   );

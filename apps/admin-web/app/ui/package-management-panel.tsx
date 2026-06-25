@@ -39,6 +39,7 @@ import {
   loadDetailResource,
   replaceItemById,
 } from "./detail-loaders";
+import { AdminAlertDialog } from "./admin-confirm-dialog";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import { hasAdminFormChanges } from "./admin-form-dirty";
 import {
@@ -994,11 +995,6 @@ export function PackageManagementPanel({
                 />
               </label>
 
-              {error ? (
-                <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              ) : null}
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
@@ -1200,11 +1196,6 @@ export function PackageManagementPanel({
                 </label>
               ) : null}
 
-              {error ? (
-                <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              ) : null}
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
@@ -1232,6 +1223,9 @@ export function PackageManagementPanel({
             </div>
           </div>
         </div>
+      ) : null}
+      {(createOpen || modal) && error ? (
+        <AdminAlertDialog message={error} onClose={() => setError(null)} />
       ) : null}
     </section>
   );

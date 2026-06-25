@@ -22,6 +22,7 @@ import {
   loadDetailResource,
   replaceItemById,
 } from "./detail-loaders";
+import { AdminAlertDialog } from "./admin-confirm-dialog";
 import {
   AdminDatePicker,
   AdminTimePicker,
@@ -1276,11 +1277,6 @@ export function StoreManagementPanel({
                 </>
               )}
 
-              {error ? (
-                <div className="mt-4 rounded-xl border border-[#ffd7bd] bg-[#fff8f2] px-4 py-3 text-sm text-[#b45309]">
-                  {error}
-                </div>
-              ) : null}
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
@@ -1305,6 +1301,9 @@ export function StoreManagementPanel({
             </div>
           </div>
         </div>
+      ) : null}
+      {modal && error ? (
+        <AdminAlertDialog message={error} onClose={() => setError(null)} />
       ) : null}
     </section>
   );

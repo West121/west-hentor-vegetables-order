@@ -8,7 +8,7 @@ import {
   normalizeAdminListPayload,
   type AdminPaginationMeta,
 } from "./admin-pagination";
-import { AdminConfirmDialog } from "./admin-confirm-dialog";
+import { AdminAlertDialog, AdminConfirmDialog } from "./admin-confirm-dialog";
 import { RequiredLabel } from "./required-mark";
 
 export type RolePermissionOption = {
@@ -293,12 +293,6 @@ export function RoleManagementPanel({
           </div>
         </div>
 
-        {error ? (
-          <div className="mt-4 rounded-xl border border-[#ffd8cc] bg-[#fff5f1] px-4 py-3 text-sm font-semibold text-[#d64a3a]">
-            {error}
-          </div>
-        ) : null}
-
         <div className="mt-5 flex flex-wrap items-end gap-3 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-3">
           <label className="flex min-w-[260px] flex-1 flex-col gap-1 text-xs font-semibold text-[#66756d]">
             关键字
@@ -492,11 +486,6 @@ export function RoleManagementPanel({
                 </div>
               </div>
 
-              {error ? (
-                <div className="rounded-xl border border-[#ffd8cc] bg-[#fff5f1] px-4 py-3 text-sm font-semibold text-[#d64a3a]">
-                  {error}
-                </div>
-              ) : null}
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-5 py-4">
@@ -534,6 +523,9 @@ export function RoleManagementPanel({
           title="删除角色"
           variant="danger"
         />
+      ) : null}
+      {error ? (
+        <AdminAlertDialog message={error} onClose={() => setError(null)} />
       ) : null}
     </section>
   );

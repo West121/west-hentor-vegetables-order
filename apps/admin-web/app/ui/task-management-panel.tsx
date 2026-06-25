@@ -28,6 +28,7 @@ import {
   AdminDateTimePicker,
   AdminTimePicker,
 } from "./admin-date-time-picker";
+import { AdminAlertDialog } from "./admin-confirm-dialog";
 import { formatDateTimeMinute } from "./date-format";
 import { RequiredLabel } from "./required-mark";
 
@@ -917,11 +918,6 @@ export function TaskManagementPanel({
                 </div>
               </div>
 
-              {error ? (
-                <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              ) : null}
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
@@ -946,6 +942,9 @@ export function TaskManagementPanel({
             </div>
           </div>
         </div>
+      ) : null}
+      {modal && error ? (
+        <AdminAlertDialog message={error} onClose={() => setError(null)} />
       ) : null}
     </section>
   );

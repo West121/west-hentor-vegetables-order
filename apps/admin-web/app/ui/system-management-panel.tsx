@@ -17,6 +17,7 @@ import {
   normalizeAdminListPayload,
   type AdminPaginationMeta,
 } from "./admin-pagination";
+import { AdminAlertDialog } from "./admin-confirm-dialog";
 import { RequiredLabel } from "./required-mark";
 import {
   buildDetailPath,
@@ -828,11 +829,6 @@ export function SystemManagementPanel({
                 </div>
               )}
 
-              {error ? (
-                <div className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              ) : null}
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
@@ -857,6 +853,9 @@ export function SystemManagementPanel({
             </div>
           </div>
         </div>
+      ) : null}
+      {modal && error ? (
+        <AdminAlertDialog message={error} onClose={() => setError(null)} />
       ) : null}
     </section>
   );

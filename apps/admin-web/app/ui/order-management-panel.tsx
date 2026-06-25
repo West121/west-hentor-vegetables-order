@@ -28,6 +28,7 @@ import {
   type OrderFormState,
   type OrderModalMode,
 } from "./order-modal-state";
+import { AdminAlertDialog } from "./admin-confirm-dialog";
 import { AdminDatePicker } from "./admin-date-time-picker";
 import { formatDateTimeSecond } from "./date-format";
 import {
@@ -1429,11 +1430,6 @@ export function OrderManagementPanel({
         </button>
       </div>
 
-      {error && !modal ? (
-        <div className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      ) : null}
       {successMessage && !modal ? (
         <div className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
           {successMessage}
@@ -2006,11 +2002,6 @@ export function OrderManagementPanel({
                 </>
               )}
 
-              {error ? (
-                <div className="lg:col-span-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              ) : null}
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
@@ -2045,6 +2036,9 @@ export function OrderManagementPanel({
             </div>
           </div>
         </div>
+      ) : null}
+      {error ? (
+        <AdminAlertDialog message={error} onClose={() => setError(null)} />
       ) : null}
     </section>
   );
