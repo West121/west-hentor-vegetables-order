@@ -149,6 +149,7 @@ export type OrderPanelItem = {
 };
 
 type OrderManagementPanelProps = {
+  canWrite?: boolean;
   dishOptions: OrderDishOption[];
   initialItems: OrderPanelItem[];
   initialPagination: AdminPaginationMeta;
@@ -495,6 +496,7 @@ function nextExtraShipmentName(shipments: OrderFormState["shipments"]) {
 }
 
 export function OrderManagementPanel({
+  canWrite = true,
   dishOptions,
   initialItems,
   initialPagination,
@@ -542,6 +544,10 @@ export function OrderManagementPanel({
   } | null>(null);
 
   function openModal(item: OrderPanelItem | null, mode: OrderModalMode) {
+    if ((mode === "create" || mode === "edit") && !canWrite) {
+      return;
+    }
+
     const nextForm = buildOrderFormState(
       item ? { ...item, shipments: defaultShipmentsForOrder(item) } : null,
       memberOptions,
@@ -786,7 +792,7 @@ export function OrderManagementPanel({
   }
 
   async function cloudPrintOrders(orderIds = currentPrintOrderIds()) {
-    if (!store) {
+    if (!canWrite || !store) {
       return;
     }
 
@@ -838,7 +844,7 @@ export function OrderManagementPanel({
   }
 
   async function submitCloudPrintOrders(orderIds: string[], printerId: string | null) {
-    if (!store) {
+    if (!canWrite || !store) {
       return;
     }
 
@@ -1063,7 +1069,7 @@ export function OrderManagementPanel({
   }
 
   async function shipCurrentOrder() {
-    if (!modal?.item || !store) {
+    if (!canWrite || !modal?.item || !store) {
       return;
     }
 
@@ -1112,7 +1118,7 @@ export function OrderManagementPanel({
   }
 
   async function saveOrderModalChanges() {
-    if (!modal?.item || !store) {
+    if (!canWrite || !modal?.item || !store) {
       return;
     }
 
@@ -1209,7 +1215,7 @@ export function OrderManagementPanel({
   }
 
   async function signCurrentOrder() {
-    if (!modal?.item || !store) {
+    if (!canWrite || !modal?.item || !store) {
       return;
     }
 
@@ -1244,7 +1250,7 @@ export function OrderManagementPanel({
   }
 
   async function voidCurrentOrder() {
-    if (!modal?.item || !store) {
+    if (!canWrite || !modal?.item || !store) {
       return;
     }
 
@@ -1287,7 +1293,7 @@ export function OrderManagementPanel({
   }
 
   async function createOrder() {
-    if (!store || !selectedCreateMember || !createPackage || !createAddress) {
+    if (!canWrite || !store || !selectedCreateMember || !createPackage || !createAddress) {
       setError("请选择具备可用套餐和默认地址的会员");
       return;
     }
@@ -1452,8 +1458,8 @@ export function OrderManagementPanel({
           </SelectContent>
         </Select>
         <button
-          className="h-10 shrink-0 rounded-lg bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
-          disabled={loadingList}
+          className="h-10 shrink-0 rounded-lg bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
+          disabled={loadingList || !store}
           onClick={() => void loadOrders(statusFilter, 1)}
           type="button"
         >
@@ -1467,24 +1473,28 @@ export function OrderManagementPanel({
         >
           重置
         </button>
-        <button
-          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-[#cfe3d3] bg-[#eff8f1] px-4 text-sm font-semibold text-[#1f8f4f] disabled:opacity-60"
-          disabled={!store || cloudPrinting || selectedPrintableCount === 0}
-          onClick={() => void cloudPrintOrders()}
-          title={
-            selectedPrintableCount > 0
-              ? `为已勾选的 ${selectedPrintableCount} 个订单生成电子面单`
-              : "请先勾选待配送且未生成运单的订单"
-          }
-          type="button"
-        >
-          <CloudUpload className="h-4 w-4" />
-          {cloudPrinting
-            ? "生成中"
-            : selectedPrintableCount > 0
-              ? `电子面单 ${selectedPrintableCount}`
-              : "电子面单"}
-        </button>
+        {canWrite ? (
+          <button
+            className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-[#cfe3d3] bg-[#eff8f1] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:bg-[#edf0ec] disabled:text-[#91a497]"
+            disabled={!store || cloudPrinting || selectedPrintableCount === 0}
+            onClick={() => void cloudPrintOrders()}
+            title={
+              !store
+                ? "当前账号未分配数据范围"
+                : selectedPrintableCount > 0
+                  ? `为已勾选的 ${selectedPrintableCount} 个订单生成电子面单`
+                  : "请先勾选待配送且未生成运单的订单"
+            }
+            type="button"
+          >
+            <CloudUpload className="h-4 w-4" />
+            {cloudPrinting
+              ? "生成中"
+              : selectedPrintableCount > 0
+                ? `电子面单 ${selectedPrintableCount}`
+                : "电子面单"}
+          </button>
+        ) : null}
         <button
           className="h-10 shrink-0 rounded-lg border border-[#cfe3d3] bg-white px-4 text-sm font-semibold text-[#1f8f4f] disabled:opacity-60"
           disabled={!store}
@@ -1509,13 +1519,17 @@ export function OrderManagementPanel({
               {summary.pendingShipment} 条待处理
             </span>
           </div>
-          <button
-            className="rounded-lg bg-[#1f8f4f] px-5 py-2 text-sm font-semibold text-white"
-            onClick={() => openModal(null, "create")}
-            type="button"
-          >
-            新建订单
-          </button>
+          {canWrite ? (
+            <button
+              className="rounded-lg bg-[#1f8f4f] px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
+              disabled={!store}
+              onClick={() => openModal(null, "create")}
+              title={store ? "新建订单" : "当前账号未分配数据范围"}
+              type="button"
+            >
+              新建订单
+            </button>
+          ) : null}
         </div>
         <div className="overflow-x-auto px-6 pb-5">
           <table className="w-full min-w-[1020px] border-collapse text-left text-sm">
@@ -1526,7 +1540,7 @@ export function OrderManagementPanel({
                     aria-label="选择当前页可生成电子面单的订单"
                     checked={allPrintableSelected}
                     className="h-4 w-4 rounded border-[#cfe3d3] accent-[#1f8f4f]"
-                    disabled={printableOrderIdsInView.length === 0 || cloudPrinting}
+                    disabled={!canWrite || printableOrderIdsInView.length === 0 || cloudPrinting}
                     onChange={(event) => toggleAllPrintableOrders(event.target.checked)}
                     type="checkbox"
                   />
@@ -1554,7 +1568,7 @@ export function OrderManagementPanel({
                         aria-label={`选择订单 ${order.orderNo}`}
                         checked={orderSelected}
                         className="h-4 w-4 rounded border-[#cfe3d3] accent-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-40"
-                        disabled={!orderCanPrint || cloudPrinting}
+                        disabled={!canWrite || !orderCanPrint || cloudPrinting}
                         onChange={(event) =>
                           toggleOrderSelection(order.id, event.target.checked)
                         }
@@ -1619,29 +1633,33 @@ export function OrderManagementPanel({
                         >
                           详情
                         </button>
-                        <button
-                          className="text-sm font-semibold text-[#1f8f4f] hover:underline"
-                          onClick={() => openModal(order, "edit")}
-                          title="编辑备注"
-                          type="button"
-                        >
-                          编辑
-                        </button>
-                        <button
-                          className="text-sm font-semibold text-[#1f8f4f] hover:underline disabled:text-[#9bb6a5] disabled:no-underline"
-                          disabled={cloudPrinting || !orderCanPrint}
-                          onClick={() => void cloudPrintOrders([order.id])}
-                          title={
-                            orderCanPrint
-                              ? "生成电子面单"
-                              : hasGeneratedLogistics(order)
-                                ? "该订单已生成运单"
-                                : "仅待配送订单可生成电子面单"
-                          }
-                          type="button"
-                        >
-                          {hasGeneratedLogistics(order) ? "已生成" : "电子面单"}
-                        </button>
+                        {canWrite ? (
+                          <>
+                            <button
+                              className="text-sm font-semibold text-[#1f8f4f] hover:underline"
+                              onClick={() => openModal(order, "edit")}
+                              title="编辑备注"
+                              type="button"
+                            >
+                              编辑
+                            </button>
+                            <button
+                              className="text-sm font-semibold text-[#1f8f4f] hover:underline disabled:text-[#9bb6a5] disabled:no-underline"
+                              disabled={cloudPrinting || !orderCanPrint}
+                              onClick={() => void cloudPrintOrders([order.id])}
+                              title={
+                                orderCanPrint
+                                  ? "生成电子面单"
+                                  : hasGeneratedLogistics(order)
+                                    ? "该订单已生成运单"
+                                    : "仅待配送订单可生成电子面单"
+                              }
+                              type="button"
+                            >
+                              {hasGeneratedLogistics(order) ? "已生成" : "电子面单"}
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -2070,7 +2088,7 @@ export function OrderManagementPanel({
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
-              {modal.mode === "edit" ? (
+              {canWrite && modal.mode === "edit" ? (
                 <button
                   className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
                   disabled={saving || loadingDetail || !store}
@@ -2088,7 +2106,7 @@ export function OrderManagementPanel({
               >
                 {modalIsReadOnly ? "关闭" : "取消"}
               </button>
-              {modal.mode === "create" ? (
+              {canWrite && modal.mode === "create" ? (
                 <button
                   className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
                   disabled={createDisabled}

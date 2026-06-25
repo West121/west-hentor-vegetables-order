@@ -59,6 +59,7 @@ type StoreOption = {
 };
 
 type PackageManagementPanelProps = {
+  canWrite?: boolean;
   initialItems: PackagePanelItem[];
   initialPagination: AdminPaginationMeta;
   initialSummary: {
@@ -145,6 +146,7 @@ function formatMemberOption(member: {
 }
 
 export function PackageManagementPanel({
+  canWrite = true,
   initialItems,
   initialPagination,
   initialSummary,
@@ -246,6 +248,10 @@ export function PackageManagementPanel({
   }
 
   function openCreateModal() {
+    if (!canWrite || !store) {
+      return;
+    }
+
     setCreateForm(buildCreateFormState(memberOptions, packageTemplateOptions));
     setMemberSearch("");
     setMemberPickerOpen(false);
@@ -291,6 +297,10 @@ export function PackageManagementPanel({
   }
 
   function openModal(item: PackagePanelItem, mode: ModalMode) {
+    if (mode !== "detail" && !canWrite) {
+      return;
+    }
+
     const nextForm = buildFormState(item);
     setModal({ item, mode });
     setForm(nextForm);
@@ -393,7 +403,7 @@ export function PackageManagementPanel({
   }
 
   async function submitCreateModal() {
-    if (!store) {
+    if (!canWrite || !store) {
       return;
     }
 
@@ -433,7 +443,7 @@ export function PackageManagementPanel({
   }
 
   async function submitModal() {
-    if (!modal || modal.mode === "detail" || !form || !store) {
+    if (!canWrite || !modal || modal.mode === "detail" || !form || !store) {
       return;
     }
 
@@ -565,26 +575,30 @@ export function PackageManagementPanel({
               <div className="mt-1 text-lg font-semibold">{value}</div>
             </div>
           ))}
-          <button
-            className="inline-flex h-[58px] items-center gap-2 rounded-xl bg-[#1f8f4f] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={
-              !store ||
-              memberOptions.length === 0 ||
-              packageTemplateOptions.length === 0
-            }
-            onClick={openCreateModal}
-            title={
-              memberOptions.length === 0
-                ? "暂无可选择会员"
-                : packageTemplateOptions.length === 0
-                  ? "暂无可用套餐模板"
-                  : "新增用户套餐"
-            }
-            type="button"
-          >
-            <Plus size={16} />
-            新增用户套餐
-          </button>
+          {canWrite ? (
+            <button
+              className="inline-flex h-[58px] items-center gap-2 rounded-xl bg-[#1f8f4f] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
+              disabled={
+                !store ||
+                memberOptions.length === 0 ||
+                packageTemplateOptions.length === 0
+              }
+              onClick={openCreateModal}
+              title={
+                !store
+                  ? "当前账号未分配数据范围"
+                  : memberOptions.length === 0
+                    ? "暂无可选择会员"
+                    : packageTemplateOptions.length === 0
+                      ? "暂无可用套餐模板"
+                      : "新增用户套餐"
+              }
+              type="button"
+            >
+              <Plus size={16} />
+              新增用户套餐
+            </button>
+          ) : null}
           <button
             className="h-[58px] rounded-xl border border-dashed border-[#b8d8bf] bg-[#f8fff8] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-60"
             disabled
@@ -633,7 +647,7 @@ export function PackageManagementPanel({
           </Select>
         </label>
         <button
-          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
+          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
           disabled={loadingList || !store}
           onClick={() => void reloadPackages(1)}
           type="button"
@@ -726,41 +740,45 @@ export function PackageManagementPanel({
                     >
                       <Eye size={16} />
                     </button>
-                    <button
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                      onClick={() => openModal(item, "adjust")}
-                      title="调整套餐"
-                      type="button"
-                    >
-                      <Pencil size={16} />
-                    </button>
-                    {item.status === "FROZEN" ? (
-                      <button
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                        onClick={() => openModal(item, "unfreeze")}
-                        title="解冻套餐"
-                        type="button"
-                      >
-                        <RotateCcw size={16} />
-                      </button>
-                    ) : (
-                      <button
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#f2d5c8] text-[#b85a2b] hover:bg-[#fff7f2]"
-                        onClick={() => openModal(item, "freeze")}
-                        title="冻结套餐"
-                        type="button"
-                      >
-                        <LockKeyhole size={16} />
-                      </button>
-                    )}
-                    <button
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 text-red-600 hover:bg-red-50"
-                      onClick={() => openModal(item, "delete")}
-                      title="删除套餐"
-                      type="button"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    {canWrite ? (
+                      <>
+                        <button
+                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                          onClick={() => openModal(item, "adjust")}
+                          title="调整套餐"
+                          type="button"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        {item.status === "FROZEN" ? (
+                          <button
+                            className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                            onClick={() => openModal(item, "unfreeze")}
+                            title="解冻套餐"
+                            type="button"
+                          >
+                            <RotateCcw size={16} />
+                          </button>
+                        ) : (
+                          <button
+                            className="grid h-9 w-9 place-items-center rounded-xl border border-[#f2d5c8] text-[#b85a2b] hover:bg-[#fff7f2]"
+                            onClick={() => openModal(item, "freeze")}
+                            title="冻结套餐"
+                            type="button"
+                          >
+                            <LockKeyhole size={16} />
+                          </button>
+                        )}
+                        <button
+                          className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 text-red-600 hover:bg-red-50"
+                          onClick={() => openModal(item, "delete")}
+                          title="删除套餐"
+                          type="button"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </td>
               </tr>
@@ -1159,7 +1177,7 @@ export function PackageManagementPanel({
                 </div>
               ) : null}
 
-              {modal.mode !== "detail" ? (
+              {canWrite && modal.mode !== "detail" ? (
                 <label className="mt-5 flex flex-col gap-2 text-sm font-medium">
                   <RequiredLabel>操作原因</RequiredLabel>
                   <textarea

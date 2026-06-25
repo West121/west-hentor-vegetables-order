@@ -60,6 +60,7 @@ export type PackageTemplatePanelItem = {
 };
 
 type PackageTemplateManagementPanelProps = {
+  canWrite?: boolean;
   initialItems: PackageTemplatePanelItem[];
   initialPagination: AdminPaginationMeta;
   initialSummary: {
@@ -195,6 +196,7 @@ function nowIso() {
 }
 
 export function PackageTemplateManagementPanel({
+  canWrite = true,
   initialItems,
   initialPagination,
   initialSummary,
@@ -294,6 +296,10 @@ export function PackageTemplateManagementPanel({
   }
 
   function openCreateModal() {
+    if (!canWrite || !store) {
+      return;
+    }
+
     const nextForm = buildFormState();
     setModal({ item: null, mode: "create" });
     setForm(nextForm);
@@ -302,6 +308,10 @@ export function PackageTemplateManagementPanel({
   }
 
   function openEditModal(item: PackageTemplatePanelItem) {
+    if (!canWrite) {
+      return;
+    }
+
     const nextForm = buildFormState(item);
     setModal({ item, mode: "edit" });
     setForm(nextForm);
@@ -452,7 +462,7 @@ export function PackageTemplateManagementPanel({
   }
 
   async function submitModal() {
-    if (!modal || modal.mode === "detail" || !store) {
+    if (!canWrite || !modal || modal.mode === "detail" || !store) {
       return;
     }
 
@@ -595,14 +605,17 @@ export function PackageTemplateManagementPanel({
           >
             <CreditCard size={20} />
           </button>
-          <button
-            className="h-[58px] rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={!store}
-            onClick={openCreateModal}
-            type="button"
-          >
-            新建套餐
-          </button>
+          {canWrite ? (
+            <button
+              className="h-[58px] rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
+              disabled={!store}
+              onClick={openCreateModal}
+              title={store ? "新建套餐" : "当前账号未分配数据范围"}
+              type="button"
+            >
+              新建套餐
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -639,7 +652,7 @@ export function PackageTemplateManagementPanel({
           </select>
         </label>
         <button
-          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
+          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
           disabled={loadingList || !store}
           onClick={() => void reloadTemplates(1)}
           type="button"
@@ -709,15 +722,17 @@ export function PackageTemplateManagementPanel({
                     >
                       <Eye size={16} />
                     </button>
-                    <button
-                      aria-label="编辑套餐"
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                      onClick={() => openEditModal(item)}
-                      title="编辑套餐"
-                      type="button"
-                    >
-                      <Pencil size={16} />
-                    </button>
+                    {canWrite ? (
+                      <button
+                        aria-label="编辑套餐"
+                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                        onClick={() => openEditModal(item)}
+                        title="编辑套餐"
+                        type="button"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    ) : null}
                   </div>
                 </td>
               </tr>
@@ -1018,7 +1033,7 @@ export function PackageTemplateManagementPanel({
               >
                 {modal.mode === "detail" ? "关闭" : "取消"}
               </button>
-              {modal.mode !== "detail" ? (
+              {canWrite && modal.mode !== "detail" ? (
                 <button
                   className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
                   disabled={saving || loadingDetail || !store}

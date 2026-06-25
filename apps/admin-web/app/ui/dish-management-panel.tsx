@@ -82,6 +82,7 @@ export type DishPanelItem = {
 };
 
 type DishManagementPanelProps = {
+  canWrite?: boolean;
   categoryOptions?: DishCategoryOption[];
   initialItems: DishPanelItem[];
   initialPagination: AdminPaginationMeta;
@@ -139,6 +140,7 @@ function nowIso() {
 }
 
 export function DishManagementPanel({
+  canWrite = true,
   categoryOptions,
   initialItems,
   initialPagination,
@@ -268,6 +270,10 @@ export function DishManagementPanel({
   }
 
   function openCreateModal() {
+    if (!canWrite || !store) {
+      return;
+    }
+
     const nextForm = {
       ...buildDishFormState(),
       category: resolvedCategoryOptions[0]?.code ?? "LEAFY",
@@ -279,6 +285,10 @@ export function DishManagementPanel({
   }
 
   function openEditModal(item: DishPanelItem) {
+    if (!canWrite) {
+      return;
+    }
+
     const nextForm = buildDishFormState(item);
     setModal({ item, mode: "edit" });
     setDishForm(nextForm);
@@ -297,6 +307,10 @@ export function DishManagementPanel({
   }
 
   function openInventoryModal(item: DishPanelItem) {
+    if (!canWrite) {
+      return;
+    }
+
     const nextForm = buildInventoryFormState();
     setModal({ item, mode: "inventory" });
     setInventoryForm(nextForm);
@@ -464,7 +478,7 @@ export function DishManagementPanel({
   }
 
   async function submitDishModal() {
-    if (!modal || modal.mode === "detail" || modal.mode === "inventory" || !store) {
+    if (!canWrite || !modal || modal.mode === "detail" || modal.mode === "inventory" || !store) {
       return;
     }
 
@@ -555,7 +569,7 @@ export function DishManagementPanel({
   }
 
   async function submitInventoryModal() {
-    if (!modal || modal.mode !== "inventory" || !store) {
+    if (!canWrite || !modal || modal.mode !== "inventory" || !store) {
       return;
     }
 
@@ -620,7 +634,7 @@ export function DishManagementPanel({
   }
 
   async function toggleDishStatus(item: DishPanelItem) {
-    if (!store || statusChangingId) {
+    if (!canWrite || !store || statusChangingId) {
       return;
     }
 
@@ -717,14 +731,17 @@ export function DishManagementPanel({
               <div className="mt-1 text-lg font-semibold">{value}</div>
             </div>
           ))}
-          <button
-            className="h-[58px] rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={!store}
-            onClick={openCreateModal}
-            type="button"
-          >
-            新建菜品
-          </button>
+          {canWrite ? (
+            <button
+              className="h-[58px] rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
+              disabled={!store}
+              onClick={openCreateModal}
+              title={store ? "新建菜品" : "当前账号未分配数据范围"}
+              type="button"
+            >
+              新建菜品
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -778,7 +795,7 @@ export function DishManagementPanel({
           </select>
         </label>
         <button
-          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
+          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
           disabled={loadingList || !store}
           onClick={() => void reloadDishes(1)}
           type="button"
@@ -855,24 +872,26 @@ export function DishManagementPanel({
                 </td>
                 <td className="px-4 py-4">
                   <div className="flex justify-end gap-2">
-                    <button
-                      aria-label={
-                        item.status === "ON_SALE" ? "快捷下架" : "快捷上架"
-                      }
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1] disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={statusChangingId === item.id || !store}
-                      onClick={() => void toggleDishStatus(item)}
-                      title={
-                        item.status === "ON_SALE" ? "快捷下架" : "快捷上架"
-                      }
-                      type="button"
-                    >
-                      {statusChangingId === item.id
-                        ? "..."
-                        : item.status === "ON_SALE"
-                          ? <PowerOff size={16} />
-                          : <Power size={16} />}
-                    </button>
+                    {canWrite ? (
+                      <button
+                        aria-label={
+                          item.status === "ON_SALE" ? "快捷下架" : "快捷上架"
+                        }
+                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1] disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={statusChangingId === item.id || !store}
+                        onClick={() => void toggleDishStatus(item)}
+                        title={
+                          item.status === "ON_SALE" ? "快捷下架" : "快捷上架"
+                        }
+                        type="button"
+                      >
+                        {statusChangingId === item.id
+                          ? "..."
+                          : item.status === "ON_SALE"
+                            ? <PowerOff size={16} />
+                            : <Power size={16} />}
+                      </button>
+                    ) : null}
                     <button
                       aria-label="查看菜品详情"
                       className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
@@ -882,24 +901,28 @@ export function DishManagementPanel({
                     >
                       <Eye size={16} />
                     </button>
-                    <button
-                      aria-label="库存调整"
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                      onClick={() => openInventoryModal(item)}
-                      title="库存调整"
-                      type="button"
-                    >
-                      <SlidersHorizontal size={16} />
-                    </button>
-                    <button
-                      aria-label="编辑菜品"
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                      onClick={() => openEditModal(item)}
-                      title="编辑菜品"
-                      type="button"
-                    >
-                      <Pencil size={16} />
-                    </button>
+                    {canWrite ? (
+                      <>
+                        <button
+                          aria-label="库存调整"
+                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                          onClick={() => openInventoryModal(item)}
+                          title="库存调整"
+                          type="button"
+                        >
+                          <SlidersHorizontal size={16} />
+                        </button>
+                        <button
+                          aria-label="编辑菜品"
+                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                          onClick={() => openEditModal(item)}
+                          title="编辑菜品"
+                          type="button"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </td>
               </tr>
@@ -1198,7 +1221,7 @@ export function DishManagementPanel({
               >
                 {modal.mode === "detail" ? "关闭" : "取消"}
               </button>
-              {modal.mode !== "detail" ? (
+              {canWrite && modal.mode !== "detail" ? (
                 <button
                   className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
                   disabled={saving || uploading || loadingDetail || !store}

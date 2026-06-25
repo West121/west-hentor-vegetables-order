@@ -83,6 +83,7 @@ export type TaskDishOption = {
 };
 
 type TaskManagementPanelProps = {
+  canWrite?: boolean;
   categoryOptions?: DishCategoryOption[];
   dishOptions: TaskDishOption[];
   initialItems: TaskPanelItem[];
@@ -185,6 +186,7 @@ function buildCopyForm(item: TaskPanelItem): FormState {
 }
 
 export function TaskManagementPanel({
+  canWrite = true,
   categoryOptions,
   dishOptions,
   initialItems,
@@ -231,6 +233,10 @@ export function TaskManagementPanel({
   }
 
   function openCreateModal() {
+    if (!canWrite || !store) {
+      return;
+    }
+
     const nextForm = buildForm();
     setModal({ item: null, mode: "create" });
     setForm(nextForm);
@@ -239,6 +245,10 @@ export function TaskManagementPanel({
   }
 
   function openEditModal(item: TaskPanelItem) {
+    if (!canWrite) {
+      return;
+    }
+
     const nextForm = buildForm(item);
     setModal({ item, mode: "edit" });
     setForm(nextForm);
@@ -257,6 +267,10 @@ export function TaskManagementPanel({
   }
 
   function openCopyModal(item: TaskPanelItem) {
+    if (!canWrite) {
+      return;
+    }
+
     const nextForm = buildCopyForm(item);
     setModal({ item, mode: "copy" });
     setForm(nextForm);
@@ -432,7 +446,7 @@ export function TaskManagementPanel({
   }
 
   async function submitModal() {
-    if (!modal || !store) {
+    if (!canWrite || !modal || !store) {
       return;
     }
     if (modal.mode === "detail") {
@@ -511,7 +525,7 @@ export function TaskManagementPanel({
   }
 
   async function cancelTask(item: TaskPanelItem) {
-    if (!store || !canCancelTask(item)) {
+    if (!canWrite || !store || !canCancelTask(item)) {
       return;
     }
 
@@ -579,14 +593,23 @@ export function TaskManagementPanel({
               <div className="mt-1 text-lg font-semibold">{value}</div>
             </div>
           ))}
-          <button
-            className="h-[58px] rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={!store || dishOptions.length === 0}
-            onClick={openCreateModal}
-            type="button"
-          >
-            新建任务
-          </button>
+          {canWrite ? (
+            <button
+              className="h-[58px] rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
+              disabled={!store || dishOptions.length === 0}
+              onClick={openCreateModal}
+              title={
+                !store
+                  ? "当前账号未分配数据范围"
+                  : dishOptions.length === 0
+                    ? "暂无可选菜品"
+                    : "新建任务"
+              }
+              type="button"
+            >
+              新建任务
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -623,7 +646,7 @@ export function TaskManagementPanel({
           </select>
         </label>
         <button
-          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
+          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
           disabled={loadingList || !store}
           onClick={() => void refreshTasks(1)}
           type="button"
@@ -690,53 +713,57 @@ export function TaskManagementPanel({
                     >
                       <Eye size={16} />
                     </button>
-                    <button
-                      aria-label="复制任务"
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                      onClick={() => openCopyModal(item)}
-                      title="复制任务"
-                      type="button"
-                    >
-                      <Copy size={16} />
-                    </button>
-                    <button
-                      aria-label="取消任务"
-                      className={[
-                        "grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#b85a2b] hover:bg-[#fff7ed]",
-                        !canCancelTask(item)
-                          ? "cursor-not-allowed opacity-45 hover:bg-white"
-                          : "",
-                      ].join(" ")}
-                      disabled={!canCancelTask(item) || cancelingId === item.id}
-                      onClick={() => void cancelTask(item)}
-                      title={
-                        canCancelTask(item)
-                          ? "取消任务"
-                          : "已结束或已停用任务不可取消"
-                      }
-                      type="button"
-                    >
-                      {cancelingId === item.id ? "..." : <Ban size={16} />}
-                    </button>
-                    <button
-                      aria-label="编辑任务"
-                      className={[
-                        "grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]",
-                        item.status === "ACTIVE"
-                          ? "cursor-not-allowed opacity-45 hover:bg-white"
-                          : "",
-                      ].join(" ")}
-                      disabled={item.status === "ACTIVE"}
-                      onClick={() => openEditModal(item)}
-                      title={
-                        item.status === "ACTIVE"
-                          ? "已生效任务不可编辑"
-                          : "编辑任务"
-                      }
-                      type="button"
-                    >
-                      <Pencil size={16} />
-                    </button>
+                    {canWrite ? (
+                      <>
+                        <button
+                          aria-label="复制任务"
+                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                          onClick={() => openCopyModal(item)}
+                          title="复制任务"
+                          type="button"
+                        >
+                          <Copy size={16} />
+                        </button>
+                        <button
+                          aria-label="取消任务"
+                          className={[
+                            "grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#b85a2b] hover:bg-[#fff7ed]",
+                            !canCancelTask(item)
+                              ? "cursor-not-allowed opacity-45 hover:bg-white"
+                              : "",
+                          ].join(" ")}
+                          disabled={!canCancelTask(item) || cancelingId === item.id}
+                          onClick={() => void cancelTask(item)}
+                          title={
+                            canCancelTask(item)
+                              ? "取消任务"
+                              : "已结束或已停用任务不可取消"
+                          }
+                          type="button"
+                        >
+                          {cancelingId === item.id ? "..." : <Ban size={16} />}
+                        </button>
+                        <button
+                          aria-label="编辑任务"
+                          className={[
+                            "grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]",
+                            item.status === "ACTIVE"
+                              ? "cursor-not-allowed opacity-45 hover:bg-white"
+                              : "",
+                          ].join(" ")}
+                          disabled={item.status === "ACTIVE"}
+                          onClick={() => openEditModal(item)}
+                          title={
+                            item.status === "ACTIVE"
+                              ? "已生效任务不可编辑"
+                              : "编辑任务"
+                          }
+                          type="button"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </td>
               </tr>
@@ -929,7 +956,7 @@ export function TaskManagementPanel({
               >
                 {modal.mode === "detail" ? "关闭" : "取消"}
               </button>
-              {modal.mode !== "detail" ? (
+              {canWrite && modal.mode !== "detail" ? (
                 <button
                   className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
                   disabled={saving || loadingDetail || !store}

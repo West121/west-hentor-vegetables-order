@@ -47,6 +47,18 @@ import { TaskManagementPanel, type TaskDishOption, type TaskPanelItem } from "./
 const ADMIN_LIST_PAGE_SIZE = 10;
 const ADMIN_LOG_PAGE_SIZE = 20;
 const ADMIN_OPTION_LIMIT = 200;
+const STORE_SCOPED_SECTIONS = new Set<AdminSectionId>([
+  "orders",
+  "shipment-stats",
+  "members",
+  "user-packages",
+  "package-templates",
+  "dishes",
+  "tasks",
+  "dictionaries",
+  "kuaidi-printers",
+  "system-settings",
+]);
 
 type StoreOption = {
   id: string;
@@ -494,6 +506,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   const permissionCodes = session?.permissionCodes ?? [];
+  const hasPermission = (code: string) => permissionCodes.includes(code);
   const activeSection = resolveAdminSection(
     searchParams.get("section"),
     permissionCodes,
@@ -572,6 +585,8 @@ export default function DashboardPage() {
   const activeStore = data.activeStore;
   const activeSectionLabel = getAdminSectionLabel(activeSection);
   const isOrderSection = activeSection === "orders";
+  const showStoreScopeNotice =
+    STORE_SCOPED_SECTIONS.has(activeSection) && !activeStore;
   const userDisplay = data.userDisplay;
   const scopeLabel = data.storeAccessScope === "ALL" ? "全部数据" : "授权数据";
 
@@ -622,6 +637,12 @@ export default function DashboardPage() {
       </header>
 
       <main className="admin-shell-main space-y-6 p-7">
+        {showStoreScopeNotice ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900 shadow-sm">
+            当前账号未分配数据范围，业务列表会显示为空，新增、编辑、电子面单等操作已禁用。请使用超级管理员在后台用户中分配数据范围后再操作。
+          </div>
+        ) : null}
+
         {activeSection === "overview" ? (
           <>
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -678,6 +699,7 @@ export default function DashboardPage() {
               phone: member.phone,
             }))}
             orderTasks={data.activeOrderTasks}
+            canWrite={hasPermission("orders.write")}
             store={activeStore}
           />
         ) : null}
@@ -694,6 +716,7 @@ export default function DashboardPage() {
             initialItems={data.storeMembers}
             initialPagination={data.storeMemberPagination}
             initialSummary={data.storeMemberSummary}
+            canWrite={hasPermission("members.write")}
             store={activeStore}
           />
         ) : null}
@@ -715,6 +738,7 @@ export default function DashboardPage() {
               totalTimes: template.totalTimes,
               weightLimitJin: template.weightLimitJin,
             }))}
+            canWrite={hasPermission("members.write")}
             store={activeStore}
           />
         ) : null}
@@ -724,6 +748,7 @@ export default function DashboardPage() {
             initialItems={data.packageTemplates}
             initialPagination={data.packageTemplatePagination}
             initialSummary={data.packageTemplateSummary}
+            canWrite={hasPermission("packages.write")}
             store={activeStore}
           />
         ) : null}
@@ -734,6 +759,7 @@ export default function DashboardPage() {
             initialItems={data.dishes}
             initialPagination={data.dishPagination}
             initialSummary={data.dishSummary}
+            canWrite={hasPermission("dishes.write")}
             store={activeStore}
           />
         ) : null}
@@ -745,6 +771,7 @@ export default function DashboardPage() {
             initialItems={data.tasks}
             initialPagination={data.taskPagination}
             initialSummary={data.taskSummary}
+            canWrite={hasPermission("tasks.write")}
             store={activeStore}
           />
         ) : null}

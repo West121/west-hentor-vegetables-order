@@ -121,6 +121,7 @@ type SpringMemberPanelItem = Partial<MemberPanelItem> & {
 };
 
 type MemberManagementPanelProps = {
+  canWrite?: boolean;
   initialItems: MemberPanelItem[];
   initialPagination: AdminPaginationMeta;
   initialSummary: {
@@ -331,6 +332,7 @@ export function normalizeMemberPanelItems(items: SpringMemberPanelItem[]) {
 }
 
 export function MemberManagementPanel({
+  canWrite = true,
   initialItems,
   initialPagination,
   initialSummary,
@@ -432,6 +434,10 @@ export function MemberManagementPanel({
   }
 
   function openCreateModal() {
+    if (!canWrite || !store) {
+      return;
+    }
+
     setCreateForm(buildCreateMemberFormState());
     setCreateError(null);
     setCreateOpen(true);
@@ -447,7 +453,7 @@ export function MemberManagementPanel({
   }
 
   async function submitCreateModal() {
-    if (!store) {
+    if (!canWrite || !store) {
       return;
     }
 
@@ -510,6 +516,10 @@ export function MemberManagementPanel({
   }
 
   function openModal(member: MemberPanelItem) {
+    if (!canWrite) {
+      return;
+    }
+
     const normalizedMember = normalizeMemberPanelItem(member);
     const nextForm = buildMemberFormState(normalizedMember);
 
@@ -538,6 +548,10 @@ export function MemberManagementPanel({
   }
 
   function openModalWithStatus(member: MemberPanelItem, status: BindingStatus) {
+    if (!canWrite) {
+      return;
+    }
+
     const normalizedMember = normalizeMemberPanelItem(member);
     const nextInitialForm = buildMemberFormState(normalizedMember);
 
@@ -655,7 +669,7 @@ export function MemberManagementPanel({
   }
 
   async function submitModal() {
-    if (modalMode === "detail" || !modalMember || !form || !store) {
+    if (!canWrite || modalMode === "detail" || !modalMember || !form || !store) {
       return;
     }
 
@@ -732,6 +746,10 @@ export function MemberManagementPanel({
   }
 
   function openImportModal(mode: ImportMode) {
+    if (!canWrite || !store) {
+      return;
+    }
+
     setImportMode(mode);
     setImportOpen(true);
     setImportFile(null);
@@ -763,7 +781,7 @@ export function MemberManagementPanel({
   }
 
   async function submitImport() {
-    if (!store) {
+    if (!canWrite || !store) {
       return;
     }
 
@@ -871,33 +889,40 @@ export function MemberManagementPanel({
           </p>
         </div>
         <div className="flex flex-wrap items-start justify-end gap-3">
-          <button
-            className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#1f8f4f] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!store}
-            onClick={openCreateModal}
-            type="button"
-          >
-            <Plus size={16} />
-            新增会员
-          </button>
-          <button
-            className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#cfe3d3] bg-[#edf7ef] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!store}
-            onClick={() => openImportModal("members")}
-            type="button"
-          >
-            <Upload size={16} />
-            导入会员
-          </button>
-          <button
-            className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#cfe3d3] bg-[#edf7ef] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!store}
-            onClick={() => openImportModal("packages")}
-            type="button"
-          >
-            <Upload size={16} />
-            导入会员套餐
-          </button>
+          {canWrite ? (
+            <>
+              <button
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#1f8f4f] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
+                disabled={!store}
+                onClick={openCreateModal}
+                title={store ? "新增会员" : "当前账号未分配数据范围"}
+                type="button"
+              >
+                <Plus size={16} />
+                新增会员
+              </button>
+              <button
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#cfe3d3] bg-[#edf7ef] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:bg-[#edf0ec] disabled:text-[#91a497]"
+                disabled={!store}
+                onClick={() => openImportModal("members")}
+                title={store ? "导入会员" : "当前账号未分配数据范围"}
+                type="button"
+              >
+                <Upload size={16} />
+                导入会员
+              </button>
+              <button
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#cfe3d3] bg-[#edf7ef] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:bg-[#edf0ec] disabled:text-[#91a497]"
+                disabled={!store}
+                onClick={() => openImportModal("packages")}
+                title={store ? "导入会员套餐" : "当前账号未分配数据范围"}
+                type="button"
+              >
+                <Upload size={16} />
+                导入会员套餐
+              </button>
+            </>
+          ) : null}
           <div className="flex flex-wrap gap-2">
             {[
               ["全部", summary.total],
@@ -949,7 +974,7 @@ export function MemberManagementPanel({
           </select>
         </label>
         <button
-          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
+          className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
           disabled={loadingList || !store}
           onClick={() => void reloadMembers(1)}
           type="button"
@@ -1044,33 +1069,37 @@ export function MemberManagementPanel({
                     >
                       <Eye size={16} />
                     </button>
-                    <button
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                      onClick={() => openModal(member)}
-                      title="编辑会员"
-                      type="button"
-                    >
-                      <Pencil size={16} />
-                    </button>
-                    <button
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                      onClick={() =>
-                        openModalWithStatus(
-                          member,
-                          member.bindingStatus === "ACTIVE"
-                            ? "DISABLED"
-                            : "ACTIVE",
-                        )
-                      }
-                      title={member.bindingStatus === "ACTIVE" ? "停用" : "启用"}
-                      type="button"
-                    >
-                      {member.bindingStatus === "ACTIVE" ? (
-                        <Ban size={16} />
-                      ) : (
-                        <RotateCcw size={16} />
-                      )}
-                    </button>
+                    {canWrite ? (
+                      <>
+                        <button
+                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                          onClick={() => openModal(member)}
+                          title="编辑会员"
+                          type="button"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                          onClick={() =>
+                            openModalWithStatus(
+                              member,
+                              member.bindingStatus === "ACTIVE"
+                                ? "DISABLED"
+                                : "ACTIVE",
+                            )
+                          }
+                          title={member.bindingStatus === "ACTIVE" ? "停用" : "启用"}
+                          type="button"
+                        >
+                          {member.bindingStatus === "ACTIVE" ? (
+                            <Ban size={16} />
+                          ) : (
+                            <RotateCcw size={16} />
+                          )}
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </td>
               </tr>
@@ -1830,7 +1859,7 @@ export function MemberManagementPanel({
               >
                 {modalMode === "detail" ? "关闭" : "取消"}
               </button>
-              {modalMode !== "detail" ? (
+              {canWrite && modalMode !== "detail" ? (
                 <button
                   className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
                   disabled={saving || loadingDetail}
