@@ -40,6 +40,47 @@ describe("member management modal usage", () => {
     expect(source).not.toContain("标题栏可拖拽");
   });
 
+  it("uses the shared China region data and shadcn selects for member address cascading", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/member-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("AddressRegionCascader");
+    expect(source).toContain("CHINA_PROVINCE_REGIONS");
+    expect(source).toContain("getChinaCityRegion");
+    expect(source).toContain('from "@/components/ui/select"');
+    expect(source).toContain("<SelectTrigger");
+    expect(source).toContain("<SelectContent");
+    expect(source).toContain("请选择省");
+    expect(source).toContain("请选择市");
+    expect(source).toContain("请选择区");
+    expect(source).not.toContain("例如 江苏省");
+    expect(source).not.toContain("例如 南京市");
+    expect(source).not.toContain("例如 六合区");
+  });
+
+  it("opens manual member creation in the draggable admin modal shell", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/member-management-panel.tsx"),
+      "utf8",
+    );
+    const createBlock = source.slice(
+      source.indexOf("{createOpen ? ("),
+      source.indexOf("{importOpen ? ("),
+    );
+
+    expect(createBlock).toContain('aria-modal="true"');
+    expect(createBlock).toContain('role="dialog"');
+    expect(createBlock).toContain("resize");
+    expect(createBlock).toContain("translate(");
+    expect(createBlock).toContain("onPointerDown={handleHeaderPointerDown}");
+    expect(createBlock).toContain("onPointerCancel={handleHeaderPointerUp}");
+    expect(createBlock).toContain('title={fullscreen ? "退出全屏" : "全屏"}');
+    expect(createBlock).toContain("Maximize2");
+    expect(createBlock).toContain("Minimize2");
+  });
+
   it("exposes member import through the member list panel", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/member-management-panel.tsx"),

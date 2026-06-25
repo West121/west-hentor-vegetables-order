@@ -14,7 +14,18 @@ import {
   X,
 } from "lucide-react";
 import { useRef, useState, type ChangeEvent, type PointerEvent } from "react";
+import { CHINA_PROVINCE_REGIONS, getChinaCityRegion } from "@hentor/shared";
 import { utils, write } from "xlsx";
+
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 import {
   AdminPagination,
@@ -255,6 +266,146 @@ function formatAddress(
   );
 }
 
+type AddressRegionValue = Pick<
+  MemberFormState["defaultAddress"],
+  "city" | "district" | "province"
+>;
+
+type AddressRegionCascaderProps = {
+  onChange: (nextValue: AddressRegionValue) => void;
+  readOnly?: boolean;
+  required?: boolean;
+  value: AddressRegionValue;
+};
+
+function fieldLabel(label: string, required?: boolean) {
+  return required ? <RequiredLabel>{label}</RequiredLabel> : label;
+}
+
+function appendCurrentOption(options: string[], currentValue: string) {
+  const trimmed = currentValue.trim();
+  if (!trimmed || options.includes(trimmed)) {
+    return options;
+  }
+
+  return [trimmed, ...options];
+}
+
+function AddressRegionCascader({
+  onChange,
+  readOnly = false,
+  required = false,
+  value,
+}: AddressRegionCascaderProps) {
+  const selectedProvince = value.province.trim();
+  const selectedCity = value.city.trim();
+  const selectedDistrict = value.district.trim();
+  const provinceRegion = CHINA_PROVINCE_REGIONS.find(
+    (region) => region.province === selectedProvince,
+  );
+  const provinceOptions = appendCurrentOption(
+    CHINA_PROVINCE_REGIONS.map((region) => region.province),
+    selectedProvince,
+  );
+  const cityOptions = appendCurrentOption(
+    provinceRegion?.cities ?? [],
+    selectedCity,
+  );
+  const districtOptions = appendCurrentOption(
+    getChinaCityRegion(selectedProvince, selectedCity)?.districtNames ?? [],
+    selectedDistrict,
+  );
+
+  return (
+    <>
+      <label className="flex flex-col gap-2 font-medium">
+        {fieldLabel("省", required)}
+        <Select
+          disabled={readOnly}
+          onValueChange={(province) =>
+            onChange({
+              city: "",
+              district: "",
+              province,
+            })
+          }
+          value={selectedProvince || undefined}
+        >
+          <SelectTrigger className="h-10 w-full rounded-xl border-[#dbe6dc] bg-white text-sm font-normal text-[#15261d]">
+            <SelectValue placeholder="请选择省" />
+          </SelectTrigger>
+          <SelectContent align="start" position="popper">
+            <SelectGroup>
+              <SelectLabel>省</SelectLabel>
+              {provinceOptions.map((province) => (
+                <SelectItem key={province} value={province}>
+                  {province}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </label>
+      <label className="flex flex-col gap-2 font-medium">
+        {fieldLabel("市", required)}
+        <Select
+          disabled={readOnly || !selectedProvince}
+          onValueChange={(city) =>
+            onChange({
+              city,
+              district: "",
+              province: selectedProvince,
+            })
+          }
+          value={selectedCity || undefined}
+        >
+          <SelectTrigger className="h-10 w-full rounded-xl border-[#dbe6dc] bg-white text-sm font-normal text-[#15261d]">
+            <SelectValue placeholder="请选择市" />
+          </SelectTrigger>
+          <SelectContent align="start" position="popper">
+            <SelectGroup>
+              <SelectLabel>市</SelectLabel>
+              {cityOptions.map((city) => (
+                <SelectItem key={city} value={city}>
+                  {city}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </label>
+      <label className="flex flex-col gap-2 font-medium">
+        {fieldLabel("区", required)}
+        <Select
+          disabled={readOnly || !selectedCity}
+          onValueChange={(district) =>
+            onChange({
+              city: selectedCity,
+              district,
+              province: selectedProvince,
+            })
+          }
+          value={selectedDistrict || undefined}
+        >
+          <SelectTrigger className="h-10 w-full rounded-xl border-[#dbe6dc] bg-white text-sm font-normal text-[#15261d]">
+            <SelectValue placeholder="请选择区" />
+          </SelectTrigger>
+          <SelectContent align="start" position="popper">
+            <SelectGroup>
+              <SelectLabel>区</SelectLabel>
+              {districtOptions.map((district) => (
+                <SelectItem key={district} value={district}>
+                  {district}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </label>
+    </>
+  );
+}
+
 function formatRecentOrder(order: NonNullable<MemberPanelItem["recentOrders"]>[number]) {
   const itemSummary = order.items.length
     ? order.items
@@ -440,6 +591,8 @@ export function MemberManagementPanel({
 
     setCreateForm(buildCreateMemberFormState());
     setCreateError(null);
+    setFullscreen(false);
+    setOffset({ x: 0, y: 0 });
     setCreateOpen(true);
   }
 
@@ -1124,24 +1277,55 @@ export function MemberManagementPanel({
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
             aria-modal="true"
-            className="mx-auto flex max-h-full min-h-[560px] w-[760px] max-w-full flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl"
+            className={[
+              "mx-auto flex min-h-[560px] flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
+              fullscreen
+                ? "h-full w-full"
+                : "h-[72vh] w-[760px] max-w-full resize",
+            ].join(" ")}
             role="dialog"
+            style={
+              fullscreen
+                ? undefined
+                : { transform: `translate(${offset.x}px, ${offset.y}px)` }
+            }
           >
-            <div className="flex items-start justify-between border-b border-[#dbe6dc] px-6 py-4">
+            <div
+              className="flex cursor-move items-start justify-between border-b border-[#dbe6dc] px-6 py-4"
+              onPointerDown={handleHeaderPointerDown}
+              onPointerMove={handleHeaderPointerMove}
+              onPointerCancel={handleHeaderPointerUp}
+              onPointerUp={handleHeaderPointerUp}
+            >
               <div>
                 <div className="text-lg font-semibold">新增会员</div>
                 <div className="mt-1 text-sm text-[#66756d]">
                   手动创建会员或将已有手机号绑定到当前数据范围。
                 </div>
               </div>
-              <button
-                className="rounded-full bg-[#edf7ef] px-4 py-2 text-sm font-semibold text-[#1f8f4f]"
-                disabled={saving}
-                onClick={closeCreateModal}
-                type="button"
+              <div
+                className="flex items-center gap-2"
+                onPointerDown={(event) => event.stopPropagation()}
               >
-                关闭
-              </button>
+                <button
+                  className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f]"
+                  disabled={saving}
+                  onClick={() => setFullscreen((value) => !value)}
+                  title={fullscreen ? "退出全屏" : "全屏"}
+                  type="button"
+                >
+                  {fullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+                </button>
+                <button
+                  className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 bg-red-50 text-red-600"
+                  disabled={saving}
+                  onClick={closeCreateModal}
+                  title="关闭"
+                  type="button"
+                >
+                  <X size={17} />
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-auto p-6">
@@ -1213,57 +1397,18 @@ export function MemberManagementPanel({
                       value={createForm.defaultAddress.receiverPhone}
                     />
                   </label>
-                  <label className="flex flex-col gap-2 font-medium">
-                    省
-                    <input
-                      className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                      onChange={(event) =>
-                        setCreateForm((value) => ({
-                          ...value,
-                          defaultAddress: {
-                            ...value.defaultAddress,
-                            province: event.target.value,
-                          },
-                        }))
-                      }
-                      placeholder="例如 江苏省"
-                      value={createForm.defaultAddress.province}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2 font-medium">
-                    市
-                    <input
-                      className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                      onChange={(event) =>
-                        setCreateForm((value) => ({
-                          ...value,
-                          defaultAddress: {
-                            ...value.defaultAddress,
-                            city: event.target.value,
-                          },
-                        }))
-                      }
-                      placeholder="例如 南京市"
-                      value={createForm.defaultAddress.city}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2 font-medium">
-                    区
-                    <input
-                      className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                      onChange={(event) =>
-                        setCreateForm((value) => ({
-                          ...value,
-                          defaultAddress: {
-                            ...value.defaultAddress,
-                            district: event.target.value,
-                          },
-                        }))
-                      }
-                      placeholder="例如 六合区"
-                      value={createForm.defaultAddress.district}
-                    />
-                  </label>
+                  <AddressRegionCascader
+                    onChange={(region) =>
+                      setCreateForm((value) => ({
+                        ...value,
+                        defaultAddress: {
+                          ...value.defaultAddress,
+                          ...region,
+                        },
+                      }))
+                    }
+                    value={createForm.defaultAddress}
+                  />
                   <label className="flex flex-col gap-2 font-medium md:col-span-2">
                     详细地址
                     <input
@@ -1658,72 +1803,24 @@ export function MemberManagementPanel({
                         value={form.defaultAddress.receiverPhone}
                       />
                     </label>
-                    <label className="flex flex-col gap-2 font-medium">
-                      <RequiredLabel>省</RequiredLabel>
-                      <input
-                        className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                        onChange={(event) =>
-                          setForm((value) =>
-                            value
-                              ? {
-                                  ...value,
-                                  defaultAddress: {
-                                    ...value.defaultAddress,
-                                    province: event.target.value,
-                                  },
-                                }
-                              : value,
-                          )
-                        }
-                        placeholder="例如 江苏省"
-                        readOnly={modalMode === "detail"}
-                        value={form.defaultAddress.province}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-2 font-medium">
-                      <RequiredLabel>市</RequiredLabel>
-                      <input
-                        className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                        onChange={(event) =>
-                          setForm((value) =>
-                            value
-                              ? {
-                                  ...value,
-                                  defaultAddress: {
-                                    ...value.defaultAddress,
-                                    city: event.target.value,
-                                  },
-                                }
-                              : value,
-                          )
-                        }
-                        placeholder="例如 南京市"
-                        readOnly={modalMode === "detail"}
-                        value={form.defaultAddress.city}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-2 font-medium">
-                      <RequiredLabel>区</RequiredLabel>
-                      <input
-                        className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                        onChange={(event) =>
-                          setForm((value) =>
-                            value
-                              ? {
-                                  ...value,
-                                  defaultAddress: {
-                                    ...value.defaultAddress,
-                                    district: event.target.value,
-                                  },
-                                }
-                              : value,
-                          )
-                        }
-                        placeholder="例如 六合区"
-                        readOnly={modalMode === "detail"}
-                        value={form.defaultAddress.district}
-                      />
-                    </label>
+                    <AddressRegionCascader
+                      onChange={(region) =>
+                        setForm((value) =>
+                          value
+                            ? {
+                                ...value,
+                                defaultAddress: {
+                                  ...value.defaultAddress,
+                                  ...region,
+                                },
+                              }
+                            : value,
+                        )
+                      }
+                      readOnly={modalMode === "detail"}
+                      required
+                      value={form.defaultAddress}
+                    />
                     <label className="flex flex-col gap-2 font-medium md:col-span-2">
                       <RequiredLabel>详细地址</RequiredLabel>
                       <input
