@@ -15,6 +15,11 @@ import {
   X,
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
+import {
+  createAdminModalDragState,
+  getBoundedAdminModalOffset,
+  type AdminModalDragState,
+} from "./admin-modal-drag";
 
 import {
   Select,
@@ -178,13 +183,7 @@ export function PackageManagementPanel({
   const [statusFilter, setStatusFilter] = useState<
     PackagePanelItem["status"] | "ALL"
   >("ALL");
-  const dragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    x: number;
-    y: number;
-  } | null>(null);
+  const dragRef = useRef<AdminModalDragState | null>(null);
 
   async function reloadPackages(
     page = pagination.page,
@@ -373,14 +372,13 @@ export function PackageManagementPanel({
       return;
     }
 
+    const nextDrag = createAdminModalDragState(event, offset);
+    if (!nextDrag) {
+      return;
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      x: offset.x,
-      y: offset.y,
-    };
+    dragRef.current = nextDrag;
   }
 
   function handleHeaderPointerMove(event: PointerEvent<HTMLDivElement>) {
@@ -389,10 +387,7 @@ export function PackageManagementPanel({
       return;
     }
 
-    setOffset({
-      x: drag.x + event.clientX - drag.startX,
-      y: drag.y + event.clientY - drag.startY,
-    });
+    setOffset(getBoundedAdminModalOffset(drag, event.clientX, event.clientY));
   }
 
   function handleHeaderPointerUp(event: PointerEvent<HTMLDivElement>) {
@@ -803,6 +798,8 @@ export function PackageManagementPanel({
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
             aria-modal="true"
+            data-admin-modal-shell
+            data-fullscreen={fullscreen ? "true" : "false"}
             className="mx-auto flex max-h-full min-h-[560px] w-[720px] max-w-full flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl"
             role="dialog"
           >
@@ -1033,6 +1030,8 @@ export function PackageManagementPanel({
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
             aria-modal="true"
+            data-admin-modal-shell
+            data-fullscreen={fullscreen ? "true" : "false"}
             className={[
               "mx-auto flex min-h-[520px] flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
               fullscreen
@@ -1047,6 +1046,7 @@ export function PackageManagementPanel({
             }
           >
             <div
+              data-admin-modal-drag-handle
               className="flex cursor-move items-center justify-between border-b border-[#dbe6dc] px-6 py-4"
               onPointerDown={handleHeaderPointerDown}
               onPointerMove={handleHeaderPointerMove}

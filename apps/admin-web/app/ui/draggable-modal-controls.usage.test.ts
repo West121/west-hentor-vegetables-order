@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const draggableModalPanels = [
   "dish-management-panel.tsx",
+  "kuaidi-printer-management-panel.tsx",
   "member-management-panel.tsx",
   "order-management-panel.tsx",
   "package-management-panel.tsx",
@@ -18,6 +19,7 @@ const draggableModalPanels = [
 function expectResizableModalContainer(source: string, fileName: string) {
   const modalContainerPatterns = [
     /:\s*"h-\[\d+vh\] w-\[\d+px\] max-w-full resize"/,
+    /:\s*"h-\[\d+vh\] max-w-4xl resize"/,
     /:\s*"absolute left-1\/2 top-20 flex h-\[\d+vh\] w-\[min\(\d+px,calc\(100vw-48px\)\)\] -translate-x-1\/2 resize/,
   ];
 
@@ -45,6 +47,10 @@ describe("draggable admin modal controls", () => {
       expect(source, fileName).toContain('role="dialog"');
       expectResizableModalContainer(source, fileName);
       expect(source, fileName).toContain("translate(");
+      expect(source, fileName).toContain("createAdminModalDragState");
+      expect(source, fileName).toContain("getBoundedAdminModalOffset");
+      expect(source, fileName).toContain("data-admin-modal-shell");
+      expect(source, fileName).toContain("data-admin-modal-drag-handle");
       expect(source, fileName).toContain("setPointerCapture(event.pointerId)");
       expect(source, fileName).toContain("releasePointerCapture(event.pointerId)");
       expect(source, fileName).toContain("onPointerDown={handleHeaderPointerDown}");
@@ -67,5 +73,17 @@ describe("draggable admin modal controls", () => {
         "onPointerDown={(event) => event.stopPropagation()}",
       );
     }
+  });
+
+  it("hides the drag affordance while a modal is fullscreen", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/globals.css"),
+      "utf8",
+    );
+
+    expect(source).toContain(
+      '[data-admin-modal-shell][data-fullscreen="true"] [data-admin-modal-drag-handle]',
+    );
+    expect(source).toContain("cursor: default !important");
   });
 });

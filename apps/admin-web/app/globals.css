@@ -296,6 +296,10 @@ html.theme-fade-transitioning body * {
   box-shadow: 0 22px 58px rgba(0, 0, 0, 0.34) !important;
 }
 
+[data-admin-modal-shell][data-fullscreen="true"] [data-admin-modal-drag-handle] {
+  cursor: default !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html.theme-transitioning::view-transition-old(root),
   html.theme-transitioning::view-transition-new(root) {

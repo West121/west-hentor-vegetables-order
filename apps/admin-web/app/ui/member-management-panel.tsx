@@ -2,6 +2,7 @@
 
 import {
   Ban,
+  ChevronDown,
   Download,
   Eye,
   Maximize2,
@@ -14,18 +15,13 @@ import {
   X,
 } from "lucide-react";
 import { useRef, useState, type ChangeEvent, type PointerEvent } from "react";
+import {
+  createAdminModalDragState,
+  getBoundedAdminModalOffset,
+  type AdminModalDragState,
+} from "./admin-modal-drag";
 import { CHINA_PROVINCE_REGIONS, getChinaCityRegion } from "@hentor/shared";
 import { utils, write } from "xlsx";
-
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 import {
   AdminPagination,
@@ -291,6 +287,138 @@ function appendCurrentOption(options: string[], currentValue: string) {
   return [trimmed, ...options];
 }
 
+type SearchableRegionSelectProps = {
+  disabled?: boolean;
+  label: string;
+  onClear: () => void;
+  onValueChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+  readOnly?: boolean;
+  required?: boolean;
+  value: string;
+};
+
+function SearchableRegionSelect({
+  disabled = false,
+  label,
+  onClear,
+  onValueChange,
+  options,
+  placeholder,
+  readOnly = false,
+  required = false,
+  value,
+}: SearchableRegionSelectProps) {
+  const [open, setOpen] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const query = keyword.trim();
+  const filteredOptions = query
+    ? options.filter((option) => option.includes(query))
+    : options;
+  const interactiveDisabled = readOnly || disabled;
+
+  function closeDropdown() {
+    setOpen(false);
+    setKeyword("");
+  }
+
+  return (
+    <label className="flex flex-col gap-2 font-medium">
+      {fieldLabel(label, required)}
+      <div
+        className="relative"
+        onBlur={(event) => {
+          const nextTarget = event.relatedTarget;
+          if (
+            !nextTarget ||
+            !event.currentTarget.contains(nextTarget as Node)
+          ) {
+            closeDropdown();
+          }
+        }}
+      >
+        <button
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          className="flex h-10 w-full items-center gap-2 rounded-xl border border-[#dbe6dc] bg-white px-3 pr-14 text-left text-sm font-normal text-[#15261d] transition hover:border-[#b8d8bf] disabled:cursor-not-allowed disabled:bg-[#f4f7f2] disabled:text-[#8a9a90]"
+          disabled={interactiveDisabled}
+          onClick={() => setOpen((current) => !current)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              closeDropdown();
+            }
+          }}
+          type="button"
+        >
+          <span className={value ? "flex-1 truncate" : "flex-1 truncate text-[#8a9a90]"}>
+            {value || placeholder}
+          </span>
+          <ChevronDown
+            className={`shrink-0 text-[#6c7a71] transition ${open ? "rotate-180" : ""}`}
+            size={16}
+          />
+        </button>
+        {value && !interactiveDisabled ? (
+          <button
+            aria-label={`清除${label}`}
+            className="absolute right-8 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full text-[#6c7a71] transition hover:bg-[#edf5ee] hover:text-[#1f8f4f]"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onClear();
+              closeDropdown();
+            }}
+            onMouseDown={(event) => event.preventDefault()}
+            type="button"
+          >
+            <X size={13} />
+          </button>
+        ) : null}
+        {open && !interactiveDisabled ? (
+          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[80] overflow-hidden rounded-xl border border-[#dbe6dc] bg-white shadow-xl">
+            <div className="border-b border-[#e6eee7] p-2">
+              <input
+                autoFocus
+                className="h-9 w-full rounded-lg border border-[#dbe6dc] px-3 text-sm outline-none transition placeholder:text-[#8a9a90] focus:border-[#1f8f4f]"
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder={`搜索${label}`}
+                value={keyword}
+              />
+            </div>
+            <div className="max-h-56 overflow-y-auto p-1" role="listbox">
+              {filteredOptions.length ? (
+                filteredOptions.map((option) => (
+                  <button
+                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition hover:bg-[#edf5ee] ${
+                      option === value
+                        ? "bg-[#e8f5eb] font-semibold text-[#1f8f4f]"
+                        : "text-[#15261d]"
+                    }`}
+                    key={option}
+                    onClick={() => {
+                      onValueChange(option);
+                      closeDropdown();
+                    }}
+                    onMouseDown={(event) => event.preventDefault()}
+                    role="option"
+                    type="button"
+                  >
+                    <span className="truncate">{option}</span>
+                    {option === value ? <span className="text-xs">已选</span> : null}
+                  </button>
+                ))
+              ) : (
+                <div className="px-3 py-4 text-sm text-[#8a9a90]">无匹配地区</div>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </label>
+  );
+}
+
 function AddressRegionCascader({
   onChange,
   readOnly = false,
@@ -318,90 +446,68 @@ function AddressRegionCascader({
 
   return (
     <>
-      <label className="flex flex-col gap-2 font-medium">
-        {fieldLabel("省", required)}
-        <Select
-          disabled={readOnly}
-          onValueChange={(province) =>
-            onChange({
-              city: "",
-              district: "",
-              province,
-            })
-          }
-          value={selectedProvince || undefined}
-        >
-          <SelectTrigger className="h-10 w-full rounded-xl border-[#dbe6dc] bg-white text-sm font-normal text-[#15261d]">
-            <SelectValue placeholder="请选择省" />
-          </SelectTrigger>
-          <SelectContent align="start" position="popper">
-            <SelectGroup>
-              <SelectLabel>省</SelectLabel>
-              {provinceOptions.map((province) => (
-                <SelectItem key={province} value={province}>
-                  {province}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </label>
-      <label className="flex flex-col gap-2 font-medium">
-        {fieldLabel("市", required)}
-        <Select
-          disabled={readOnly || !selectedProvince}
-          onValueChange={(city) =>
-            onChange({
-              city,
-              district: "",
-              province: selectedProvince,
-            })
-          }
-          value={selectedCity || undefined}
-        >
-          <SelectTrigger className="h-10 w-full rounded-xl border-[#dbe6dc] bg-white text-sm font-normal text-[#15261d]">
-            <SelectValue placeholder="请选择市" />
-          </SelectTrigger>
-          <SelectContent align="start" position="popper">
-            <SelectGroup>
-              <SelectLabel>市</SelectLabel>
-              {cityOptions.map((city) => (
-                <SelectItem key={city} value={city}>
-                  {city}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </label>
-      <label className="flex flex-col gap-2 font-medium">
-        {fieldLabel("区", required)}
-        <Select
-          disabled={readOnly || !selectedCity}
-          onValueChange={(district) =>
-            onChange({
-              city: selectedCity,
-              district,
-              province: selectedProvince,
-            })
-          }
-          value={selectedDistrict || undefined}
-        >
-          <SelectTrigger className="h-10 w-full rounded-xl border-[#dbe6dc] bg-white text-sm font-normal text-[#15261d]">
-            <SelectValue placeholder="请选择区" />
-          </SelectTrigger>
-          <SelectContent align="start" position="popper">
-            <SelectGroup>
-              <SelectLabel>区</SelectLabel>
-              {districtOptions.map((district) => (
-                <SelectItem key={district} value={district}>
-                  {district}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </label>
+      <SearchableRegionSelect
+        label="省"
+        onClear={() => onChange({ city: "", district: "", province: "" })}
+        onValueChange={(province) =>
+          onChange({
+            city: "",
+            district: "",
+            province,
+          })
+        }
+        options={provinceOptions}
+        placeholder="请选择省"
+        readOnly={readOnly}
+        required={required}
+        value={selectedProvince}
+      />
+      <SearchableRegionSelect
+        disabled={!selectedProvince}
+        label="市"
+        onClear={() =>
+          onChange({
+            city: "",
+            district: "",
+            province: selectedProvince,
+          })
+        }
+        onValueChange={(city) =>
+          onChange({
+            city,
+            district: "",
+            province: selectedProvince,
+          })
+        }
+        options={cityOptions}
+        placeholder="请选择市"
+        readOnly={readOnly}
+        required={required}
+        value={selectedCity}
+      />
+      <SearchableRegionSelect
+        disabled={!selectedCity}
+        label="区"
+        onClear={() =>
+          onChange({
+            city: selectedCity,
+            district: "",
+            province: selectedProvince,
+          })
+        }
+        onValueChange={(district) =>
+          onChange({
+            city: selectedCity,
+            district,
+            province: selectedProvince,
+          })
+        }
+        options={districtOptions}
+        placeholder="请选择区"
+        readOnly={readOnly}
+        required={required}
+        value={selectedDistrict}
+      />
     </>
   );
 }
@@ -515,13 +621,7 @@ export function MemberManagementPanel({
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
-  const dragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    x: number;
-    y: number;
-  } | null>(null);
+  const dragRef = useRef<AdminModalDragState | null>(null);
 
   async function reloadMembers(
     page = pagination.page,
@@ -792,14 +892,13 @@ export function MemberManagementPanel({
       return;
     }
 
+    const nextDrag = createAdminModalDragState(event, offset);
+    if (!nextDrag) {
+      return;
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      x: offset.x,
-      y: offset.y,
-    };
+    dragRef.current = nextDrag;
   }
 
   function handleHeaderPointerMove(event: PointerEvent<HTMLDivElement>) {
@@ -808,10 +907,7 @@ export function MemberManagementPanel({
       return;
     }
 
-    setOffset({
-      x: drag.x + event.clientX - drag.startX,
-      y: drag.y + event.clientY - drag.startY,
-    });
+    setOffset(getBoundedAdminModalOffset(drag, event.clientX, event.clientY));
   }
 
   function handleHeaderPointerUp(event: PointerEvent<HTMLDivElement>) {
@@ -1277,6 +1373,8 @@ export function MemberManagementPanel({
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
             aria-modal="true"
+            data-admin-modal-shell
+            data-fullscreen={fullscreen ? "true" : "false"}
             className={[
               "mx-auto flex min-h-[560px] flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
               fullscreen
@@ -1291,6 +1389,7 @@ export function MemberManagementPanel({
             }
           >
             <div
+              data-admin-modal-drag-handle
               className="flex cursor-move items-start justify-between border-b border-[#dbe6dc] px-6 py-4"
               onPointerDown={handleHeaderPointerDown}
               onPointerMove={handleHeaderPointerMove}
@@ -1527,6 +1626,8 @@ export function MemberManagementPanel({
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
             aria-modal="true"
+            data-admin-modal-shell
+            data-fullscreen={fullscreen ? "true" : "false"}
             className="mx-auto flex max-h-full min-h-[560px] w-[760px] max-w-full flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl"
             role="dialog"
           >
@@ -1658,6 +1759,8 @@ export function MemberManagementPanel({
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
             aria-modal="true"
+            data-admin-modal-shell
+            data-fullscreen={fullscreen ? "true" : "false"}
             className={[
               "mx-auto flex min-h-[500px] flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
               fullscreen
@@ -1672,6 +1775,7 @@ export function MemberManagementPanel({
             }
           >
             <div
+              data-admin-modal-drag-handle
               className="flex cursor-move items-center justify-between border-b border-[#dbe6dc] px-6 py-4"
               onPointerDown={handleHeaderPointerDown}
               onPointerMove={handleHeaderPointerMove}

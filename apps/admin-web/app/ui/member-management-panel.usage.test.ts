@@ -40,21 +40,26 @@ describe("member management modal usage", () => {
     expect(source).not.toContain("标题栏可拖拽");
   });
 
-  it("uses the shared China region data and shadcn selects for member address cascading", () => {
+  it("uses shared China region data with searchable and clearable address cascading", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/member-management-panel.tsx"),
       "utf8",
     );
 
     expect(source).toContain("AddressRegionCascader");
+    expect(source).toContain("SearchableRegionSelect");
     expect(source).toContain("CHINA_PROVINCE_REGIONS");
     expect(source).toContain("getChinaCityRegion");
-    expect(source).toContain('from "@/components/ui/select"');
-    expect(source).toContain("<SelectTrigger");
-    expect(source).toContain("<SelectContent");
+    expect(source).toContain("appendCurrentOption");
+    expect(source).toContain("filteredOptions");
+    expect(source).toContain("placeholder={`搜索${label}`}");
+    expect(source).toContain("aria-label={`清除${label}`}");
     expect(source).toContain("请选择省");
     expect(source).toContain("请选择市");
     expect(source).toContain("请选择区");
+    expect(source).not.toContain('from "@/components/ui/select"');
+    expect(source).not.toContain("<SelectTrigger");
+    expect(source).not.toContain("<SelectContent");
     expect(source).not.toContain("例如 江苏省");
     expect(source).not.toContain("例如 南京市");
     expect(source).not.toContain("例如 六合区");

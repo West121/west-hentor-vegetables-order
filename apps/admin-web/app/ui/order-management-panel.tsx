@@ -10,6 +10,11 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
+import {
+  createAdminModalDragState,
+  getBoundedAdminModalOffset,
+  type AdminModalDragState,
+} from "./admin-modal-drag";
 
 import {
   AdminPagination,
@@ -535,13 +540,7 @@ export function OrderManagementPanel({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const detailRequestRef = useRef(0);
-  const dragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    x: number;
-    y: number;
-  } | null>(null);
+  const dragRef = useRef<AdminModalDragState | null>(null);
 
   function openModal(item: OrderPanelItem | null, mode: OrderModalMode) {
     if ((mode === "create" || mode === "edit") && !canWrite) {
@@ -927,14 +926,13 @@ export function OrderManagementPanel({
       return;
     }
 
+    const nextDrag = createAdminModalDragState(event, offset);
+    if (!nextDrag) {
+      return;
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      x: offset.x,
-      y: offset.y,
-    };
+    dragRef.current = nextDrag;
   }
 
   function handleHeaderPointerMove(event: PointerEvent<HTMLDivElement>) {
@@ -943,10 +941,7 @@ export function OrderManagementPanel({
       return;
     }
 
-    setOffset({
-      x: drag.x + event.clientX - drag.startX,
-      y: drag.y + event.clientY - drag.startY,
-    });
+    setOffset(getBoundedAdminModalOffset(drag, event.clientX, event.clientY));
   }
 
   function handleHeaderPointerUp(event: PointerEvent<HTMLDivElement>) {
@@ -1686,6 +1681,8 @@ export function OrderManagementPanel({
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
             aria-modal="true"
+            data-admin-modal-shell
+            data-fullscreen={fullscreen ? "true" : "false"}
             className={[
               "mx-auto flex min-h-[540px] flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
               fullscreen
@@ -1700,6 +1697,7 @@ export function OrderManagementPanel({
             }
           >
             <div
+              data-admin-modal-drag-handle
               className="flex cursor-move items-center justify-between border-b border-[#dbe6dc] px-6 py-4"
               onPointerDown={handleHeaderPointerDown}
               onPointerMove={handleHeaderPointerMove}
@@ -2124,6 +2122,8 @@ export function OrderManagementPanel({
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#07140c]/40 p-5">
           <div
             aria-modal="true"
+            data-admin-modal-shell
+            data-fullscreen={fullscreen ? "true" : "false"}
             className="w-full max-w-lg overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl shadow-[#0f2418]/20"
             role="dialog"
           >

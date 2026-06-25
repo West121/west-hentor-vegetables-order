@@ -10,6 +10,11 @@ import {
   X,
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
+import {
+  createAdminModalDragState,
+  getBoundedAdminModalOffset,
+  type AdminModalDragState,
+} from "./admin-modal-drag";
 
 import { CHINA_PROVINCE_REGIONS } from "@hentor/shared";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
@@ -252,13 +257,7 @@ export function SystemSettingsPanel({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const dragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    x: number;
-    y: number;
-  } | null>(null);
+  const dragRef = useRef<AdminModalDragState | null>(null);
 
   function resetModalPosition() {
     setFullscreen(false);
@@ -298,14 +297,13 @@ export function SystemSettingsPanel({
       return;
     }
 
+    const nextDrag = createAdminModalDragState(event, offset);
+    if (!nextDrag) {
+      return;
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      x: offset.x,
-      y: offset.y,
-    };
+    dragRef.current = nextDrag;
   }
 
   function handleHeaderPointerMove(event: PointerEvent<HTMLDivElement>) {
@@ -314,10 +312,7 @@ export function SystemSettingsPanel({
       return;
     }
 
-    setOffset({
-      x: drag.x + event.clientX - drag.startX,
-      y: drag.y + event.clientY - drag.startY,
-    });
+    setOffset(getBoundedAdminModalOffset(drag, event.clientX, event.clientY));
   }
 
   function handleHeaderPointerUp(event: PointerEvent<HTMLDivElement>) {
@@ -486,6 +481,8 @@ export function SystemSettingsPanel({
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
           <div
             aria-modal="true"
+            data-admin-modal-shell
+            data-fullscreen={fullscreen ? "true" : "false"}
             className={[
               "mx-auto flex min-h-[520px] flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
               fullscreen
@@ -500,6 +497,7 @@ export function SystemSettingsPanel({
             }
           >
             <div
+              data-admin-modal-drag-handle
               className="flex cursor-move items-center justify-between border-b border-[#dbe6dc] px-6 py-4"
               onPointerDown={handleHeaderPointerDown}
               onPointerMove={handleHeaderPointerMove}

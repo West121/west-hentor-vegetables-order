@@ -11,6 +11,11 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useRef, useState, type PointerEvent } from "react";
+import {
+  createAdminModalDragState,
+  getBoundedAdminModalOffset,
+  type AdminModalDragState,
+} from "./admin-modal-drag";
 
 import {
   AdminPagination,
@@ -186,13 +191,7 @@ export function StoreManagementPanel({
   const [franchiseeStatusFilter, setFranchiseeStatusFilter] = useState<
     FranchiseeStatus | "ALL"
   >("ALL");
-  const dragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    x: number;
-    y: number;
-  } | null>(null);
+  const dragRef = useRef<AdminModalDragState | null>(null);
 
   const franchiseeOptions = useMemo(
     () => franchisees.filter((item) => item.status !== "EXPIRED"),
@@ -362,14 +361,13 @@ export function StoreManagementPanel({
       return;
     }
 
+    const nextDrag = createAdminModalDragState(event, offset);
+    if (!nextDrag) {
+      return;
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      x: offset.x,
-      y: offset.y,
-    };
+    dragRef.current = nextDrag;
   }
 
   function handleHeaderPointerMove(event: PointerEvent<HTMLDivElement>) {
@@ -378,10 +376,7 @@ export function StoreManagementPanel({
       return;
     }
 
-    setOffset({
-      x: drag.x + event.clientX - drag.startX,
-      y: drag.y + event.clientY - drag.startY,
-    });
+    setOffset(getBoundedAdminModalOffset(drag, event.clientX, event.clientY));
   }
 
   function handleHeaderPointerUp(event: PointerEvent<HTMLDivElement>) {
@@ -942,6 +937,8 @@ export function StoreManagementPanel({
         <div className="fixed inset-0 z-50 bg-[#0f2418]/32">
           <div
             aria-modal="true"
+            data-admin-modal-shell
+            data-fullscreen={fullscreen ? "true" : "false"}
             className={
               fullscreen
                 ? "absolute inset-5 flex flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
@@ -955,6 +952,7 @@ export function StoreManagementPanel({
             }
           >
             <div
+              data-admin-modal-drag-handle
               className="flex cursor-move items-start justify-between gap-4 border-b border-[#dbe6dc] px-6 py-4"
               onPointerDown={handleHeaderPointerDown}
               onPointerMove={handleHeaderPointerMove}
