@@ -129,6 +129,30 @@ function buildFormState(
   };
 }
 
+function validateAdminUserForm(mode: ModalState["mode"], form: FormState) {
+  if (mode === "password") {
+    return form.password.trim().length < 8 ? "新密码至少需要 8 位" : null;
+  }
+
+  if (!form.username.trim()) {
+    return "请输入登录账号";
+  }
+  if (!form.name.trim()) {
+    return "请输入用户姓名";
+  }
+  if (mode === "create" && form.password.trim().length < 8) {
+    return "初始密码至少需要 8 位";
+  }
+  if (form.roleIds.length === 0) {
+    return "请选择后台角色";
+  }
+  if (!form.status) {
+    return "请选择用户状态";
+  }
+
+  return null;
+}
+
 function displayPhone(phone: string | null) {
   return phone ?? "未填写";
 }
@@ -414,6 +438,12 @@ export function SystemManagementPanel({
 
   async function submitModal() {
     if (!modal || modal.mode === "detail") {
+      return;
+    }
+
+    const validationMessage = validateAdminUserForm(modal.mode, form);
+    if (validationMessage) {
+      setError(validationMessage);
       return;
     }
 

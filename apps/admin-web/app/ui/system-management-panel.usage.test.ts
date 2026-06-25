@@ -42,4 +42,20 @@ describe("system management user modal usage", () => {
     expect(source).toContain("/api/admin/roles?page=1&pageSize=200");
     expect(source).toContain("void reloadRoleOptions");
   });
+
+  it("shows concrete validation messages before saving admin users", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/system-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("function validateAdminUserForm");
+    expect(source).toContain("请输入登录账号");
+    expect(source).toContain("请输入用户姓名");
+    expect(source).toContain("初始密码至少需要 8 位");
+    expect(source).toContain("新密码至少需要 8 位");
+    expect(source).toContain("请选择后台角色");
+    expect(source).toContain("const validationMessage = validateAdminUserForm");
+    expect(source).not.toContain("请求参数不完整");
+  });
 });

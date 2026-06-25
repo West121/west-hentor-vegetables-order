@@ -19,6 +19,7 @@ fi
 export SPRING_STORAGE_MODE="${SPRING_STORAGE_MODE:-local}"
 export SPRING_STORAGE_LOCAL_ROOT="${SPRING_STORAGE_LOCAL_ROOT:-$APP_DIR/uploads}"
 export SPRING_STORAGE_PUBLIC_BASE_URL="${SPRING_STORAGE_PUBLIC_BASE_URL:-/uploads}"
+export MANAGEMENT_HEALTH_REDIS_ENABLED="${MANAGEMENT_HEALTH_REDIS_ENABLED:-false}"
 
 if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   echo "Spring API is already running: $(cat "$PID_FILE")"
