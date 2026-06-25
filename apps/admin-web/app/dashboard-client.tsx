@@ -26,6 +26,10 @@ import {
   type PackageTemplatePanelItem,
 } from "./ui/package-template-management-panel";
 import {
+  KuaidiPrinterManagementPanel,
+  type KuaidiPrinterPanelItem,
+} from "./ui/kuaidi-printer-management-panel";
+import {
   RoleManagementPanel,
   type RolePanelItem,
   type RolePermissionOption,
@@ -92,6 +96,9 @@ type DashboardData = {
   memberOptions: MemberPanelItem[];
   members: number;
   menuTree: ReturnType<typeof buildAdminMenuTree>;
+  kuaidiPrinterPagination: ReturnType<typeof emptyPagination>;
+  kuaidiPrinterSummary: any;
+  kuaidiPrinters: KuaidiPrinterPanelItem[];
   operationLogPagination: ReturnType<typeof emptyPagination>;
   operationLogs: OperationLogPanelItem[];
   orders: number;
@@ -303,6 +310,7 @@ async function loadDashboardData(
     systemSettings,
     dictionaries,
     dishCategoryOptions,
+    kuaidiPrinters,
   ] = await Promise.all([
     canManageSystem
       ? readList<AdminUserPanelItem, Record<string, number>>(
@@ -410,6 +418,12 @@ async function loadDashboardData(
           `/api/admin/dictionaries/DISH_CATEGORY?${storeParam}`,
         ).catch(() => ({ items: [] as SystemDictionaryItem[] }))
       : Promise.resolve({ items: [] as SystemDictionaryItem[] }),
+    canManageSystem && activeStore
+      ? readList<KuaidiPrinterPanelItem, Record<string, number>>(
+          withStore("/api/admin/kuaidi-printers"),
+          { active: 0, defaults: 0, disabled: 0, total: 0 },
+        )
+      : Promise.resolve(emptyList<KuaidiPrinterPanelItem, Record<string, number>>({ active: 0, defaults: 0, disabled: 0, total: 0 })),
   ]);
 
   const roleRows = roles.items;
@@ -434,6 +448,9 @@ async function loadDashboardData(
     packageTemplateSummary: packageTemplates.summary,
     packageTemplateOptions: packageTemplateOptions.items,
     menuTree: buildAdminMenuTree(),
+    kuaidiPrinters: kuaidiPrinters.items,
+    kuaidiPrinterPagination: kuaidiPrinters.pagination,
+    kuaidiPrinterSummary: kuaidiPrinters.summary,
     permissions: permissions.items,
     rolePagination: roles.pagination,
     roleRows,
@@ -759,6 +776,15 @@ export default function DashboardPage() {
           <SystemDictionaryPanel
             initialDictionaries={data.dictionaries}
             initialItems={data.dishCategoryOptions}
+            store={activeStore}
+          />
+        ) : null}
+
+        {activeSection === "kuaidi-printers" ? (
+          <KuaidiPrinterManagementPanel
+            initialItems={data.kuaidiPrinters}
+            initialPagination={data.kuaidiPrinterPagination}
+            initialSummary={data.kuaidiPrinterSummary}
             store={activeStore}
           />
         ) : null}

@@ -2,6 +2,7 @@
 
 import {
   Eye,
+  EyeOff,
   KeyRound,
   Maximize2,
   Minimize2,
@@ -187,6 +188,7 @@ export function SystemManagementPanel({
   const [loadingList, setLoadingList] = useState(false);
   const [loadingRoles, setLoadingRoles] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<AdminStatus | "ALL">("ALL");
@@ -207,6 +209,7 @@ export function SystemManagementPanel({
     setFullscreen(false);
     setOffset({ x: 0, y: 0 });
     setError(null);
+    setPasswordVisible(false);
   }
 
   function openCreateModal() {
@@ -741,13 +744,27 @@ export function SystemManagementPanel({
                 </div>
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   <RequiredLabel>新密码</RequiredLabel>
-                  <input
-                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                    minLength={8}
-                    onChange={(event) => updateForm("password", event.target.value)}
-                    type="password"
-                    value={form.password}
-                  />
+                  <div className="relative">
+                    <input
+                      className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 pr-11 outline-none focus:border-[#1f8f4f]"
+                      minLength={8}
+                      onChange={(event) => updateForm("password", event.target.value)}
+                      type={passwordVisible ? "text" : "password"}
+                      value={form.password}
+                    />
+                    <button
+                      className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-[#66756d] hover:bg-[#eff8f1] hover:text-[#1f8f4f]"
+                      onClick={() => setPasswordVisible((value) => !value)}
+                      title={passwordVisible ? "隐藏密码" : "显示密码"}
+                      type="button"
+                    >
+                      {passwordVisible ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
                 </label>
                 </div>
               ) : (
@@ -774,15 +791,29 @@ export function SystemManagementPanel({
                   {modal.mode === "create" ? (
                     <label className="flex flex-col gap-2 text-sm font-medium">
                       <RequiredLabel>初始密码</RequiredLabel>
-                      <input
-                        className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                        minLength={8}
-                        onChange={(event) =>
-                          updateForm("password", event.target.value)
-                        }
-                        type="password"
-                        value={form.password}
-                      />
+                      <div className="relative">
+                        <input
+                          className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 pr-11 outline-none focus:border-[#1f8f4f]"
+                          minLength={8}
+                          onChange={(event) =>
+                            updateForm("password", event.target.value)
+                          }
+                          type={passwordVisible ? "text" : "password"}
+                          value={form.password}
+                        />
+                        <button
+                          className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-[#66756d] hover:bg-[#eff8f1] hover:text-[#1f8f4f]"
+                          onClick={() => setPasswordVisible((value) => !value)}
+                          title={passwordVisible ? "隐藏密码" : "显示密码"}
+                          type="button"
+                        >
+                          {passwordVisible ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
                     </label>
                   ) : null}
                   <label className="flex flex-col gap-2 text-sm font-medium">

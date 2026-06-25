@@ -189,12 +189,18 @@ describe("admin navigation", () => {
       "roles",
       "menus",
       "dictionaries",
+      "kuaidi-printers",
       "operation-logs",
       "system-settings",
     ]);
     expect(systemGroup?.children.find((item) => item.section === "menus"))
       .toMatchObject({
         icon: "folder-tree",
+        permissionCodes: ["system.manage"],
+      });
+    expect(systemGroup?.children.find((item) => item.section === "kuaidi-printers"))
+      .toMatchObject({
+        icon: "printer",
         permissionCodes: ["system.manage"],
       });
   });

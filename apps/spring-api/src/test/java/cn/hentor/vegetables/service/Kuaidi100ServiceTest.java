@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import cn.hentor.vegetables.config.Kuaidi100Properties;
+import cn.hentor.vegetables.dto.Kuaidi100PrintConfig;
 import cn.hentor.vegetables.dto.Kuaidi100PrintTaskDto;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -98,6 +99,43 @@ class Kuaidi100ServiceTest {
       "江苏省南京市六合区龙池街道冠城大通",
       param.path("recMan").path("printAddr").asText()
     );
+  }
+
+  @Test
+  void printerConfigOverridesCloudPrintRequestFields() {
+    Kuaidi100Service service = new Kuaidi100Service(objectMapper, configuredProperties());
+    Kuaidi100PrintConfig printerConfig = new Kuaidi100PrintConfig(
+      "",
+      "",
+      "printer-code",
+      "顺丰即日",
+      "printer-key",
+      "shunfeng",
+      "0",
+      "0",
+      false,
+      true,
+      false,
+      "printer-partner",
+      "printer-partner-key",
+      "SHIPPER",
+      "printer-id",
+      "前台热敏打印机",
+      Map.of("type", "10"),
+      "printer-secret",
+      "涵氧生态",
+      "printer-siid-02",
+      "template-002"
+    );
+
+    Map<String, Object> param = service.buildParam(printTask(), printerConfig);
+
+    assertEquals("printer-code", param.get("code"));
+    assertEquals("printer-partner", param.get("partnerId"));
+    assertEquals("printer-partner-key", param.get("partnerKey"));
+    assertEquals("printer-siid-02", param.get("siid"));
+    assertEquals("template-002", param.get("tempId"));
+    assertEquals("10", param.get("type"));
   }
 
   private Kuaidi100Properties configuredProperties() {

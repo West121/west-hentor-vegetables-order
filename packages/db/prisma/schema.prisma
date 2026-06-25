@@ -130,6 +130,7 @@ model Store {
   dishes             Dish[]
   orders             Order[]
   tasks              Task[]
+  kuaidi100Printers  Kuaidi100Printer[]
   inventoryLogs      InventoryLog[]
   adminUserStores    AdminUserStore[]
   operationLogs      AdminOperationLog[]
@@ -426,6 +427,34 @@ model OrderShipment {
   updatedAt   DateTime @updatedAt
 
   @@index([orderId, sortOrder])
+}
+
+model Kuaidi100Printer {
+  id            String      @id @default(cuid())
+  storeId       String
+  name          String
+  status        StoreStatus @default(ACTIVE)
+  isDefault     Boolean     @default(false)
+  apiKey        String?
+  apiSecret     String?
+  partnerId     String?
+  partnerKey    String?
+  code          String?
+  kuaidicom     String?
+  expType       String?
+  payType       String?
+  siid          String
+  tempId        String?
+  senderCompany String?
+  requestParams Json?
+  sortOrder     Int         @default(0)
+  remark        String?
+  store         Store       @relation(fields: [storeId], references: [id])
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([storeId, status])
+  @@index([storeId, isDefault])
 }
 
 model OrderChangeLog {

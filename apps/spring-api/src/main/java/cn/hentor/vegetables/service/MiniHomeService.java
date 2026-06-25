@@ -216,11 +216,12 @@ public class MiniHomeService {
 
   private TaskEntity loadActiveTask(String storeId) {
     LocalDateTime now = LocalDateTime.now(BUSINESS_ZONE);
+    taskMapper.disableExpiredActiveTasks(storeId, now, now);
     return taskMapper.selectOne(
       new LambdaQueryWrapper<TaskEntity>()
         .eq(TaskEntity::getStoreId, storeId)
         .le(TaskEntity::getStartsAt, now)
-        .ge(TaskEntity::getEndsAt, now)
+        .gt(TaskEntity::getEndsAt, now)
         .apply("\"status\" = 'ACTIVE'")
         .orderByDesc(TaskEntity::getStartsAt)
         .orderByDesc(TaskEntity::getCreatedAt)

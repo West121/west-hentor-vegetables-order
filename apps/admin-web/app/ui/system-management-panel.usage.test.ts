@@ -58,4 +58,17 @@ describe("system management user modal usage", () => {
     expect(source).toContain("const validationMessage = validateAdminUserForm");
     expect(source).not.toContain("请求参数不完整");
   });
+
+  it("lets operators show and hide password inputs when creating or resetting users", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/system-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("EyeOff");
+    expect(source).toContain("passwordVisible");
+    expect(source).toContain('title={passwordVisible ? "隐藏密码" : "显示密码"}');
+    expect(source).toContain('type={passwordVisible ? "text" : "password"}');
+    expect(source).toContain("setPasswordVisible(false)");
+  });
 });

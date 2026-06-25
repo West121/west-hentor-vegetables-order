@@ -41,6 +41,20 @@ describe("order management panel", () => {
     expect(source).not.toContain("面单预览");
   });
 
+  it("asks operators to choose a printer when there are more than two active printers", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/order-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("loadActivePrinters");
+    expect(source).toContain("/api/admin/kuaidi-printers");
+    expect(source).toContain("printers.length > 2");
+    expect(source).toContain("setPrinterSelectorOpen(true)");
+    expect(source).toContain("选择电子面单打印机");
+    expect(source).toContain("printerId");
+  });
+
   it("does not keep the removed manual batch shipping workflow", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/order-management-panel.tsx"),

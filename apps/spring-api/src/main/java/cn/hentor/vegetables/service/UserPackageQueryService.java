@@ -299,10 +299,9 @@ public class UserPackageQueryService {
       );
     }
 
-    int totalTimes = request.totalTimes() == null ? template.getTotalTimes() : request.totalTimes();
+    int totalTimes = template.getTotalTimes();
     int usedTimes = request.usedTimes() == null ? 0 : request.usedTimes();
-    BigDecimal weightLimitJin =
-      request.weightLimitJin() == null ? template.getWeightLimitJin() : request.weightLimitJin();
+    BigDecimal weightLimitJin = template.getWeightLimitJin();
     requirePackageAdjustment(totalTimes, usedTimes, weightLimitJin);
     String status = StringUtils.hasText(request.status())
       ? request.status().trim()

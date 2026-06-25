@@ -29,6 +29,7 @@ import cn.hentor.vegetables.dto.AdminOrderUserPackageDto;
 import cn.hentor.vegetables.dto.AdminSessionDto;
 import cn.hentor.vegetables.dto.Kuaidi100CloudPrintRequest;
 import cn.hentor.vegetables.dto.Kuaidi100CloudPrintResponse;
+import cn.hentor.vegetables.dto.Kuaidi100PrintConfig;
 import cn.hentor.vegetables.dto.Kuaidi100PrintFailureDto;
 import cn.hentor.vegetables.dto.Kuaidi100PrintResultDto;
 import cn.hentor.vegetables.dto.Kuaidi100PrintTaskDto;
@@ -88,6 +89,7 @@ public class OrderQueryService {
   private final AdminOperationLogMapper adminOperationLogMapper;
   private final AdminUserMapper adminUserMapper;
   private final DishMapper dishMapper;
+  private final Kuaidi100PrinterService kuaidi100PrinterService;
   private final Kuaidi100Service kuaidi100Service;
   private final MiniReservationService miniReservationService;
   private final ObjectMapper objectMapper;
@@ -104,6 +106,7 @@ public class OrderQueryService {
     AdminOperationLogMapper adminOperationLogMapper,
     AdminUserMapper adminUserMapper,
     DishMapper dishMapper,
+    Kuaidi100PrinterService kuaidi100PrinterService,
     Kuaidi100Service kuaidi100Service,
     MiniReservationService miniReservationService,
     ObjectMapper objectMapper,
@@ -119,6 +122,7 @@ public class OrderQueryService {
     this.adminOperationLogMapper = adminOperationLogMapper;
     this.adminUserMapper = adminUserMapper;
     this.dishMapper = dishMapper;
+    this.kuaidi100PrinterService = kuaidi100PrinterService;
     this.kuaidi100Service = kuaidi100Service;
     this.miniReservationService = miniReservationService;
     this.objectMapper = objectMapper;
@@ -653,7 +657,11 @@ public class OrderQueryService {
     AdminSessionDto session
   ) {
     requireActiveOperator(session.adminUserId());
-    List<String> missingConfig = kuaidi100Service.missingConfig();
+    Kuaidi100PrintConfig printConfig = kuaidi100PrinterService.resolvePrintConfig(
+      request.storeId(),
+      request.printerId()
+    );
+    List<String> missingConfig = kuaidi100Service.missingConfig(printConfig);
     if (!missingConfig.isEmpty()) {
       throw new ApiException(
         "KUAIDI100_CONFIG_MISSING",
@@ -675,7 +683,7 @@ public class OrderQueryService {
     List<Kuaidi100PrintFailureDto> failures = new ArrayList<>();
     for (Kuaidi100PrintTaskDto task : tasks) {
       try {
-        successes.add(kuaidi100Service.submitCloudPrint(task));
+        successes.add(kuaidi100Service.submitCloudPrint(task, printConfig));
       } catch (ApiException exception) {
         failures.add(
           new Kuaidi100PrintFailureDto(

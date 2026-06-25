@@ -406,10 +406,8 @@ export function PackageManagementPanel({
           reason: createForm.reason,
           storeId: store.id,
           templateId: createForm.templateId,
-          totalTimes: createForm.totalTimes,
           usedTimes: createForm.usedTimes,
           userId: createForm.userId,
-          weightLimitJin: createForm.weightLimitJin,
         }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -935,15 +933,10 @@ export function PackageManagementPanel({
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   <RequiredLabel>总次数</RequiredLabel>
                   <input
-                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                    min={1}
-                    onChange={(event) =>
-                      setCreateForm((value) => ({
-                        ...value,
-                        totalTimes: event.target.value,
-                      }))
-                    }
-                    type="number"
+                    aria-readonly="true"
+                    className="h-11 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-3 text-[#66756d] outline-none"
+                    readOnly
+                    type="text"
                     value={createForm.totalTimes}
                   />
                 </label>
@@ -965,16 +958,10 @@ export function PackageManagementPanel({
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   <RequiredLabel>单次斤数</RequiredLabel>
                   <input
-                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                    min={0.5}
-                    onChange={(event) =>
-                      setCreateForm((value) => ({
-                        ...value,
-                        weightLimitJin: event.target.value,
-                      }))
-                    }
-                    step={0.5}
-                    type="number"
+                    aria-readonly="true"
+                    className="h-11 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-3 text-[#66756d] outline-none"
+                    readOnly
+                    type="text"
                     value={createForm.weightLimitJin}
                   />
                 </label>

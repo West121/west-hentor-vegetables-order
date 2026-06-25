@@ -47,4 +47,20 @@ describe("package management reserved purchase entry", () => {
     expect(source).toContain("已有订单记录的套餐请使用冻结");
     expect(source).toContain('method: isAdjust ? "PATCH" : isDelete ? "DELETE" : "POST"');
   });
+
+  it("keeps template-derived package totals read-only during creation", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/package-management-panel.tsx"),
+      "utf8",
+    );
+    const createPayload = source.match(
+      /fetch\("\/api\/admin\/user-packages"[\s\S]*?method: "POST"/,
+    )?.[0];
+
+    expect(source).toContain("updateCreateTemplate(templateId)");
+    expect(source).toContain("readOnly");
+    expect(createPayload).toBeTruthy();
+    expect(createPayload).not.toContain("totalTimes: createForm.totalTimes");
+    expect(createPayload).not.toContain("weightLimitJin: createForm.weightLimitJin");
+  });
 });

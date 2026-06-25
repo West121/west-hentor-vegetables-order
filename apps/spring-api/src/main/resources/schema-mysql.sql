@@ -276,6 +276,32 @@ CREATE TABLE IF NOT EXISTS `OrderShipment` (
   KEY `OrderShipment_orderId_sortOrder_idx` (`orderId`, `sortOrder`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `Kuaidi100Printer` (
+  `id` varchar(191) PRIMARY KEY,
+  `storeId` varchar(191) NOT NULL,
+  `name` varchar(191) NOT NULL,
+  `status` varchar(32) NOT NULL DEFAULT 'ACTIVE',
+  `isDefault` boolean NOT NULL DEFAULT false,
+  `apiKey` varchar(191),
+  `apiSecret` varchar(191),
+  `partnerId` varchar(191),
+  `partnerKey` varchar(191),
+  `code` varchar(191),
+  `kuaidicom` varchar(64),
+  `expType` varchar(191),
+  `payType` varchar(64),
+  `siid` varchar(191) NOT NULL,
+  `tempId` varchar(191),
+  `senderCompany` varchar(191),
+  `requestParams` json,
+  `sortOrder` int NOT NULL DEFAULT 0,
+  `remark` text,
+  `createdAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY `Kuaidi100Printer_storeId_status_idx` (`storeId`, `status`),
+  KEY `Kuaidi100Printer_storeId_default_idx` (`storeId`, `isDefault`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `OrderChangeLog` (
   `id` varchar(191) PRIMARY KEY,
   `orderId` varchar(191) NOT NULL,
@@ -404,4 +430,3 @@ CREATE TABLE IF NOT EXISTS `PaymentOrder` (
   `createdAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-

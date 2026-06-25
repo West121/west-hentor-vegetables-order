@@ -254,11 +254,12 @@ public class MiniReservationService {
   }
 
   private TaskEntity loadActiveTask(String storeId, LocalDateTime now) {
+    taskMapper.disableExpiredActiveTasks(storeId, now, now);
     return taskMapper.selectOne(
       new LambdaQueryWrapper<TaskEntity>()
         .eq(TaskEntity::getStoreId, storeId)
         .le(TaskEntity::getStartsAt, now)
-        .ge(TaskEntity::getEndsAt, now)
+        .gt(TaskEntity::getEndsAt, now)
         .apply("\"status\" = 'ACTIVE'")
         .orderByDesc(TaskEntity::getStartsAt)
         .orderByDesc(TaskEntity::getCreatedAt)

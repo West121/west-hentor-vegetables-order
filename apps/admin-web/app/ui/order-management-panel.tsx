@@ -166,6 +166,14 @@ type OrderSummary = {
   total: number;
 };
 
+type KuaidiPrinterOption = {
+  id: string;
+  isDefault: boolean;
+  name: string;
+  siid: string;
+  status: string;
+};
+
 type OrderListFilters = {
   dateFrom: string;
   dateTo: string;
@@ -517,6 +525,9 @@ export function OrderManagementPanel({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [saving, setSaving] = useState(false);
   const [cloudPrinting, setCloudPrinting] = useState(false);
+  const [printerOptions, setPrinterOptions] = useState<KuaidiPrinterOption[]>([]);
+  const [pendingPrintOrderIds, setPendingPrintOrderIds] = useState<string[]>([]);
+  const [printerSelectorOpen, setPrinterSelectorOpen] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -785,6 +796,52 @@ export function OrderManagementPanel({
       return;
     }
 
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const printers = await loadActivePrinters();
+      if (printers.length > 2) {
+        setPrinterOptions(printers);
+        setPendingPrintOrderIds(ids);
+        setPrinterSelectorOpen(true);
+        return;
+      }
+      const preferredPrinter = printers.find((printer) => printer.isDefault) ?? printers[0];
+      await submitCloudPrintOrders(ids, preferredPrinter?.id ?? null);
+    } catch (printError) {
+      setError(
+        printError instanceof Error ? printError.message : "电子面单生成失败",
+      );
+    }
+  }
+
+  async function loadActivePrinters() {
+    if (!store) {
+      return [];
+    }
+    const params = new URLSearchParams({
+      pageSize: "100",
+      status: "ACTIVE",
+      storeId: store.id,
+    });
+    const response = await fetch(`/api/admin/kuaidi-printers?${params.toString()}`);
+    const result = (await response.json()) as {
+      data?: { items?: KuaidiPrinterOption[] };
+      error?: { message: string };
+      success: boolean;
+    };
+    if (!response.ok || !result.success) {
+      throw new Error(result.error?.message ?? "加载打印机失败");
+    }
+    return (result.data?.items ?? []).filter((printer) => printer.status === "ACTIVE");
+  }
+
+  async function submitCloudPrintOrders(orderIds: string[], printerId: string | null) {
+    if (!store) {
+      return;
+    }
+
     setCloudPrinting(true);
     setError(null);
     setSuccessMessage(null);
@@ -792,7 +849,8 @@ export function OrderManagementPanel({
     try {
       const response = await fetch("/api/admin/orders/print-labels", {
         body: JSON.stringify({
-          orderIds: ids,
+          orderIds,
+          printerId,
           storeId: store.id,
         }),
         headers: { "content-type": "application/json" },
@@ -824,7 +882,7 @@ export function OrderManagementPanel({
         throw new Error(failureMessage || "电子面单生成失败");
       }
 
-      const successCount = result.data?.successCount ?? ids.length;
+      const successCount = result.data?.successCount ?? orderIds.length;
       await loadOrders();
       setSelectedOrderIds([]);
       setSuccessMessage(`电子面单生成成功，已处理 ${successCount} 个包裹`);
@@ -835,6 +893,13 @@ export function OrderManagementPanel({
     } finally {
       setCloudPrinting(false);
     }
+  }
+
+  function choosePrinter(printerId: string) {
+    const ids = pendingPrintOrderIds;
+    setPrinterSelectorOpen(false);
+    setPendingPrintOrderIds([]);
+    void submitCloudPrintOrders(ids, printerId);
   }
 
   function toggleOrderSelection(orderId: string, checked: boolean) {
@@ -2033,6 +2098,62 @@ export function OrderManagementPanel({
                   {saving ? "提交中" : "提交订单"}
                 </button>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {printerSelectorOpen ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#07140c]/40 p-5">
+          <div
+            aria-modal="true"
+            className="w-full max-w-lg overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl shadow-[#0f2418]/20"
+            role="dialog"
+          >
+            <div className="border-b border-[#edf2ed] px-6 py-5">
+              <h3 className="text-lg font-semibold text-[#102017]">选择电子面单打印机</h3>
+              <div className="mt-2 text-sm leading-6 text-[#66756d]">
+                已选择 {pendingPrintOrderIds.length} 个订单，选择打印机后开始生成电子面单。
+              </div>
+            </div>
+            <div className="max-h-[50vh] overflow-auto p-4">
+              <div className="grid gap-3">
+                {printerOptions.map((printer) => (
+                  <button
+                    className="flex items-center justify-between gap-4 rounded-2xl border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-4 text-left transition hover:border-[#1f8f4f] hover:bg-[#eff8f1]"
+                    disabled={cloudPrinting}
+                    key={printer.id}
+                    onClick={() => choosePrinter(printer.id)}
+                    type="button"
+                  >
+                    <span>
+                      <span className="block font-semibold text-[#102017]">
+                        {printer.name}
+                      </span>
+                      <span className="mt-1 block text-xs text-[#66756d]">
+                        siid：{printer.siid}
+                      </span>
+                    </span>
+                    {printer.isDefault ? (
+                      <span className="rounded-full bg-[#e8f6ed] px-3 py-1 text-xs font-semibold text-[#1f8f4f]">
+                        默认
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-[#edf2ed] px-6 py-4">
+              <button
+                className="h-10 rounded-xl border border-[#dbe6dc] px-5 text-sm font-semibold text-[#405248]"
+                disabled={cloudPrinting}
+                onClick={() => {
+                  setPrinterSelectorOpen(false);
+                  setPendingPrintOrderIds([]);
+                }}
+                type="button"
+              >
+                取消
+              </button>
             </div>
           </div>
         </div>

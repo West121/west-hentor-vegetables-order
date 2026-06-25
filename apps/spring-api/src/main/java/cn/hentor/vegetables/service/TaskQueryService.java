@@ -82,6 +82,7 @@ public class TaskQueryService {
     long pageSize
   ) {
     requireStore(storeId);
+    disableExpiredTasks(storeId);
     validateOptionalStatus(status);
 
     long normalizedPage = Math.max(page, 1);
@@ -111,6 +112,7 @@ public class TaskQueryService {
 
   public TaskResponse get(String storeId, String taskId) {
     StoreEntity store = requireStore(storeId);
+    disableExpiredTasks(storeId);
     TaskEntity task = requireTask(storeId, taskId);
     List<TaskDishEntity> links = taskDishMapper.selectList(
       new LambdaQueryWrapper<TaskDishEntity>()
@@ -127,6 +129,7 @@ public class TaskQueryService {
   public TaskResponse create(TaskRequest request, AdminSessionDto session) {
     AdminUserEntity operator = requireActiveOperator(session.adminUserId());
     StoreEntity store = requireStore(request.storeId());
+    disableExpiredTasks(request.storeId());
     NormalizedTaskInput input = normalizeTaskInput(request);
     ensureTaskTimeRangeAvailable(request.storeId(), input.startsAt(), input.endsAt(), input.status(), null);
     ensureTaskDishes(request.storeId(), input.dishIds());
@@ -162,6 +165,7 @@ public class TaskQueryService {
   public TaskResponse update(String taskId, TaskRequest request, AdminSessionDto session) {
     AdminUserEntity operator = requireActiveOperator(session.adminUserId());
     StoreEntity store = requireStore(request.storeId());
+    disableExpiredTasks(request.storeId());
     TaskEntity existing = requireTask(request.storeId(), taskId);
     List<TaskDishEntity> beforeLinks = loadLinks(existing.getId());
 
@@ -209,6 +213,7 @@ public class TaskQueryService {
   public TaskResponse copy(String sourceTaskId, TaskCopyRequest request, AdminSessionDto session) {
     AdminUserEntity operator = requireActiveOperator(session.adminUserId());
     StoreEntity store = requireStore(request.storeId());
+    disableExpiredTasks(request.storeId());
     TaskEntity source = requireTask(request.storeId(), sourceTaskId);
     NormalizedTaskInput input = normalizeTaskInput(
       new TaskRequest(
@@ -256,6 +261,7 @@ public class TaskQueryService {
   public TaskResponse cancel(String taskId, String storeId, AdminSessionDto session) {
     AdminUserEntity operator = requireActiveOperator(session.adminUserId());
     StoreEntity store = requireStore(storeId);
+    disableExpiredTasks(storeId);
     TaskEntity existing = requireTask(storeId, taskId);
     if ("DISABLED".equals(existing.getStatus())) {
       List<TaskDishEntity> links = loadLinks(existing.getId());
@@ -329,6 +335,11 @@ public class TaskQueryService {
         .apply("\"status\" = {0}", status)
     );
     return count == null ? 0 : count;
+  }
+
+  private void disableExpiredTasks(String storeId) {
+    LocalDateTime now = LocalDateTime.now();
+    taskMapper.disableExpiredActiveTasks(storeId, now, now);
   }
 
   private Map<String, List<TaskDishEntity>> loadTaskDishLinks(List<TaskEntity> tasks) {
