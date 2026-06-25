@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   buildAdminMenuTree,
@@ -503,8 +503,10 @@ export default function DashboardPage() {
   const selectedStoreId = searchParams.get("storeId");
   const [session, setSession] = useState<AdminSession | null>(null);
   const [data, setData] = useState<DashboardData | null>(null);
+  const [dataRevision, setDataRevision] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const lastLoadedSectionRef = useRef<AdminSectionId | null>(null);
 
   const permissionCodes = session?.permissionCodes ?? [];
   const hasPermission = (code: string) => permissionCodes.includes(code);
@@ -554,6 +556,53 @@ export default function DashboardPage() {
       cancelled = true;
     };
   }, [router, selectedStoreId]);
+
+  useEffect(() => {
+    if (!session || !data) {
+      return;
+    }
+
+    if (lastLoadedSectionRef.current === null) {
+      lastLoadedSectionRef.current = activeSection;
+      return;
+    }
+
+    if (lastLoadedSectionRef.current === activeSection) {
+      return;
+    }
+
+    lastLoadedSectionRef.current = activeSection;
+    const currentSession = session;
+    let cancelled = false;
+
+    async function refreshDashboardData() {
+      setError("");
+      try {
+        const nextData = await loadDashboardData(currentSession, selectedStoreId);
+        if (!cancelled) {
+          setData(nextData);
+          setDataRevision((value) => value + 1);
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          const message =
+            caught instanceof Error ? caught.message : "刷新后台数据失败";
+          if (message.includes("请先登录") || message.includes("登录已过期")) {
+            router.replace("/login");
+            window.location.replace("/login");
+            return;
+          }
+          setError(message.includes("aborted") ? "后台数据请求超时" : message);
+        }
+      }
+    }
+
+    void refreshDashboardData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, data, router, selectedStoreId, session]);
 
   if (error) {
     return (
@@ -644,8 +693,9 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
-        {activeSection === "overview" ? (
-          <>
+        <div key={`${activeSection}-${dataRevision}`} className="contents">
+          {activeSection === "overview" ? (
+            <>
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {[
                 ["活跃会员", data.members, "会员与后台用户分开管理"],
@@ -676,158 +726,159 @@ export default function DashboardPage() {
                 套餐购买已预留 purchase order、payment order 和微信支付字段，当前状态为未启用支付。
               </p>
             </section>
-          </>
-        ) : null}
+            </>
+          ) : null}
 
-        {activeSection === "orders" ? (
-          <OrderManagementPanel
-            dishOptions={data.dishes.map((dish) => ({
-              id: dish.id,
-              name: dish.name,
-              status: dish.status,
-              stepJin: dish.stepJin,
-              stockJin: dish.stockJin,
-            }))}
-            initialItems={data.storeOrders}
-            initialPagination={data.storeOrderPagination}
-            initialSummary={data.storeOrderSummary}
-            memberOptions={data.memberOptions.map((member) => ({
-              avatarUrl: member.avatarUrl,
-              defaultAddress: member.defaultAddress,
-              id: member.id ?? member.userId,
-              latestActivePackage: member.latestActivePackage,
-              nickname: member.nickname,
-              phone: member.phone,
-            }))}
-            orderTasks={data.activeOrderTasks}
-            canWrite={hasPermission("orders.write")}
-            store={activeStore}
-          />
-        ) : null}
+          {activeSection === "orders" ? (
+            <OrderManagementPanel
+              dishOptions={data.dishes.map((dish) => ({
+                id: dish.id,
+                name: dish.name,
+                status: dish.status,
+                stepJin: dish.stepJin,
+                stockJin: dish.stockJin,
+              }))}
+              initialItems={data.storeOrders}
+              initialPagination={data.storeOrderPagination}
+              initialSummary={data.storeOrderSummary}
+              memberOptions={data.memberOptions.map((member) => ({
+                avatarUrl: member.avatarUrl,
+                defaultAddress: member.defaultAddress,
+                id: member.id ?? member.userId,
+                latestActivePackage: member.latestActivePackage,
+                nickname: member.nickname,
+                phone: member.phone,
+              }))}
+              orderTasks={data.activeOrderTasks}
+              canWrite={hasPermission("orders.write")}
+              store={activeStore}
+            />
+          ) : null}
 
-        {activeSection === "shipment-stats" ? (
-          <ShipmentStatsPanel
-            categoryOptions={data.dishCategoryOptions}
-            store={activeStore}
-          />
-        ) : null}
+          {activeSection === "shipment-stats" ? (
+            <ShipmentStatsPanel
+              categoryOptions={data.dishCategoryOptions}
+              store={activeStore}
+            />
+          ) : null}
 
-        {activeSection === "members" ? (
-          <MemberManagementPanel
-            initialItems={data.storeMembers}
-            initialPagination={data.storeMemberPagination}
-            initialSummary={data.storeMemberSummary}
-            canWrite={hasPermission("members.write")}
-            store={activeStore}
-          />
-        ) : null}
+          {activeSection === "members" ? (
+            <MemberManagementPanel
+              initialItems={data.storeMembers}
+              initialPagination={data.storeMemberPagination}
+              initialSummary={data.storeMemberSummary}
+              canWrite={hasPermission("members.write")}
+              store={activeStore}
+            />
+          ) : null}
 
-        {activeSection === "user-packages" ? (
-          <PackageManagementPanel
-            initialItems={data.userPackages}
-            initialPagination={data.userPackagePagination}
-            initialSummary={data.userPackageSummary}
-            memberOptions={data.memberOptions.map((member) => ({
-              avatarUrl: member.avatarUrl,
-              id: member.id ?? member.userId,
-              nickname: member.nickname,
-              phone: member.phone,
-            }))}
-            packageTemplateOptions={data.packageTemplateOptions.map((template) => ({
-              id: template.id,
-              name: template.name,
-              totalTimes: template.totalTimes,
-              weightLimitJin: template.weightLimitJin,
-            }))}
-            canWrite={hasPermission("members.write")}
-            store={activeStore}
-          />
-        ) : null}
+          {activeSection === "user-packages" ? (
+            <PackageManagementPanel
+              initialItems={data.userPackages}
+              initialPagination={data.userPackagePagination}
+              initialSummary={data.userPackageSummary}
+              memberOptions={data.memberOptions.map((member) => ({
+                avatarUrl: member.avatarUrl,
+                id: member.id ?? member.userId,
+                nickname: member.nickname,
+                phone: member.phone,
+              }))}
+              packageTemplateOptions={data.packageTemplateOptions.map((template) => ({
+                id: template.id,
+                name: template.name,
+                totalTimes: template.totalTimes,
+                weightLimitJin: template.weightLimitJin,
+              }))}
+              canWrite={hasPermission("members.write")}
+              store={activeStore}
+            />
+          ) : null}
 
-        {activeSection === "package-templates" ? (
-          <PackageTemplateManagementPanel
-            initialItems={data.packageTemplates}
-            initialPagination={data.packageTemplatePagination}
-            initialSummary={data.packageTemplateSummary}
-            canWrite={hasPermission("packages.write")}
-            store={activeStore}
-          />
-        ) : null}
+          {activeSection === "package-templates" ? (
+            <PackageTemplateManagementPanel
+              initialItems={data.packageTemplates}
+              initialPagination={data.packageTemplatePagination}
+              initialSummary={data.packageTemplateSummary}
+              canWrite={hasPermission("packages.write")}
+              store={activeStore}
+            />
+          ) : null}
 
-        {activeSection === "dishes" ? (
-          <DishManagementPanel
-            categoryOptions={data.dishCategoryOptions}
-            initialItems={data.dishes}
-            initialPagination={data.dishPagination}
-            initialSummary={data.dishSummary}
-            canWrite={hasPermission("dishes.write")}
-            store={activeStore}
-          />
-        ) : null}
+          {activeSection === "dishes" ? (
+            <DishManagementPanel
+              categoryOptions={data.dishCategoryOptions}
+              initialItems={data.dishes}
+              initialPagination={data.dishPagination}
+              initialSummary={data.dishSummary}
+              canWrite={hasPermission("dishes.write")}
+              store={activeStore}
+            />
+          ) : null}
 
-        {activeSection === "tasks" ? (
-          <TaskManagementPanel
-            categoryOptions={data.dishCategoryOptions}
-            dishOptions={data.dishOptions}
-            initialItems={data.tasks}
-            initialPagination={data.taskPagination}
-            initialSummary={data.taskSummary}
-            canWrite={hasPermission("tasks.write")}
-            store={activeStore}
-          />
-        ) : null}
+          {activeSection === "tasks" ? (
+            <TaskManagementPanel
+              categoryOptions={data.dishCategoryOptions}
+              dishOptions={data.dishOptions}
+              initialItems={data.tasks}
+              initialPagination={data.taskPagination}
+              initialSummary={data.taskSummary}
+              canWrite={hasPermission("tasks.write")}
+              store={activeStore}
+            />
+          ) : null}
 
-        {activeSection === "admin-users" ? (
-          <SystemManagementPanel
-            initialAdminUsers={data.adminUsers}
-            initialPagination={data.adminUserPagination}
-            initialSummary={data.adminUserSummary}
-            roles={data.roles}
-            stores={data.stores}
-          />
-        ) : null}
+          {activeSection === "admin-users" ? (
+            <SystemManagementPanel
+              initialAdminUsers={data.adminUsers}
+              initialPagination={data.adminUserPagination}
+              initialSummary={data.adminUserSummary}
+              roles={data.roles}
+              stores={data.stores}
+            />
+          ) : null}
 
-        {activeSection === "roles" ? (
-          <RoleManagementPanel
-            initialPagination={data.rolePagination}
-            initialRoles={data.roleRows}
-            initialSummary={data.roleSummary}
-            permissions={data.permissions}
-          />
-        ) : null}
+          {activeSection === "roles" ? (
+            <RoleManagementPanel
+              initialPagination={data.rolePagination}
+              initialRoles={data.roleRows}
+              initialSummary={data.roleSummary}
+              permissions={data.permissions}
+            />
+          ) : null}
 
-        {activeSection === "menus" ? (
-          <MenuManagementPanel menuTree={data.menuTree} />
-        ) : null}
+          {activeSection === "menus" ? (
+            <MenuManagementPanel menuTree={data.menuTree} />
+          ) : null}
 
-        {activeSection === "dictionaries" ? (
-          <SystemDictionaryPanel
-            initialDictionaries={data.dictionaries}
-            initialItems={data.dishCategoryOptions}
-            store={activeStore}
-          />
-        ) : null}
+          {activeSection === "dictionaries" ? (
+            <SystemDictionaryPanel
+              initialDictionaries={data.dictionaries}
+              initialItems={data.dishCategoryOptions}
+              store={activeStore}
+            />
+          ) : null}
 
-        {activeSection === "kuaidi-printers" ? (
-          <KuaidiPrinterManagementPanel
-            initialItems={data.kuaidiPrinters}
-            initialPagination={data.kuaidiPrinterPagination}
-            initialSummary={data.kuaidiPrinterSummary}
-            store={activeStore}
-          />
-        ) : null}
+          {activeSection === "kuaidi-printers" ? (
+            <KuaidiPrinterManagementPanel
+              initialItems={data.kuaidiPrinters}
+              initialPagination={data.kuaidiPrinterPagination}
+              initialSummary={data.kuaidiPrinterSummary}
+              store={activeStore}
+            />
+          ) : null}
 
-        {activeSection === "operation-logs" ? (
-          <OperationLogsPanel
-            initialLogs={data.operationLogs}
-            initialPagination={data.operationLogPagination}
-            logStoreId={activeStore?.id ?? null}
-          />
-        ) : null}
+          {activeSection === "operation-logs" ? (
+            <OperationLogsPanel
+              initialLogs={data.operationLogs}
+              initialPagination={data.operationLogPagination}
+              logStoreId={activeStore?.id ?? null}
+            />
+          ) : null}
 
-        {activeSection === "system-settings" ? (
-          <SystemSettingsPanel initialSettings={data.systemSettings} store={activeStore} />
-        ) : null}
+          {activeSection === "system-settings" ? (
+            <SystemSettingsPanel initialSettings={data.systemSettings} store={activeStore} />
+          ) : null}
+        </div>
       </main>
     </AdminShell>
   );

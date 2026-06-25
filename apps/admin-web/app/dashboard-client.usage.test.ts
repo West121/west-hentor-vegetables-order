@@ -24,4 +24,11 @@ describe("dashboard permission wiring", () => {
     expect(source).toContain("当前账号未分配数据范围");
     expect(source).toContain("新增、编辑、电子面单等操作已禁用");
   });
+
+  it("refreshes and remounts section lists after menu switching", () => {
+    expect(source).toContain("lastLoadedSectionRef");
+    expect(source).toContain("setDataRevision");
+    expect(source).toContain("refreshDashboardData");
+    expect(source).toContain("key={`${activeSection}-${dataRevision}`}");
+  });
 });
