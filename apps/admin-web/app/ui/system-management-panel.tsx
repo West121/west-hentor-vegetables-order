@@ -42,6 +42,7 @@ type StoreOption = {
 };
 
 type RoleOption = {
+  code: string;
   id: string;
   name: string;
 };
@@ -123,19 +124,33 @@ type ApiResponse<T> = {
 function buildFormState(
   item: AdminUserPanelItem | null,
   roles: RoleOption[],
+  stores: StoreOption[],
 ): FormState {
+  const defaultStore = stores.length === 1 ? stores[0] : null;
+
   return {
     name: item?.name ?? "",
     password: "",
     phone: item?.phone ?? "",
     roleIds: item?.roleIds ?? (roles[0] ? [roles[0].id] : []),
     status: item?.status ?? "ACTIVE",
-    storeIds: item?.storeIds ?? [],
+    storeIds: item?.storeIds ?? (defaultStore ? [defaultStore.id] : []),
     username: item?.username ?? "",
   };
 }
 
-function validateAdminUserForm(mode: ModalState["mode"], form: FormState) {
+function hasAllDataScope(roleOptions: RoleOption[], roleIds: string[]) {
+  const selectedRoleIds = new Set(roleIds);
+  return roleOptions.some(
+    (role) => role.code === "super_admin" && selectedRoleIds.has(role.id),
+  );
+}
+
+function validateAdminUserForm(
+  mode: ModalState["mode"],
+  form: FormState,
+  roleOptions: RoleOption[],
+) {
   if (mode === "password") {
     return form.password.trim().length < 8 ? "新密码至少需要 8 位" : null;
   }
@@ -155,6 +170,9 @@ function validateAdminUserForm(mode: ModalState["mode"], form: FormState) {
   if (!form.status) {
     return "请选择用户状态";
   }
+  if (!hasAllDataScope(roleOptions, form.roleIds) && form.storeIds.length === 0) {
+    return "请选择至少一个数据范围";
+  }
 
   return null;
 }
@@ -167,6 +185,16 @@ function toggleValue(values: string[], value: string) {
   return values.includes(value)
     ? values.filter((item) => item !== value)
     : [...values, value];
+}
+
+function formatDataScope(
+  item: AdminUserPanelItem,
+  roleOptions: RoleOption[],
+) {
+  if (hasAllDataScope(roleOptions, item.roleIds)) {
+    return "全部数据";
+  }
+  return item.storeNames.length ? item.storeNames.join("、") : "未分配";
 }
 
 export function SystemManagementPanel({
@@ -182,10 +210,10 @@ export function SystemManagementPanel({
   const [roleOptions, setRoleOptions] = useState(roles);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [form, setForm] = useState<FormState>(() =>
-    buildFormState(null, roleOptions),
+    buildFormState(null, roleOptions, stores),
   );
   const [initialForm, setInitialForm] = useState<FormState>(() =>
-    buildFormState(null, roleOptions),
+    buildFormState(null, roleOptions, stores),
   );
   const [fullscreen, setFullscreen] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -212,7 +240,7 @@ export function SystemManagementPanel({
   }
 
   function openCreateModal() {
-    const nextForm = buildFormState(null, roleOptions);
+    const nextForm = buildFormState(null, roleOptions, stores);
     setModal({ item: null, mode: "create" });
     setForm(nextForm);
     setInitialForm(nextForm);
@@ -221,7 +249,7 @@ export function SystemManagementPanel({
   }
 
   function openEditModal(item: AdminUserPanelItem) {
-    const nextForm = buildFormState(item, roleOptions);
+    const nextForm = buildFormState(item, roleOptions, stores);
     setModal({ item, mode: "edit" });
     setForm(nextForm);
     setInitialForm(nextForm);
@@ -231,7 +259,7 @@ export function SystemManagementPanel({
   }
 
   function openDetailModal(item: AdminUserPanelItem) {
-    const nextForm = buildFormState(item, roleOptions);
+    const nextForm = buildFormState(item, roleOptions, stores);
     setModal({ item, mode: "detail" });
     setForm(nextForm);
     setInitialForm(nextForm);
@@ -241,7 +269,7 @@ export function SystemManagementPanel({
   }
 
   function openPasswordModal(item: AdminUserPanelItem) {
-    const nextForm = { ...buildFormState(item, roleOptions), password: "" };
+    const nextForm = { ...buildFormState(item, roleOptions, stores), password: "" };
     setModal({ item, mode: "password" });
     setForm(nextForm);
     setInitialForm(nextForm);
@@ -271,7 +299,7 @@ export function SystemManagementPanel({
 
         return current;
       });
-      const detailForm = buildFormState(detail, roleOptions);
+      const detailForm = buildFormState(detail, roleOptions, stores);
       setInitialForm({ ...detailForm, password: "" });
       setForm((current) =>
         current
@@ -360,6 +388,7 @@ export function SystemManagementPanel({
       }
 
       const nextRoles = result.data.items.map((role) => ({
+        code: role.code,
         id: role.id,
         name: role.name,
       }));
@@ -439,7 +468,11 @@ export function SystemManagementPanel({
       return;
     }
 
-    const validationMessage = validateAdminUserForm(modal.mode, form);
+    const validationMessage = validateAdminUserForm(
+      modal.mode,
+      form,
+      roleOptions,
+    );
     if (validationMessage) {
       setError(validationMessage);
       return;
@@ -490,6 +523,8 @@ export function SystemManagementPanel({
       setSaving(false);
     }
   }
+
+  const formHasAllDataScope = hasAllDataScope(roleOptions, form.roleIds);
 
   return (
     <section className="grid gap-5">
@@ -564,6 +599,21 @@ export function SystemManagementPanel({
               ))}
             </select>
           </label>
+          <label className="flex w-44 flex-col gap-1 text-xs font-semibold text-[#66756d]">
+            数据范围
+            <select
+              className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
+              onChange={(event) => setStoreFilter(event.target.value)}
+              value={storeFilter}
+            >
+              <option value="ALL">全部范围</option>
+              {stores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {store.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
             disabled={loadingList}
@@ -588,6 +638,7 @@ export function SystemManagementPanel({
               <tr>
                 <th className="px-4 py-3 font-medium">账号</th>
                 <th className="px-4 py-3 font-medium">角色</th>
+                <th className="px-4 py-3 font-medium">数据范围</th>
                 <th className="px-4 py-3 font-medium">状态</th>
                 <th className="px-4 py-3 font-medium">最近登录</th>
                 <th className="px-4 py-3 text-right font-medium">操作</th>
@@ -607,6 +658,20 @@ export function SystemManagementPanel({
                   <td className="px-4 py-4">
                     <div className="max-w-40 truncate">
                       {item.roleNames.join("、") || "未分配"}
+                    </div>
+                  </td>
+                  <td className="px-4 py-4">
+                    <div
+                      className={[
+                        "max-w-44 truncate text-sm",
+                        item.storeNames.length ||
+                        hasAllDataScope(roleOptions, item.roleIds)
+                          ? "text-[#15261d]"
+                          : "font-semibold text-amber-700",
+                      ].join(" ")}
+                      title={formatDataScope(item, roleOptions)}
+                    >
+                      {formatDataScope(item, roleOptions)}
                     </div>
                   </td>
                   <td className="px-4 py-4">
@@ -649,7 +714,7 @@ export function SystemManagementPanel({
               ))}
               {adminUsers.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-[#66756d]" colSpan={5}>
+                  <td className="px-4 py-10 text-center text-[#66756d]" colSpan={6}>
                     暂无后台用户
                   </td>
                 </tr>
@@ -884,6 +949,64 @@ export function SystemManagementPanel({
                         );
                       })}
                     </div>
+                  </div>
+                  <div className="md:col-span-2">
+                    <div className="mb-2 flex items-center justify-between gap-3 text-sm font-medium">
+                      <RequiredLabel>数据范围</RequiredLabel>
+                      <span className="text-xs font-normal text-[#66756d]">
+                        {formHasAllDataScope
+                          ? "超级管理员默认可访问全部数据"
+                          : "决定该账号可查看和操作的业务数据"}
+                      </span>
+                    </div>
+                    {formHasAllDataScope ? (
+                      <div className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-3 text-sm font-semibold text-[#1f8f4f]">
+                        全部数据
+                      </div>
+                    ) : (
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {stores.map((store) => {
+                          const checked = form.storeIds.includes(store.id);
+                          return (
+                            <button
+                              aria-pressed={checked}
+                              className={[
+                                "flex h-11 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition",
+                                checked
+                                  ? "border-[#8ecaa1] bg-[#eef8f0] text-[#1f8f4f]"
+                                  : "border-[#dbe6dc] bg-white text-[#405248] hover:bg-[#f8fbf7]",
+                              ].join(" ")}
+                              disabled={modal.mode === "detail"}
+                              key={store.id}
+                              onClick={() =>
+                                updateForm(
+                                  "storeIds",
+                                  toggleValue(form.storeIds, store.id),
+                                )
+                              }
+                              type="button"
+                            >
+                              <span className="truncate">{store.name}</span>
+                              <span
+                                className={[
+                                  "grid h-5 w-5 shrink-0 place-items-center rounded-full border text-xs",
+                                  checked
+                                    ? "border-[#1f8f4f] bg-[#1f8f4f] text-white"
+                                    : "border-[#bfd5c6] text-transparent",
+                                ].join(" ")}
+                              >
+                                ✓
+                              </span>
+                            </button>
+                          );
+                        })}
+                        {stores.length === 0 ? (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 md:col-span-2">
+                            暂无可分配的数据范围
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

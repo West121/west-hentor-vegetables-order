@@ -31,6 +31,22 @@ describe("system management user modal usage", () => {
     expect(source).not.toContain('type="checkbox"');
   });
 
+  it("lets administrators assign data scope when creating or editing backend users", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/system-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("storeIds");
+    expect(source).toContain("请选择至少一个数据范围");
+    expect(source).toContain("数据范围");
+    expect(source).toContain("formHasAllDataScope");
+    expect(source).toContain("超级管理员默认可访问全部数据");
+    expect(source).toContain("toggleValue(form.storeIds, store.id)");
+    expect(source).toContain("formatDataScope");
+    expect(source).toContain("未分配");
+  });
+
   it("refreshes role options before creating or editing admin users", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/system-management-panel.tsx"),

@@ -122,7 +122,7 @@ type DashboardData = {
   rolePagination: ReturnType<typeof emptyPagination>;
   roleRows: RolePanelItem[];
   roleSummary: any;
-  roles: Array<{ id: string; name: string }>;
+  roles: Array<{ code: string; id: string; name: string }>;
   storeAccessScope: string;
   storeMemberPagination: ReturnType<typeof emptyPagination>;
   storeMemberSummary: any;
@@ -468,6 +468,7 @@ async function loadDashboardData(
     roleRows,
     roleSummary: roles.summary,
     roles: roleRows.map((role) => ({
+      code: role.code,
       id: role.id,
       name: role.name,
     })),
