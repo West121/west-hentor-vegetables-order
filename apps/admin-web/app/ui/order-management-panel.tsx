@@ -9,7 +9,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useRef, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 
 import {
   AdminPagination,
@@ -73,6 +73,15 @@ type OrderDishOption = {
   status: string;
   stepJin: number;
   stockJin: number;
+};
+
+type OrderCutoffTask = {
+  cutoffTime: string;
+  endsAt: string;
+  id: string;
+  name: string;
+  startsAt: string;
+  status: string;
 };
 
 type OrderStatus =
@@ -144,6 +153,7 @@ type OrderManagementPanelProps = {
   initialPagination: AdminPaginationMeta;
   initialSummary: OrderSummary;
   memberOptions: OrderMemberOption[];
+  orderTasks?: OrderCutoffTask[];
   store: StoreOption | null;
 };
 
@@ -322,6 +332,110 @@ function canCreateElectronicWaybill(order: OrderPanelItem) {
   return order.status === "PENDING_SHIPMENT" && !hasGeneratedLogistics(order);
 }
 
+function parseTaskDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfLocalDay(date: Date) {
+  const day = new Date(date);
+  day.setHours(0, 0, 0, 0);
+  return day;
+}
+
+function endOfLocalDay(date: Date) {
+  const day = new Date(date);
+  day.setHours(23, 59, 59, 999);
+  return day;
+}
+
+function parseCutoffAt(cutoffTime: string, now: Date) {
+  const match = cutoffTime.trim().match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  if (!match) {
+    return null;
+  }
+
+  const cutoffAt = new Date(now);
+  cutoffAt.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  return cutoffAt;
+}
+
+function findTodayCutoffTask(tasks: OrderCutoffTask[], now: Date) {
+  const todayStart = startOfLocalDay(now);
+  const todayEnd = endOfLocalDay(now);
+
+  return tasks
+    .filter((task) => String(task.status).toUpperCase() === "ACTIVE")
+    .map((task) => ({
+      task,
+      endsAt: parseTaskDate(task.endsAt),
+      startsAt: parseTaskDate(task.startsAt),
+    }))
+    .filter((item): item is { task: OrderCutoffTask; startsAt: Date; endsAt: Date } => {
+      const startsAt = item.startsAt;
+      const endsAt = item.endsAt;
+
+      return (
+        startsAt !== null &&
+        endsAt !== null &&
+        startsAt <= todayEnd &&
+        endsAt >= todayStart
+      );
+    })
+    .sort((left, right) => {
+      const leftRunning = left.startsAt <= now && left.endsAt >= now;
+      const rightRunning = right.startsAt <= now && right.endsAt >= now;
+
+      if (leftRunning !== rightRunning) {
+        return leftRunning ? -1 : 1;
+      }
+
+      return left.endsAt.getTime() - right.endsAt.getTime();
+    })[0]?.task;
+}
+
+function buildCutoffDisplay(tasks: OrderCutoffTask[], now: Date) {
+  const task = findTodayCutoffTask(tasks, now);
+  if (!task) {
+    return {
+      cutoffText: "未设置",
+      detailLines: ["今日无任务"],
+      tone: "muted" as const,
+    };
+  }
+
+  const cutoffAt = parseCutoffAt(task.cutoffTime, now);
+  if (!cutoffAt) {
+    return {
+      cutoffText: "未设置",
+      detailLines: ["截单时间异常"],
+      tone: "warning" as const,
+    };
+  }
+
+  if (now >= cutoffAt) {
+    return {
+      cutoffText: task.cutoffTime,
+      detailLines: ["已截单"],
+      tone: "danger" as const,
+    };
+  }
+
+  const remainingMinutes = Math.max(
+    0,
+    Math.ceil((cutoffAt.getTime() - now.getTime()) / 60_000),
+  );
+  const hours = Math.floor(remainingMinutes / 60);
+  const minutes = remainingMinutes % 60;
+
+  return {
+    cutoffText: task.cutoffTime,
+    detailLines:
+      hours > 0 ? [`还有 ${hours}小时`, `${minutes}分`] : [`还有 ${minutes}分`],
+    tone: "active" as const,
+  };
+}
+
 function defaultShipmentsForOrder(order: OrderPanelItem) {
   const safeShipments = order.shipments ?? [];
   const safeBenefits = order.benefitItems ?? [];
@@ -377,6 +491,7 @@ export function OrderManagementPanel({
   initialPagination,
   initialSummary,
   memberOptions,
+  orderTasks = [],
   store,
 }: OrderManagementPanelProps) {
   const [items, setItems] = useState(() =>
@@ -404,6 +519,7 @@ export function OrderManagementPanel({
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [now, setNow] = useState(() => new Date());
   const detailRequestRef = useRef(0);
   const dragRef = useRef<{
     pointerId: number;
@@ -432,6 +548,11 @@ export function OrderManagementPanel({
       void hydrateOrderDetail(item);
     }
   }
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   function closeModal() {
     if (saving) {
@@ -1172,6 +1293,13 @@ export function OrderManagementPanel({
   const allPrintableSelected =
     printableOrderIdsInView.length > 0 &&
     printableOrderIdsInView.every((orderId) => selectedOrderIds.includes(orderId));
+  const cutoffDisplay = buildCutoffDisplay(orderTasks, now);
+  const cutoffBadgeClass =
+    cutoffDisplay.tone === "danger"
+      ? "bg-red-50 text-red-700"
+      : cutoffDisplay.tone === "muted"
+        ? "bg-[#eef4ef] text-[#66756d]"
+        : "bg-[#fff1d3] text-[#8a5a00]";
   return (
     <section className="space-y-6">
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
@@ -1194,11 +1322,17 @@ export function OrderManagementPanel({
         <div className="rounded-xl border border-[#dbe6dc] bg-white px-4 py-4 shadow-sm">
           <div className="text-sm font-medium text-[#66756d]">今日截单</div>
           <div className="mt-2 flex items-center justify-between gap-3">
-            <div className="text-3xl font-semibold text-[#102017]">18:00</div>
-            <div className="rounded-full bg-[#fff1d3] px-3 py-1 text-center text-sm font-semibold leading-5 text-[#8a5a00]">
-              还有 3小时
-              <br />
-              12分
+            <div className="text-3xl font-semibold text-[#102017]">
+              {cutoffDisplay.cutoffText}
+            </div>
+            <div
+              className={`rounded-full px-3 py-1 text-center text-sm font-semibold leading-5 ${cutoffBadgeClass}`}
+            >
+              {cutoffDisplay.detailLines.map((line) => (
+                <span className="block" key={line}>
+                  {line}
+                </span>
+              ))}
             </div>
           </div>
         </div>

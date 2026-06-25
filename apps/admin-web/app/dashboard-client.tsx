@@ -116,6 +116,7 @@ type DashboardData = {
   taskPagination: ReturnType<typeof emptyPagination>;
   taskSummary: any;
   tasks: TaskPanelItem[];
+  activeOrderTasks: TaskPanelItem[];
   userDisplay: {
     name: string;
     roles: string;
@@ -278,6 +279,7 @@ async function loadDashboardData(
       params.set("storeId", storeId);
     }
     params.set("take", String(take));
+    params.set("pageSize", String(take));
     return `${path}?${params.toString()}`;
   };
 
@@ -296,6 +298,7 @@ async function loadDashboardData(
     dishes,
     dishOptions,
     tasks,
+    activeOrderTasks,
     operationLogs,
     systemSettings,
     dictionaries,
@@ -374,6 +377,13 @@ async function loadDashboardData(
           { active: 0, disabled: 0, draft: 0, total: 0 },
         )
       : Promise.resolve(emptyList<TaskPanelItem, Record<string, number>>({ active: 0, disabled: 0, draft: 0, total: 0 })),
+    activeStore
+      ? readList<TaskPanelItem, Record<string, number>>(
+          `${withStore("/api/admin/tasks", ADMIN_OPTION_LIMIT)}&status=ACTIVE`,
+          { active: 0, disabled: 0, draft: 0, total: 0 },
+          ADMIN_OPTION_LIMIT,
+        )
+      : Promise.resolve(emptyList<TaskPanelItem, Record<string, number>>({ active: 0, disabled: 0, draft: 0, total: 0 }, ADMIN_OPTION_LIMIT)),
     canManageSystem
       ? readList<OperationLogPanelItem, Record<string, number>>(
           storeParam
@@ -447,6 +457,7 @@ async function loadDashboardData(
     stores: session.stores,
     systemSettings,
     tasks: tasks.items,
+    activeOrderTasks: activeOrderTasks.items,
     taskPagination: tasks.pagination,
     taskSummary: tasks.summary,
     userDisplay: {
@@ -649,6 +660,7 @@ export default function DashboardPage() {
               nickname: member.nickname,
               phone: member.phone,
             }))}
+            orderTasks={data.activeOrderTasks}
             store={activeStore}
           />
         ) : null}

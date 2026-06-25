@@ -85,4 +85,25 @@ describe("order management panel", () => {
     expect(source).toContain("avatarUrl={order.user?.avatarUrl}");
     expect(source).toContain("avatarUrl={modal.item.user?.avatarUrl}");
   });
+
+  it("calculates today's cutoff card from task data instead of fixed copy", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/order-management-panel.tsx"),
+      "utf8",
+    );
+    const cutoffBlock = source.slice(
+      source.indexOf("function buildCutoffDisplay"),
+      source.indexOf("<div className=\"flex flex-nowrap", source.indexOf("今日截单")),
+    );
+
+    expect(source).toContain("orderTasks?: OrderCutoffTask[]");
+    expect(source).toContain("orderTasks = []");
+    expect(source).toContain("const [now, setNow] = useState(() => new Date())");
+    expect(source).toContain("window.setInterval(() => setNow(new Date()), 60_000)");
+    expect(cutoffBlock).toContain("buildCutoffDisplay(orderTasks, now)");
+    expect(cutoffBlock).toContain("{cutoffDisplay.cutoffText}");
+    expect(cutoffBlock).toContain("cutoffDisplay.detailLines.map");
+    expect(source).not.toContain("还有 3小时");
+    expect(source).not.toContain("12分");
+  });
 });
