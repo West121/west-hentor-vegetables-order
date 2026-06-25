@@ -7,6 +7,7 @@ import {
   Maximize2,
   Minimize2,
   Pencil,
+  Plus,
   RotateCcw,
   Upload,
   UserRound,
@@ -131,6 +132,11 @@ type MemberManagementPanelProps = {
 };
 
 type MemberModalMode = "detail" | "edit";
+
+type CreateMemberFormState = MemberFormState & {
+  nickname: string;
+  phone: string;
+};
 
 type MemberImportResult = {
   createdBindings: number;
@@ -258,6 +264,25 @@ function formatRecentOrder(order: NonNullable<MemberPanelItem["recentOrders"]>[n
   return `${order.orderNo} · ${itemSummary}`;
 }
 
+function buildCreateMemberFormState(): CreateMemberFormState {
+  return {
+    defaultAddress: {
+      city: "",
+      detail: "",
+      district: "",
+      id: null,
+      province: "",
+      receiverName: "",
+      receiverPhone: "",
+    },
+    disabledReason: "",
+    nickname: "",
+    phone: "",
+    remark: "",
+    status: "ACTIVE",
+  };
+}
+
 export function getMemberUserId(member: SpringMemberPanelItem) {
   return member.id ?? member.userId ?? "";
 }
@@ -326,6 +351,11 @@ export function MemberManagementPanel({
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<BindingStatus | "ALL">("ALL");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateMemberFormState>(
+    buildCreateMemberFormState,
+  );
+  const [createError, setCreateError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importMode, setImportMode] = useState<ImportMode>("members");
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -399,6 +429,84 @@ export function MemberManagementPanel({
     setQuery("");
     setStatusFilter("ALL");
     void reloadMembers(1, { query: "", statusFilter: "ALL" });
+  }
+
+  function openCreateModal() {
+    setCreateForm(buildCreateMemberFormState());
+    setCreateError(null);
+    setCreateOpen(true);
+  }
+
+  function closeCreateModal() {
+    if (saving) {
+      return;
+    }
+
+    setCreateOpen(false);
+    setCreateError(null);
+  }
+
+  async function submitCreateModal() {
+    if (!store) {
+      return;
+    }
+
+    if (!createForm.phone.trim()) {
+      setCreateError("请输入会员手机号");
+      return;
+    }
+    if (createForm.status === "DISABLED" && !createForm.disabledReason.trim()) {
+      setCreateError("停用会员时必须填写停用原因");
+      return;
+    }
+
+    setSaving(true);
+    setCreateError(null);
+
+    try {
+      const shouldSubmitAddress =
+        [
+          createForm.defaultAddress.province,
+          createForm.defaultAddress.city,
+          createForm.defaultAddress.district,
+          createForm.defaultAddress.detail,
+          createForm.defaultAddress.receiverName,
+          createForm.defaultAddress.receiverPhone,
+        ].some((value) => Boolean(value.trim()));
+      const response = await fetch("/api/admin/members", {
+        body: JSON.stringify({
+          defaultAddress: shouldSubmitAddress
+            ? createForm.defaultAddress
+            : null,
+          disabledReason: createForm.disabledReason,
+          nickname: createForm.nickname,
+          phone: createForm.phone,
+          remark: createForm.remark,
+          status: createForm.status,
+          storeId: store.id,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        error?: { message: string };
+        success: boolean;
+      };
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error?.message ?? "新增会员失败");
+      }
+
+      await reloadMembers(1);
+      setCreateOpen(false);
+      setCreateForm(buildCreateMemberFormState());
+    } catch (submitError) {
+      setCreateError(
+        submitError instanceof Error ? submitError.message : "新增会员失败",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   function openModal(member: MemberPanelItem) {
@@ -766,6 +874,15 @@ export function MemberManagementPanel({
           <button
             className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#1f8f4f] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!store}
+            onClick={openCreateModal}
+            type="button"
+          >
+            <Plus size={16} />
+            新增会员
+          </button>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#cfe3d3] bg-[#edf7ef] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!store}
             onClick={() => openImportModal("members")}
             type="button"
           >
@@ -973,6 +1090,264 @@ export function MemberManagementPanel({
         pagination={pagination}
       />
       </div>
+
+      {createOpen ? (
+        <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
+          <div
+            aria-modal="true"
+            className="mx-auto flex max-h-full min-h-[560px] w-[760px] max-w-full flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl"
+            role="dialog"
+          >
+            <div className="flex items-start justify-between border-b border-[#dbe6dc] px-6 py-4">
+              <div>
+                <div className="text-lg font-semibold">新增会员</div>
+                <div className="mt-1 text-sm text-[#66756d]">
+                  手动创建会员或将已有手机号绑定到当前数据范围。
+                </div>
+              </div>
+              <button
+                className="rounded-full bg-[#edf7ef] px-4 py-2 text-sm font-semibold text-[#1f8f4f]"
+                disabled={saving}
+                onClick={closeCreateModal}
+                type="button"
+              >
+                关闭
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto p-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="flex flex-col gap-2 text-sm font-medium">
+                  <RequiredLabel>手机号</RequiredLabel>
+                  <input
+                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    onChange={(event) =>
+                      setCreateForm((value) => ({
+                        ...value,
+                        phone: event.target.value,
+                      }))
+                    }
+                    placeholder="请输入会员手机号"
+                    value={createForm.phone}
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-medium">
+                  会员昵称
+                  <input
+                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    onChange={(event) =>
+                      setCreateForm((value) => ({
+                        ...value,
+                        nickname: event.target.value,
+                      }))
+                    }
+                    placeholder="可选"
+                    value={createForm.nickname}
+                  />
+                </label>
+              </div>
+
+              <section className="mt-5 rounded-xl border border-[#dbe6dc] p-4">
+                <h3 className="font-semibold">默认地址</h3>
+                <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
+                  <label className="flex flex-col gap-2 font-medium">
+                    收货人
+                    <input
+                      className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                      onChange={(event) =>
+                        setCreateForm((value) => ({
+                          ...value,
+                          defaultAddress: {
+                            ...value.defaultAddress,
+                            receiverName: event.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="默认使用会员昵称"
+                      value={createForm.defaultAddress.receiverName}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 font-medium">
+                    联系电话
+                    <input
+                      className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                      onChange={(event) =>
+                        setCreateForm((value) => ({
+                          ...value,
+                          defaultAddress: {
+                            ...value.defaultAddress,
+                            receiverPhone: event.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="默认使用会员手机号"
+                      value={createForm.defaultAddress.receiverPhone}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 font-medium">
+                    省
+                    <input
+                      className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                      onChange={(event) =>
+                        setCreateForm((value) => ({
+                          ...value,
+                          defaultAddress: {
+                            ...value.defaultAddress,
+                            province: event.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="例如 江苏省"
+                      value={createForm.defaultAddress.province}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 font-medium">
+                    市
+                    <input
+                      className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                      onChange={(event) =>
+                        setCreateForm((value) => ({
+                          ...value,
+                          defaultAddress: {
+                            ...value.defaultAddress,
+                            city: event.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="例如 南京市"
+                      value={createForm.defaultAddress.city}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 font-medium">
+                    区
+                    <input
+                      className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                      onChange={(event) =>
+                        setCreateForm((value) => ({
+                          ...value,
+                          defaultAddress: {
+                            ...value.defaultAddress,
+                            district: event.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="例如 六合区"
+                      value={createForm.defaultAddress.district}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 font-medium md:col-span-2">
+                    详细地址
+                    <input
+                      className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                      onChange={(event) =>
+                        setCreateForm((value) => ({
+                          ...value,
+                          defaultAddress: {
+                            ...value.defaultAddress,
+                            detail: event.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="街道、小区、楼栋、门牌号"
+                      value={createForm.defaultAddress.detail}
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <section className="mt-5 rounded-xl border border-[#dbe6dc] p-4">
+                <h3 className="font-semibold">
+                  <RequiredLabel>服务状态</RequiredLabel>
+                </h3>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {(["ACTIVE", "DISABLED"] as const).map((status) => (
+                    <button
+                      className={[
+                        "h-10 rounded-xl border text-sm font-semibold",
+                        createForm.status === status
+                          ? "border-[#1f8f4f] bg-[#e8f6ed] text-[#1f8f4f]"
+                          : "border-[#dbe6dc] text-[#66756d]",
+                      ].join(" ")}
+                      key={status}
+                      onClick={() =>
+                        setCreateForm((value) => ({
+                          ...value,
+                          status,
+                        }))
+                      }
+                      type="button"
+                    >
+                      {STATUS_LABELS[status]}
+                    </button>
+                  ))}
+                </div>
+                <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
+                  会员备注
+                  <textarea
+                    className="min-h-20 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
+                    onChange={(event) =>
+                      setCreateForm((value) => ({
+                        ...value,
+                        remark: event.target.value,
+                      }))
+                    }
+                    placeholder="可选"
+                    value={createForm.remark}
+                  />
+                </label>
+                <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
+                  <span>
+                    停用原因
+                    {createForm.status === "DISABLED" ? (
+                      <span className="ml-1 text-red-500">*</span>
+                    ) : null}
+                  </span>
+                  <textarea
+                    className="min-h-20 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
+                    disabled={createForm.status === "ACTIVE"}
+                    onChange={(event) =>
+                      setCreateForm((value) => ({
+                        ...value,
+                        disabledReason: event.target.value,
+                      }))
+                    }
+                    placeholder={
+                      createForm.status === "DISABLED" ? "请输入停用原因" : ""
+                    }
+                    required={createForm.status === "DISABLED"}
+                    value={createForm.disabledReason}
+                  />
+                </label>
+              </section>
+
+              {createError ? (
+                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {createError}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
+              <button
+                className="h-10 rounded-xl border border-[#dbe6dc] px-5"
+                disabled={saving}
+                onClick={closeCreateModal}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
+                disabled={saving || !createForm.phone.trim()}
+                onClick={() => void submitCreateModal()}
+                type="button"
+              >
+                {saving ? "保存中" : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {importOpen ? (
         <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">

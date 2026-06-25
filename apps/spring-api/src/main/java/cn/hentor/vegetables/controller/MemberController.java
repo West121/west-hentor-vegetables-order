@@ -4,6 +4,7 @@ import cn.hentor.vegetables.common.ApiException;
 import cn.hentor.vegetables.common.ApiResponse;
 import cn.hentor.vegetables.common.PageResult;
 import cn.hentor.vegetables.dto.AdminSessionDto;
+import cn.hentor.vegetables.dto.MemberCreateRequest;
 import cn.hentor.vegetables.dto.MemberDetailResponse;
 import cn.hentor.vegetables.dto.MemberImportResultDto;
 import cn.hentor.vegetables.dto.MemberListItem;
@@ -79,6 +80,19 @@ public class MemberController {
     requirePermission(session, "members.read");
     requireStoreAccess(session, storeId);
     return ApiResponse.ok(memberService.getMember(storeId, userId));
+  }
+
+  @PostMapping
+  public ApiResponse<MemberDetailResponse> create(
+    @Valid @RequestBody MemberCreateRequest request,
+    @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
+    @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
+  ) {
+    AdminSessionDto session = requireSession(authorization, tokenHeader, tokenCookie);
+    requirePermission(session, "members.write");
+    requireStoreAccess(session, request.storeId());
+    return ApiResponse.ok(memberService.createMember(request.storeId(), request, session));
   }
 
   @PatchMapping("/{userId}")

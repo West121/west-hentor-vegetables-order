@@ -63,6 +63,23 @@ describe("member management modal usage", () => {
     expect(source).not.toContain("选择 CSV/TXT");
   });
 
+  it("exposes manual member creation from the member list panel", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/member-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("新增会员");
+    expect(source).toContain("openCreateModal");
+    expect(source).toContain('fetch("/api/admin/members"');
+    expect(source).toContain("手动创建会员或将已有手机号绑定到当前数据范围");
+    expect(source).toContain("请输入会员手机号");
+    expect(source).toContain(
+      'createForm.status === "DISABLED" && !createForm.disabledReason.trim()',
+    );
+    expect(source).toContain("停用会员时必须填写停用原因");
+  });
+
   it("renders member avatars when available", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/member-management-panel.tsx"),

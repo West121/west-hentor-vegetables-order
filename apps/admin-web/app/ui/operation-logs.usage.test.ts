@@ -24,6 +24,7 @@ describe("admin operation log coverage", () => {
     expect(panelSource).toContain('MINIAPP_ADDRESS_DEFAULT_SET: "设为默认地址"');
     expect(panelSource).toContain('MINIAPP_ADDRESS_DELETED: "删除收货地址"');
     expect(panelSource).toContain('MINIAPP_PHONE_LOGIN: "小程序登录"');
+    expect(panelSource).toContain('MEMBER_CREATED: "新建会员"');
     expect(panelSource).toContain('ORDER_CREATED: "新建订单"');
     expect(panelSource).toContain('ORDER_INTERNAL_REMARK_UPDATED: "编辑订单备注"');
     expect(panelSource).toContain('ORDER_SHIPPED: "订单发货"');

@@ -69,6 +69,24 @@ public interface UserMapper extends BaseMapper<UserEntity> {
 
   @Update("""
     UPDATE "User"
+    SET "defaultStoreId" = #{defaultStoreId},
+        "disabledReason" = #{disabledReason},
+        "nickname" = #{nickname},
+        "remark" = #{remark},
+        "updatedAt" = #{updatedAt}
+    WHERE "id" = #{id}
+    """)
+  int updateAdminCreatedMemberProfile(
+    @Param("id") String id,
+    @Param("defaultStoreId") String defaultStoreId,
+    @Param("disabledReason") String disabledReason,
+    @Param("nickname") String nickname,
+    @Param("remark") String remark,
+    @Param("updatedAt") LocalDateTime updatedAt
+  );
+
+  @Update("""
+    UPDATE "User"
     SET "status" = 'DISABLED',
         "disabledReason" = #{disabledReason},
         "updatedAt" = #{updatedAt}

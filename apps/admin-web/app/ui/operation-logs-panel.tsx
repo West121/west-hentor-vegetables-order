@@ -61,6 +61,7 @@ const ACTION_LABELS: Record<string, string> = {
   DISH_UPDATED: "编辑菜品",
   FRANCHISEE_CREATED: "新建合作方",
   FRANCHISEE_UPDATED: "编辑合作方",
+  MEMBER_CREATED: "新建会员",
   MEMBER_IMPORT: "导入会员",
   MEMBER_STORE_BINDING_UPDATED: "编辑会员",
   MINIAPP_ADDRESS_CREATED: "新增收货地址",

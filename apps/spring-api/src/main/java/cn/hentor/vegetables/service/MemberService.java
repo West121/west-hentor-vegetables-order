@@ -6,6 +6,7 @@ import cn.hentor.vegetables.dto.AdminSessionDto;
 import cn.hentor.vegetables.dto.ImportFailureDto;
 import cn.hentor.vegetables.dto.MemberAddressDto;
 import cn.hentor.vegetables.dto.MemberAddressRequest;
+import cn.hentor.vegetables.dto.MemberCreateRequest;
 import cn.hentor.vegetables.dto.MemberDetailDto;
 import cn.hentor.vegetables.dto.MemberDetailResponse;
 import cn.hentor.vegetables.dto.MemberImportResultDto;
@@ -235,6 +236,124 @@ public class MemberService {
       new MemberStoreSummaryDto(store.getCode(), store.getId(), store.getName()),
       binding.getUpdatedAt()
     ));
+  }
+
+  @Transactional
+  public MemberDetailResponse createMember(
+    String storeId,
+    MemberCreateRequest request,
+    AdminSessionDto session
+  ) {
+    AdminUserEntity operator = requireActiveOperator(session.adminUserId());
+    StoreEntity store = requireStore(storeId);
+    String phone = normalizeImportedPhone(request.phone());
+    if (!phone.matches("^1\\d{10}$")) {
+      throw new ApiException("PHONE_INVALID", "请输入正确手机号", HttpStatus.BAD_REQUEST);
+    }
+    String status = StringUtils.hasText(request.status()) ? request.status().trim() : "ACTIVE";
+    if (!BINDING_STATUSES.contains(status)) {
+      throw new ApiException("INVALID_PARAMS", "会员状态不正确", HttpStatus.BAD_REQUEST);
+    }
+    String disabledReason = "DISABLED".equals(status)
+      ? requireDisabledReason(request.disabledReason())
+      : null;
+    String nickname = trimToNull(request.nickname());
+    String remark = trimToNull(request.remark());
+    LocalDateTime now = LocalDateTime.now();
+    UserEntity user = findImportUser(storeId, phone);
+    boolean createdUser = user == null;
+
+    if (createdUser) {
+      user = new UserEntity();
+      user.setId(id());
+      user.setDefaultStoreId(storeId);
+      user.setDisabledReason(disabledReason);
+      user.setNickname(nickname);
+      user.setOpenid("admin-created-phone:" + phone);
+      user.setPhone(phone);
+      user.setRemark(remark);
+      user.setStatus("ACTIVE");
+      user.setCreatedAt(now);
+      user.setUpdatedAt(now);
+      userMapper.insert(user);
+    } else {
+      MemberStoreBindingEntity existingBinding = memberStoreBindingMapper.selectOne(
+        new LambdaQueryWrapper<MemberStoreBindingEntity>()
+          .eq(MemberStoreBindingEntity::getStoreId, storeId)
+          .eq(MemberStoreBindingEntity::getUserId, user.getId())
+          .last("LIMIT 1")
+      );
+      if (existingBinding != null) {
+        throw new ApiException("MEMBER_ALREADY_EXISTS", "该手机号已是当前数据范围会员", HttpStatus.CONFLICT);
+      }
+      String nextDefaultStoreId = StringUtils.hasText(user.getDefaultStoreId())
+        ? user.getDefaultStoreId()
+        : storeId;
+      userMapper.updateAdminCreatedMemberProfile(
+        user.getId(),
+        nextDefaultStoreId,
+        disabledReason,
+        nickname == null ? user.getNickname() : nickname,
+        remark == null ? user.getRemark() : remark,
+        now
+      );
+      user = userMapper.selectById(user.getId());
+    }
+
+    boolean shouldUseStoreAsDefault =
+      !StringUtils.hasText(user.getDefaultStoreId()) ||
+        storeId.equals(user.getDefaultStoreId()) ||
+        createdUser;
+    if (shouldUseStoreAsDefault) {
+      memberStoreBindingMapper.clearDefaultForUser(user.getId(), now);
+      if (!storeId.equals(user.getDefaultStoreId())) {
+        userMapper.updateDefaultStore(user.getId(), storeId, now);
+        user.setDefaultStoreId(storeId);
+      }
+    }
+
+    MemberStoreBindingEntity binding = new MemberStoreBindingEntity();
+    binding.setId(id());
+    binding.setUserId(user.getId());
+    binding.setStoreId(store.getId());
+    binding.setStatus(status);
+    binding.setSource("admin_create");
+    binding.setIsDefault(shouldUseStoreAsDefault);
+    binding.setCreatedAt(now);
+    binding.setUpdatedAt(now);
+    memberStoreBindingMapper.insertAdminBinding(binding);
+
+    AddressEntity normalizedAddress = normalizeMemberAddressInput(
+      request.defaultAddress(),
+      user,
+      storeId
+    );
+    MemberAddressDto addressDto = null;
+    if (normalizedAddress != null) {
+      normalizedAddress.setId(id());
+      normalizedAddress.setUserId(user.getId());
+      normalizedAddress.setStoreId(storeId);
+      normalizedAddress.setIsDefault(true);
+      normalizedAddress.setCreatedAt(now);
+      normalizedAddress.setUpdatedAt(now);
+      addressMapper.clearOtherDefaults(normalizedAddress);
+      addressMapper.insert(normalizedAddress);
+      addressDto = toAddressDto(normalizedAddress);
+    }
+
+    writeMemberCreateLog(
+      operator.getId(),
+      storeId,
+      user.getId(),
+      createdUser,
+      status,
+      addressDto,
+      disabledReason,
+      nickname,
+      phone,
+      remark
+    );
+    return getMember(storeId, user.getId());
   }
 
   @Transactional
@@ -780,6 +899,43 @@ public class MemberService {
     log.setBeforeValue("null");
     log.setAfterValue(toJson(afterValue));
     log.setRequestParams(toJson(Map.of("rowCount", rowCount)));
+    log.setResponseData("{}");
+    log.setStatusCode(200);
+    log.setCreatedAt(LocalDateTime.now());
+    adminOperationLogMapper.insertLog(log);
+  }
+
+  private void writeMemberCreateLog(
+    String operatorId,
+    String storeId,
+    String userId,
+    boolean createdUser,
+    String bindingStatus,
+    MemberAddressDto defaultAddress,
+    String disabledReason,
+    String nickname,
+    String phone,
+    String remark
+  ) {
+    Map<String, Object> afterValue = new LinkedHashMap<>();
+    afterValue.put("bindingStatus", bindingStatus);
+    afterValue.put("createdUser", createdUser);
+    afterValue.put("defaultAddress", defaultAddress);
+    afterValue.put("disabledReason", disabledReason);
+    afterValue.put("nickname", nickname);
+    afterValue.put("phone", phone);
+    afterValue.put("remark", remark);
+
+    AdminOperationLogEntity log = new AdminOperationLogEntity();
+    log.setId(id());
+    log.setAction("MEMBER_CREATED");
+    log.setBeforeValue("null");
+    log.setAfterValue(toJson(afterValue));
+    log.setOperatorId(operatorId);
+    log.setResource("member");
+    log.setResourceId(userId);
+    log.setStoreId(storeId);
+    log.setRequestParams(toJson(afterValue));
     log.setResponseData("{}");
     log.setStatusCode(200);
     log.setCreatedAt(LocalDateTime.now());
