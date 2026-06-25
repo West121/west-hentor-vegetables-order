@@ -37,7 +37,13 @@ import {
   type InventoryFormState,
 } from "./dish-modal-state";
 import { AdminAlertDialog } from "./admin-confirm-dialog";
+import {
+  AdminImportDialog,
+  type AdminImportResult,
+} from "./admin-import-dialog";
+import { downloadXlsxTemplate } from "./admin-import-template";
 import { RequiredLabel } from "./required-mark";
+import { getImportResultFromApiPayload } from "./member-import-response";
 
 type StoreOption = {
   id: string;
@@ -94,6 +100,11 @@ type DishManagementPanelProps = {
     total: number;
   };
   store: StoreOption | null;
+};
+
+type DishImportResult = AdminImportResult & {
+  createdDishes?: number;
+  updatedDishes?: number;
 };
 
 type DishModalState =
@@ -170,6 +181,11 @@ export function DishManagementPanel({
   const [uploading, setUploading] = useState(false);
   const [statusChangingId, setStatusChangingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<DishImportResult | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<DishStatus | "ALL">("ALL");
   const [categoryFilter, setCategoryFilter] = useState<DishCategory | "ALL">(
@@ -282,6 +298,86 @@ export function DishManagementPanel({
     setDishForm(nextForm);
     setInitialDishForm(nextForm);
     resetModal();
+  }
+
+  function openImportDialog() {
+    if (!canWrite || !store) {
+      return;
+    }
+    setImportOpen(true);
+    setImportFile(null);
+    setImportError(null);
+    setImportResult(null);
+  }
+
+  function closeImportDialog() {
+    if (importing) {
+      return;
+    }
+    setImportOpen(false);
+    setImportFile(null);
+    setImportError(null);
+    setImportResult(null);
+  }
+
+  function downloadDishImportTemplate() {
+    const category = resolvedCategoryOptions[0]?.name ?? "叶菜";
+    downloadXlsxTemplate(
+      "菜品导入模板.xlsx",
+      "菜品导入",
+      ["菜品名称", "分类", "库存斤数", "起订步进", "状态", "排序", "描述"],
+      [
+        {
+          菜品名称: "番茄",
+          分类: category,
+          库存斤数: 37,
+          起订步进: 1,
+          状态: "上架",
+          排序: 1,
+          描述: "本周新鲜到店",
+        },
+      ],
+    );
+  }
+
+  async function submitDishImport() {
+    if (!store || !importFile) {
+      setImportError("请选择要导入的文件");
+      return;
+    }
+
+    setImporting(true);
+    setImportError(null);
+    setImportResult(null);
+
+    const body = new FormData();
+    body.append("storeId", store.id);
+    body.append("file", importFile);
+
+    try {
+      const response = await fetch("/api/admin/dishes/import", {
+        body,
+        method: "POST",
+      });
+      const payload = (await response.json()) as {
+        data?: DishImportResult | { result?: DishImportResult | null } | null;
+        error?: { message: string };
+        success: boolean;
+      };
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error?.message ?? "导入失败");
+      }
+      const result = getImportResultFromApiPayload<DishImportResult>(payload);
+      if (!result) {
+        throw new Error("导入完成，但未返回导入结果");
+      }
+      setImportResult(result);
+      await reloadDishes(1);
+    } catch (submitError) {
+      setImportError(submitError instanceof Error ? submitError.message : "导入失败");
+    } finally {
+      setImporting(false);
+    }
   }
 
   function openEditModal(item: DishPanelItem) {
@@ -732,15 +828,27 @@ export function DishManagementPanel({
             </div>
           ))}
           {canWrite ? (
-            <button
-              className="h-[58px] rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
-              disabled={!store}
-              onClick={openCreateModal}
-              title={store ? "新建菜品" : "当前账号未分配数据范围"}
-              type="button"
-            >
-              新建菜品
-            </button>
+            <>
+              <button
+                className="inline-flex h-[58px] items-center gap-2 rounded-xl border border-[#b8d8bf] bg-[#f8fff8] px-5 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!store}
+                onClick={openImportDialog}
+                title={store ? "导入菜品" : "当前账号未分配数据范围"}
+                type="button"
+              >
+                <Upload size={16} />
+                导入菜品
+              </button>
+              <button
+                className="h-[58px] rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
+                disabled={!store}
+                onClick={openCreateModal}
+                title={store ? "新建菜品" : "当前账号未分配数据范围"}
+                type="button"
+              >
+                新建菜品
+              </button>
+            </>
           ) : null}
         </div>
       </div>
@@ -1242,6 +1350,35 @@ export function DishManagementPanel({
       ) : null}
       {modal && error ? (
         <AdminAlertDialog message={error} onClose={() => setError(null)} />
+      ) : null}
+      {importOpen ? (
+        <AdminImportDialog
+          description="上传 Excel 或 CSV 后，按菜品名称新增或更新菜品。"
+          error={importError}
+          file={importFile}
+          loading={importing}
+          onClose={closeImportDialog}
+          onDownloadTemplate={downloadDishImportTemplate}
+          onFileChange={(file) => {
+            setImportFile(file);
+            setImportError(null);
+            setImportResult(null);
+          }}
+          onSubmit={submitDishImport}
+          result={importResult}
+          resultCards={[
+            { label: "总行数", value: importResult?.totalRows ?? 0 },
+            { label: "成功", value: importResult?.importedRows ?? 0 },
+            { label: "新增", value: importResult?.createdDishes ?? 0 },
+            { label: "失败", value: importResult?.failedRows ?? 0 },
+          ]}
+          rules={[
+            "分类可填写系统字典中的分类名称或编码，例如“叶菜”或“LEAFY”。",
+            "新菜品会使用导入文件中的库存作为初始库存；已存在菜品不会通过导入修改库存。",
+            "状态可填“上架”或“下架”，文件大小不超过 5MB。",
+          ]}
+          title="导入菜品"
+        />
       ) : null}
     </section>
   );

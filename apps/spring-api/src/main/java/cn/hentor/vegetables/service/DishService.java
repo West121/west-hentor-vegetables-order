@@ -5,6 +5,8 @@ import cn.hentor.vegetables.dto.AdminSessionDto;
 import cn.hentor.vegetables.dto.DishDetailDto;
 import cn.hentor.vegetables.dto.DishDetailResponse;
 import cn.hentor.vegetables.dto.DishDto;
+import cn.hentor.vegetables.dto.DishImportResultDto;
+import cn.hentor.vegetables.dto.DishImportRow;
 import cn.hentor.vegetables.dto.DishInventoryLogDto;
 import cn.hentor.vegetables.dto.DishInventoryRequest;
 import cn.hentor.vegetables.dto.DishListResponse;
@@ -12,6 +14,8 @@ import cn.hentor.vegetables.dto.DishPaginationDto;
 import cn.hentor.vegetables.dto.DishRequest;
 import cn.hentor.vegetables.dto.DishResponse;
 import cn.hentor.vegetables.dto.DishSummaryDto;
+import cn.hentor.vegetables.dto.ImportFailureDto;
+import cn.hentor.vegetables.dto.SystemDictionaryItemDto;
 import cn.hentor.vegetables.entity.AdminOperationLogEntity;
 import cn.hentor.vegetables.entity.AdminUserEntity;
 import cn.hentor.vegetables.entity.DishEntity;
@@ -29,6 +33,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -224,6 +229,80 @@ public class DishService {
     return new DishResponse(toDto(requireDish(request.storeId(), dishId)));
   }
 
+  @Transactional
+  public DishImportResultDto importDishes(
+    String storeId,
+    List<DishImportRow> rows,
+    AdminSessionDto session
+  ) {
+    AdminUserEntity operator = requireActiveOperator(session.adminUserId());
+    validateStore(storeId);
+
+    ImportDishAccumulator result = new ImportDishAccumulator(rows.size());
+    for (DishImportRow row : rows) {
+      try {
+        String name = row.name() == null ? "" : row.name().trim();
+        if (!StringUtils.hasText(name)) {
+          result.failures().add(importFailure(row, "菜品名称不能为空"));
+          continue;
+        }
+
+        String category = resolveImportCategory(storeId, row.category());
+        if (!StringUtils.hasText(category)) {
+          result.failures().add(importFailure(row, "菜品分类不正确，请填写系统字典中的分类名称或编码"));
+          continue;
+        }
+
+        DishEntity existing = findDishByName(storeId, name);
+        BigDecimal effectiveStock = existing == null ? row.stockJin() : existing.getStockJin();
+        DishRequest request = new DishRequest(
+          storeId,
+          name,
+          category,
+          row.status() == null ? (existing == null ? "ON_SALE" : existing.getStatus()) : row.status(),
+          row.stepJin(),
+          effectiveStock,
+          existing == null ? null : existing.getImageKey(),
+          existing == null ? null : existing.getImageUrl(),
+          row.description(),
+          row.sortOrder()
+        );
+
+        if (existing == null) {
+          create(request, session);
+          result.createdDishes += 1;
+        } else {
+          update(existing.getId(), request, session);
+          result.updatedDishes += 1;
+        }
+        result.importedRows += 1;
+      } catch (ApiException exception) {
+        result.failures().add(importFailure(row, exception.getMessage()));
+      } catch (RuntimeException exception) {
+        result.failures().add(importFailure(row, "导入失败，请检查该行数据"));
+      }
+    }
+
+    result.failedRows = result.failures().size();
+    DishImportResultDto response = result.toDto();
+    writeOperationLog(
+      operator.getId(),
+      storeId,
+      "import",
+      "DISH_IMPORT",
+      null,
+      Map.of(
+        "createdDishes", response.createdDishes(),
+        "failedRows", response.failedRows(),
+        "failureSamples", response.failures().stream().limit(20).toList(),
+        "importedRows", response.importedRows(),
+        "totalRows", response.totalRows(),
+        "updatedDishes", response.updatedDishes()
+      )
+    );
+    return response;
+  }
+
   private LambdaQueryWrapper<DishEntity> buildListWrapper(
     String storeId,
     String category,
@@ -394,6 +473,40 @@ public class DishService {
     }
   }
 
+  private String resolveImportCategory(String storeId, String category) {
+    String value = category == null ? "" : category.trim();
+    if (!StringUtils.hasText(value)) {
+      return null;
+    }
+    String normalizedCode = value.toUpperCase();
+    List<SystemDictionaryItemDto> items = systemDictionaryService
+      .getDictionary(storeId, SystemDictionaryService.DISH_CATEGORY_TYPE)
+      .items();
+    for (SystemDictionaryItemDto item : items) {
+      if (Boolean.FALSE.equals(item.enabled())) {
+        continue;
+      }
+      if (normalizedCode.equalsIgnoreCase(item.code()) || value.equals(item.name())) {
+        return item.code();
+      }
+    }
+    return normalizedCode;
+  }
+
+  private DishEntity findDishByName(String storeId, String name) {
+    return dishMapper.selectOne(
+      new LambdaQueryWrapper<DishEntity>()
+        .eq(DishEntity::getStoreId, storeId)
+        .eq(DishEntity::getName, name)
+        .isNull(DishEntity::getDeletedAt)
+        .last("LIMIT 1")
+    );
+  }
+
+  private ImportFailureDto importFailure(DishImportRow row, String reason) {
+    return new ImportFailureDto(row.name(), reason, row.rowNumber(), row.category());
+  }
+
   private void validateOptionalStatus(String status) {
     if (StringUtils.hasText(status) && !"ALL".equalsIgnoreCase(status) && !STATUSES.contains(status)) {
       throw new ApiException("STATUS_INVALID", "菜品状态不正确", HttpStatus.BAD_REQUEST);
@@ -504,4 +617,32 @@ public class DishService {
     String description,
     Integer sortOrder
   ) {}
+
+  private static class ImportDishAccumulator {
+    private int createdDishes = 0;
+    private int failedRows = 0;
+    private int importedRows = 0;
+    private final List<ImportFailureDto> failures = new ArrayList<>();
+    private final int totalRows;
+    private int updatedDishes = 0;
+
+    private ImportDishAccumulator(int totalRows) {
+      this.totalRows = totalRows;
+    }
+
+    private List<ImportFailureDto> failures() {
+      return failures;
+    }
+
+    private DishImportResultDto toDto() {
+      return new DishImportResultDto(
+        createdDishes,
+        failedRows,
+        List.copyOf(failures),
+        importedRows,
+        totalRows,
+        updatedDishes
+      );
+    }
+  }
 }

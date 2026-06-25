@@ -59,4 +59,18 @@ describe("package template management modal usage", () => {
     expect(source).toContain('value={formatBenefitQuantity(benefit.totalQuantity)}');
     expect(source).toContain('value={String(benefit.sortOrder)}');
   });
+
+  it("supports file upload import with xlsx template download", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/package-template-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("导入套餐模板");
+    expect(source).toContain("套餐模板导入模板.xlsx");
+    expect(source).toContain("/api/admin/package-templates/import");
+    expect(source).toContain("AdminImportDialog");
+    expect(source).toContain("downloadXlsxTemplate");
+    expect(source).toContain("附加权益类型编码由系统自动生成");
+  });
 });

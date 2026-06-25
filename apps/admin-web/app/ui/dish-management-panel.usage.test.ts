@@ -91,4 +91,18 @@ describe("dish management modal usage", () => {
     expect(source).toContain("categoryLabelByCode");
     expect(source).not.toContain("CATEGORY_LABELS");
   });
+
+  it("supports file upload import with xlsx template download", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/dish-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("导入菜品");
+    expect(source).toContain("菜品导入模板.xlsx");
+    expect(source).toContain("/api/admin/dishes/import");
+    expect(source).toContain("AdminImportDialog");
+    expect(source).toContain("downloadXlsxTemplate");
+    expect(source).toContain("已存在菜品不会通过导入修改库存");
+  });
 });

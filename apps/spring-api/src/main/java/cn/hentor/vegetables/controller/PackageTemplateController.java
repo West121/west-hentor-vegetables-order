@@ -4,15 +4,20 @@ import cn.hentor.vegetables.common.ApiException;
 import cn.hentor.vegetables.common.ApiResponse;
 import cn.hentor.vegetables.common.PageResult;
 import cn.hentor.vegetables.dto.AdminSessionDto;
+import cn.hentor.vegetables.dto.PackageTemplateImportResultDto;
+import cn.hentor.vegetables.dto.PackageTemplateImportRow;
 import cn.hentor.vegetables.dto.PackageTemplateListItem;
 import cn.hentor.vegetables.dto.PackageTemplateRequest;
 import cn.hentor.vegetables.dto.PackageTemplateResponse;
 import cn.hentor.vegetables.dto.StoreDto;
 import cn.hentor.vegetables.service.AdminAuthService;
 import cn.hentor.vegetables.service.PackageTemplateQueryService;
+import cn.hentor.vegetables.service.SpreadsheetImportService;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,19 +30,23 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/spring/admin/package-templates")
 public class PackageTemplateController {
   private final AdminAuthService adminAuthService;
   private final PackageTemplateQueryService packageTemplateQueryService;
+  private final SpreadsheetImportService spreadsheetImportService;
 
   public PackageTemplateController(
     AdminAuthService adminAuthService,
-    PackageTemplateQueryService packageTemplateQueryService
+    PackageTemplateQueryService packageTemplateQueryService,
+    SpreadsheetImportService spreadsheetImportService
   ) {
     this.adminAuthService = adminAuthService;
     this.packageTemplateQueryService = packageTemplateQueryService;
+    this.spreadsheetImportService = spreadsheetImportService;
   }
 
   @GetMapping
@@ -109,6 +118,26 @@ public class PackageTemplateController {
     @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
   ) {
     return update(templateId, request, authorization, tokenHeader, tokenCookie);
+  }
+
+  @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+  public ApiResponse<PackageTemplateImportResultDto> importTemplates(
+    @RequestParam String storeId,
+    @RequestParam MultipartFile file,
+    @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
+    @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
+  ) {
+    AdminSessionDto session = requireSession(authorization, tokenHeader, tokenCookie);
+    requirePermission(session, "packages.write");
+    requireStoreAccess(session, storeId);
+    List<PackageTemplateImportRow> rows = spreadsheetImportService.parsePackageTemplateRows(file);
+    if (rows.isEmpty()) {
+      throw new ApiException("INVALID_PARAMS", "导入文件没有可识别的套餐模板数据", HttpStatus.BAD_REQUEST);
+    }
+    return ApiResponse.ok(
+      packageTemplateQueryService.importTemplates(storeId, rows, session)
+    );
   }
 
   private AdminSessionDto requireSession(String authorization, String tokenHeader, String tokenCookie) {

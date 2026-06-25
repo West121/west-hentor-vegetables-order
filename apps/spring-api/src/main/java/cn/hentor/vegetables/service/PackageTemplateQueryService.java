@@ -3,7 +3,10 @@ package cn.hentor.vegetables.service;
 import cn.hentor.vegetables.common.ApiException;
 import cn.hentor.vegetables.common.PageResult;
 import cn.hentor.vegetables.dto.AdminSessionDto;
+import cn.hentor.vegetables.dto.ImportFailureDto;
 import cn.hentor.vegetables.dto.PackageTemplateBenefitRequest;
+import cn.hentor.vegetables.dto.PackageTemplateImportResultDto;
+import cn.hentor.vegetables.dto.PackageTemplateImportRow;
 import cn.hentor.vegetables.dto.PackageTemplateListItem;
 import cn.hentor.vegetables.dto.PackageTemplateRequest;
 import cn.hentor.vegetables.dto.PackageTemplateResponse;
@@ -24,6 +27,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -216,6 +220,95 @@ public class PackageTemplateQueryService {
     return new PackageTemplateResponse(toDto(updated, afterBenefits));
   }
 
+  @Transactional
+  public PackageTemplateImportResultDto importTemplates(
+    String storeId,
+    List<PackageTemplateImportRow> rows,
+    AdminSessionDto session
+  ) {
+    AdminUserEntity operator = requireActiveOperator(session.adminUserId());
+    Map<String, ImportTemplateGroup> groups = groupTemplateRows(rows);
+    ImportPackageTemplateAccumulator result = new ImportPackageTemplateAccumulator(rows.size());
+
+    for (ImportTemplateGroup group : groups.values()) {
+      PackageTemplateImportRow firstRow = group.firstRow();
+      try {
+        if (!StringUtils.hasText(group.templateName())) {
+          result.failures().add(importFailure(firstRow, "套餐名称不能为空"));
+          continue;
+        }
+
+        List<PackageTemplateEntity> existingTemplates = findTemplatesByName(storeId, group.templateName());
+        if (existingTemplates.size() > 1) {
+          result.failures().add(importFailure(firstRow, "套餐名称匹配到多个模板，请先调整为唯一名称"));
+          continue;
+        }
+        PackageTemplateEntity existing = existingTemplates.isEmpty() ? null : existingTemplates.getFirst();
+        List<PackageTemplateBenefitRequest> benefits = buildImportBenefits(group, result.failures());
+        if (benefits == null) {
+          continue;
+        }
+        boolean importedBenefits = !benefits.isEmpty();
+        if (existing != null && !importedBenefits) {
+          benefits = loadBenefits(existing.getId())
+            .stream()
+            .map(benefit -> new PackageTemplateBenefitRequest(
+              benefit.getKind(),
+              benefit.getName(),
+              benefit.getSortOrder(),
+              benefit.getTotalQuantity(),
+              benefit.getUnit()
+            ))
+            .toList();
+        }
+
+        PackageTemplateRequest request = new PackageTemplateRequest(
+          benefits,
+          group.templateName(),
+          group.sortOrder(existing == null ? 0 : existing.getSortOrder()),
+          group.status(existing == null ? "ACTIVE" : existing.getStatus()),
+          storeId,
+          group.totalTimes(existing == null ? null : existing.getTotalTimes()),
+          group.weightLimitJin(existing == null ? null : existing.getWeightLimitJin())
+        );
+
+        if (existing == null) {
+          createTemplate(request, session);
+          result.createdTemplates += 1;
+        } else {
+          updateTemplate(existing.getId(), request, session);
+          result.updatedTemplates += 1;
+        }
+        result.importedBenefits += importedBenefits ? benefits.size() : 0;
+        result.importedRows += group.rows().size();
+      } catch (ApiException exception) {
+        result.failures().add(importFailure(firstRow, exception.getMessage()));
+      } catch (RuntimeException exception) {
+        result.failures().add(importFailure(firstRow, "导入失败，请检查该套餐模板数据"));
+      }
+    }
+
+    result.failedRows = result.failures().size();
+    PackageTemplateImportResultDto response = result.toDto();
+    writeOperationLog(
+      operator.getId(),
+      storeId,
+      "import",
+      "PACKAGE_TEMPLATE_IMPORT",
+      null,
+      Map.of(
+        "createdTemplates", response.createdTemplates(),
+        "failedRows", response.failedRows(),
+        "failureSamples", response.failures().stream().limit(20).toList(),
+        "importedBenefits", response.importedBenefits(),
+        "importedRows", response.importedRows(),
+        "totalRows", response.totalRows(),
+        "updatedTemplates", response.updatedTemplates()
+      )
+    );
+    return response;
+  }
+
   private Map<String, List<PackageTemplateBenefitEntity>> loadBenefitsByTemplate(
     List<PackageTemplateEntity> templates
   ) {
@@ -289,6 +382,63 @@ public class PackageTemplateQueryService {
       throw new ApiException("PACKAGE_TEMPLATE_NOT_FOUND", "套餐模板不存在", HttpStatus.NOT_FOUND);
     }
     return template;
+  }
+
+  private List<PackageTemplateEntity> findTemplatesByName(String storeId, String name) {
+    return packageTemplateMapper.selectList(
+      new LambdaQueryWrapper<PackageTemplateEntity>()
+        .eq(PackageTemplateEntity::getStoreId, storeId)
+        .eq(PackageTemplateEntity::getName, name)
+    );
+  }
+
+  private Map<String, ImportTemplateGroup> groupTemplateRows(List<PackageTemplateImportRow> rows) {
+    Map<String, ImportTemplateGroup> groups = new LinkedHashMap<>();
+    for (PackageTemplateImportRow row : rows) {
+      String name = row.templateName() == null ? "" : row.templateName().trim();
+      String key = StringUtils.hasText(name) ? name : "__row_" + row.rowNumber();
+      groups.computeIfAbsent(key, ignored -> new ImportTemplateGroup(name)).add(row);
+    }
+    return groups;
+  }
+
+  private List<PackageTemplateBenefitRequest> buildImportBenefits(
+    ImportTemplateGroup group,
+    List<ImportFailureDto> failures
+  ) {
+    List<PackageTemplateBenefitRequest> benefits = new ArrayList<>();
+    for (PackageTemplateImportRow row : group.rows()) {
+      boolean hasBenefit = StringUtils.hasText(row.benefitName()) ||
+        row.benefitTotalQuantity() != null ||
+        StringUtils.hasText(row.benefitUnit());
+      if (!hasBenefit) {
+        continue;
+      }
+      if (!StringUtils.hasText(row.benefitName())) {
+        failures.add(importFailure(row, "附加权益名称不能为空"));
+        return null;
+      }
+      if (row.benefitTotalQuantity() == null || row.benefitTotalQuantity().compareTo(BigDecimal.ZERO) <= 0) {
+        failures.add(importFailure(row, "附加权益总量不正确"));
+        return null;
+      }
+      if (!StringUtils.hasText(row.benefitUnit())) {
+        failures.add(importFailure(row, "附加权益单位不能为空"));
+        return null;
+      }
+      benefits.add(new PackageTemplateBenefitRequest(
+        null,
+        row.benefitName(),
+        row.benefitSortOrder(),
+        row.benefitTotalQuantity(),
+        row.benefitUnit()
+      ));
+    }
+    return benefits;
+  }
+
+  private ImportFailureDto importFailure(PackageTemplateImportRow row, String reason) {
+    return new ImportFailureDto(null, reason, row.rowNumber(), row.templateName());
   }
 
   private AdminUserEntity requireActiveOperator(String operatorId) {
@@ -504,4 +654,95 @@ public class PackageTemplateQueryService {
     BigDecimal totalQuantity,
     String unit
   ) {}
+
+  private static class ImportTemplateGroup {
+    private final List<PackageTemplateImportRow> rows = new ArrayList<>();
+    private final String templateName;
+
+    private ImportTemplateGroup(String templateName) {
+      this.templateName = templateName;
+    }
+
+    private void add(PackageTemplateImportRow row) {
+      rows.add(row);
+    }
+
+    private PackageTemplateImportRow firstRow() {
+      return rows.getFirst();
+    }
+
+    private List<PackageTemplateImportRow> rows() {
+      return rows;
+    }
+
+    private Integer sortOrder(Integer fallback) {
+      return rows
+        .stream()
+        .map(PackageTemplateImportRow::sortOrder)
+        .filter(value -> value != null)
+        .findFirst()
+        .orElse(fallback);
+    }
+
+    private String status(String fallback) {
+      return rows
+        .stream()
+        .map(PackageTemplateImportRow::status)
+        .filter(StringUtils::hasText)
+        .findFirst()
+        .orElse(fallback);
+    }
+
+    private String templateName() {
+      return templateName;
+    }
+
+    private Integer totalTimes(Integer fallback) {
+      return rows
+        .stream()
+        .map(PackageTemplateImportRow::totalTimes)
+        .filter(value -> value != null)
+        .findFirst()
+        .orElse(fallback);
+    }
+
+    private BigDecimal weightLimitJin(BigDecimal fallback) {
+      return rows
+        .stream()
+        .map(PackageTemplateImportRow::weightLimitJin)
+        .filter(value -> value != null)
+        .findFirst()
+        .orElse(fallback);
+    }
+  }
+
+  private static class ImportPackageTemplateAccumulator {
+    private int createdTemplates = 0;
+    private int failedRows = 0;
+    private final List<ImportFailureDto> failures = new ArrayList<>();
+    private int importedBenefits = 0;
+    private int importedRows = 0;
+    private final int totalRows;
+    private int updatedTemplates = 0;
+
+    private ImportPackageTemplateAccumulator(int totalRows) {
+      this.totalRows = totalRows;
+    }
+
+    private List<ImportFailureDto> failures() {
+      return failures;
+    }
+
+    private PackageTemplateImportResultDto toDto() {
+      return new PackageTemplateImportResultDto(
+        createdTemplates,
+        failedRows,
+        List.copyOf(failures),
+        importedBenefits,
+        importedRows,
+        totalRows,
+        updatedTemplates
+      );
+    }
+  }
 }

@@ -7,6 +7,7 @@ import {
   Minimize2,
   PackagePlus,
   Pencil,
+  Upload,
   X,
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
@@ -22,8 +23,14 @@ import {
   replaceItemById,
 } from "./detail-loaders";
 import { AdminAlertDialog } from "./admin-confirm-dialog";
+import {
+  AdminImportDialog,
+  type AdminImportResult,
+} from "./admin-import-dialog";
+import { downloadXlsxTemplate } from "./admin-import-template";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import { hasAdminFormChanges } from "./admin-form-dirty";
+import { getImportResultFromApiPayload } from "./member-import-response";
 import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
@@ -71,6 +78,12 @@ type PackageTemplateManagementPanelProps = {
     userPackages: number;
   };
   store: StoreOption | null;
+};
+
+type PackageTemplateImportResult = AdminImportResult & {
+  createdTemplates?: number;
+  importedBenefits?: number;
+  updatedTemplates?: number;
 };
 
 type ModalState =
@@ -214,6 +227,12 @@ export function PackageTemplateManagementPanel({
   const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] =
+    useState<PackageTemplateImportResult | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TemplateStatus | "ALL">(
     "ALL",
@@ -305,6 +324,112 @@ export function PackageTemplateManagementPanel({
     setForm(nextForm);
     setInitialForm(nextForm);
     resetModalPosition();
+  }
+
+  function openImportDialog() {
+    if (!canWrite || !store) {
+      return;
+    }
+    setImportOpen(true);
+    setImportFile(null);
+    setImportError(null);
+    setImportResult(null);
+  }
+
+  function closeImportDialog() {
+    if (importing) {
+      return;
+    }
+    setImportOpen(false);
+    setImportFile(null);
+    setImportError(null);
+    setImportResult(null);
+  }
+
+  function downloadPackageTemplateImportTemplate() {
+    downloadXlsxTemplate(
+      "套餐模板导入模板.xlsx",
+      "套餐模板导入",
+      [
+        "套餐名称",
+        "总次数",
+        "单次斤数",
+        "状态",
+        "排序",
+        "附加权益名称",
+        "附加权益总量",
+        "附加权益单位",
+        "附加权益排序",
+      ],
+      [
+        {
+          套餐名称: "8斤周套餐",
+          总次数: 8,
+          单次斤数: 8,
+          状态: "启用",
+          排序: 1,
+          附加权益名称: "鸡蛋",
+          附加权益总量: 1,
+          附加权益单位: "箱",
+          附加权益排序: 1,
+        },
+        {
+          套餐名称: "8斤周套餐",
+          总次数: 8,
+          单次斤数: 8,
+          状态: "启用",
+          排序: 1,
+          附加权益名称: "老母鸡",
+          附加权益总量: 1,
+          附加权益单位: "只",
+          附加权益排序: 2,
+        },
+      ],
+    );
+  }
+
+  async function submitPackageTemplateImport() {
+    if (!store || !importFile) {
+      setImportError("请选择要导入的文件");
+      return;
+    }
+
+    setImporting(true);
+    setImportError(null);
+    setImportResult(null);
+
+    const body = new FormData();
+    body.append("storeId", store.id);
+    body.append("file", importFile);
+
+    try {
+      const response = await fetch("/api/admin/package-templates/import", {
+        body,
+        method: "POST",
+      });
+      const payload = (await response.json()) as {
+        data?:
+          | PackageTemplateImportResult
+          | { result?: PackageTemplateImportResult | null }
+          | null;
+        error?: { message: string };
+        success: boolean;
+      };
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error?.message ?? "导入失败");
+      }
+      const result =
+        getImportResultFromApiPayload<PackageTemplateImportResult>(payload);
+      if (!result) {
+        throw new Error("导入完成，但未返回导入结果");
+      }
+      setImportResult(result);
+      await reloadTemplates(1);
+    } catch (submitError) {
+      setImportError(submitError instanceof Error ? submitError.message : "导入失败");
+    } finally {
+      setImporting(false);
+    }
   }
 
   function openEditModal(item: PackageTemplatePanelItem) {
@@ -606,15 +731,27 @@ export function PackageTemplateManagementPanel({
             <CreditCard size={20} />
           </button>
           {canWrite ? (
-            <button
-              className="h-[58px] rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
-              disabled={!store}
-              onClick={openCreateModal}
-              title={store ? "新建套餐" : "当前账号未分配数据范围"}
-              type="button"
-            >
-              新建套餐
-            </button>
+            <>
+              <button
+                className="inline-flex h-[58px] items-center gap-2 rounded-xl border border-[#b8d8bf] bg-[#f8fff8] px-5 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!store}
+                onClick={openImportDialog}
+                title={store ? "导入套餐模板" : "当前账号未分配数据范围"}
+                type="button"
+              >
+                <Upload size={16} />
+                导入模板
+              </button>
+              <button
+                className="h-[58px] rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
+                disabled={!store}
+                onClick={openCreateModal}
+                title={store ? "新建套餐" : "当前账号未分配数据范围"}
+                type="button"
+              >
+                新建套餐
+              </button>
+            </>
           ) : null}
         </div>
       </div>
@@ -1049,6 +1186,35 @@ export function PackageTemplateManagementPanel({
       ) : null}
       {modal && error ? (
         <AdminAlertDialog message={error} onClose={() => setError(null)} />
+      ) : null}
+      {importOpen ? (
+        <AdminImportDialog
+          description="上传 Excel 或 CSV 后，按套餐名称新增或更新模板。"
+          error={importError}
+          file={importFile}
+          loading={importing}
+          onClose={closeImportDialog}
+          onDownloadTemplate={downloadPackageTemplateImportTemplate}
+          onFileChange={(file) => {
+            setImportFile(file);
+            setImportError(null);
+            setImportResult(null);
+          }}
+          onSubmit={submitPackageTemplateImport}
+          result={importResult}
+          resultCards={[
+            { label: "总行数", value: importResult?.totalRows ?? 0 },
+            { label: "成功", value: importResult?.importedRows ?? 0 },
+            { label: "新增", value: importResult?.createdTemplates ?? 0 },
+            { label: "失败", value: importResult?.failedRows ?? 0 },
+          ]}
+          rules={[
+            "同一个套餐名称可写多行，每行填写一个附加权益；附加权益类型编码由系统自动生成。",
+            "已有同名模板会更新模板信息；如果文件中填写了附加权益，会用文件中的权益配置替换原配置。",
+            "状态可填“启用”或“停用”，文件大小不超过 5MB。",
+          ]}
+          title="导入套餐模板"
+        />
       ) : null}
     </section>
   );
