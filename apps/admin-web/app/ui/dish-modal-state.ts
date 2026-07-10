@@ -42,7 +42,7 @@ export function buildDishFormState(
     sortOrder: String(item?.sortOrder ?? 0),
     status: item?.status ?? "ON_SALE",
     stepJin: String(item?.stepJin ?? 0.5),
-    stockJin: String(item?.stockJin ?? 20),
+    stockJin: String(item?.stockJin ?? 0),
   };
 }
 
@@ -68,8 +68,7 @@ export function hasUnsavedDishModalChanges({
     current.name !== initial.name ||
     current.sortOrder !== initial.sortOrder ||
     current.status !== initial.status ||
-    current.stepJin !== initial.stepJin ||
-    current.stockJin !== initial.stockJin
+    current.stepJin !== initial.stepJin
   );
 }
 

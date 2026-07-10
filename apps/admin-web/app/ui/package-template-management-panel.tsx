@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  CreditCard,
   Eye,
   Maximize2,
   Minimize2,
@@ -11,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
+import { Button } from "@/components/ui/button";
 import {
   createAdminModalDragState,
   getBoundedAdminModalOffset,
@@ -36,6 +36,8 @@ import { downloadXlsxTemplate } from "./admin-import-template";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import { hasAdminFormChanges } from "./admin-form-dirty";
 import { getImportResultFromApiPayload } from "./member-import-response";
+import { AdminSelect } from "./admin-select";
+import { AdminFormField } from "./admin-form-field";
 import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
@@ -112,6 +114,16 @@ type FormState = {
   status: TemplateStatus;
   totalTimes: string;
   weightLimitJin: string;
+};
+
+type PackageTemplateBenefitErrors = Partial<
+  Record<"name" | "sortOrder" | "totalQuantity" | "unit", string>
+>;
+
+type PackageTemplateFormErrors = Partial<
+  Record<"name" | "sortOrder" | "status" | "totalTimes" | "weightLimitJin", string>
+> & {
+  benefits?: PackageTemplateBenefitErrors[];
 };
 
 const INTERNAL_VALID_DAYS = 36500;
@@ -213,6 +225,56 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function hasPackageTemplateFormErrors(errors: PackageTemplateFormErrors) {
+  return (
+    Object.entries(errors).some(([key, value]) =>
+      key === "benefits"
+        ? Array.isArray(value) &&
+          value.some((item) => Object.values(item).some(Boolean))
+        : Boolean(value),
+    )
+  );
+}
+
+function validatePackageTemplateForm(form: FormState) {
+  const errors: PackageTemplateFormErrors = {};
+  if (!form.name.trim()) {
+    errors.name = "请输入套餐名称";
+  }
+  if (!form.totalTimes.trim()) {
+    errors.totalTimes = "请输入总次数";
+  }
+  if (!form.weightLimitJin.trim()) {
+    errors.weightLimitJin = "请输入单次斤数";
+  }
+  if (!form.sortOrder.trim()) {
+    errors.sortOrder = "请输入排序";
+  }
+  if (!form.status) {
+    errors.status = "请选择状态";
+  }
+  const benefitErrors = form.benefits.map((benefit) => {
+    const itemErrors: PackageTemplateBenefitErrors = {};
+    if (!benefit.name.trim()) {
+      itemErrors.name = "请输入权益名称";
+    }
+    if (!Number.isFinite(Number(benefit.totalQuantity)) || Number(benefit.totalQuantity) <= 0) {
+      itemErrors.totalQuantity = "请输入大于 0 的总数量";
+    }
+    if (!benefit.unit.trim()) {
+      itemErrors.unit = "请输入单位";
+    }
+    if (!Number.isFinite(Number(benefit.sortOrder))) {
+      itemErrors.sortOrder = "请输入排序";
+    }
+    return itemErrors;
+  });
+  if (benefitErrors.some((item) => Object.values(item).some(Boolean))) {
+    errors.benefits = benefitErrors;
+  }
+  return errors;
+}
+
 export function PackageTemplateManagementPanel({
   canWrite = true,
   initialItems,
@@ -226,12 +288,13 @@ export function PackageTemplateManagementPanel({
   const [modal, setModal] = useState<ModalState | null>(null);
   const [form, setForm] = useState<FormState>(buildFormState());
   const [initialForm, setInitialForm] = useState<FormState>(buildFormState());
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(true);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<PackageTemplateFormErrors>({});
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
@@ -247,6 +310,7 @@ export function PackageTemplateManagementPanel({
   async function reloadTemplates(
     page = pagination.page,
     filters = { query, statusFilter },
+    pageSize = pagination.pageSize,
   ) {
     if (!store) {
       return;
@@ -254,7 +318,7 @@ export function PackageTemplateManagementPanel({
 
     const params = new URLSearchParams({
       page: String(page),
-      pageSize: String(pagination.pageSize),
+      pageSize: String(pageSize),
       storeId: store.id,
     });
     const nextQuery = filters.query.trim();
@@ -289,7 +353,7 @@ export function PackageTemplateManagementPanel({
       const nextList = normalizeAdminListPayload(
         result.data,
         initialSummary,
-        pagination.pageSize,
+        pageSize,
       );
       setItems(nextList.items);
       setPagination(nextList.pagination);
@@ -308,7 +372,7 @@ export function PackageTemplateManagementPanel({
   }
 
   function resetModalPosition() {
-    setFullscreen(false);
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setError(null);
   }
@@ -322,6 +386,7 @@ export function PackageTemplateManagementPanel({
     setModal({ item: null, mode: "create" });
     setForm(nextForm);
     setInitialForm(nextForm);
+    setFormErrors({});
     resetModalPosition();
   }
 
@@ -509,6 +574,7 @@ export function PackageTemplateManagementPanel({
 
     setModal(null);
     setError(null);
+    setFormErrors({});
   }
 
   function handleHeaderPointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -543,6 +609,7 @@ export function PackageTemplateManagementPanel({
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+    setFormErrors((current) => ({ ...current, [key]: undefined }));
   }
 
   function addBenefit() {
@@ -559,6 +626,7 @@ export function PackageTemplateManagementPanel({
         },
       ],
     }));
+    setFormErrors((current) => ({ ...current, benefits: undefined }));
   }
 
   function removeBenefit(index: number) {
@@ -566,6 +634,7 @@ export function PackageTemplateManagementPanel({
       ...current,
       benefits: current.benefits.filter((_, itemIndex) => itemIndex !== index),
     }));
+    setFormErrors((current) => ({ ...current, benefits: undefined }));
   }
 
   function updateBenefit<K extends keyof PackageTemplateBenefitPanelItem>(
@@ -579,6 +648,7 @@ export function PackageTemplateManagementPanel({
         itemIndex === index ? { ...benefit, [key]: value } : benefit,
       ),
     }));
+    setFormErrors((current) => ({ ...current, benefits: undefined }));
   }
 
   async function submitModal() {
@@ -586,6 +656,11 @@ export function PackageTemplateManagementPanel({
       return;
     }
 
+    const validationErrors = validatePackageTemplateForm(form);
+    setFormErrors(validationErrors);
+    if (hasPackageTemplateFormErrors(validationErrors)) {
+      return;
+    }
     setSaving(true);
     setError(null);
 
@@ -716,15 +791,6 @@ export function PackageTemplateManagementPanel({
               <div className="mt-1 text-lg font-semibold">{value}</div>
             </div>
           ))}
-          <button
-            aria-label="微信支付购买套餐预留"
-            className="grid h-[58px] w-[58px] place-items-center rounded-xl border border-dashed border-[#b8d8bf] bg-[#f8fff8] text-[#1f8f4f] disabled:opacity-60"
-            disabled
-            title="微信支付购买套餐预留"
-            type="button"
-          >
-            <CreditCard size={20} />
-          </button>
           {canWrite ? (
             <>
               <button
@@ -768,20 +834,20 @@ export function PackageTemplateManagementPanel({
         </label>
         <label className="flex w-40 flex-col gap-1 text-xs font-semibold text-[#66756d]">
           状态
-          <select
-            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-            onChange={(event) =>
-              setStatusFilter(event.target.value as TemplateStatus | "ALL")
+          <AdminSelect
+            contentLabel="状态"
+            onChange={(value) =>
+              setStatusFilter(value as TemplateStatus | "ALL")
             }
+            options={[
+              { label: "全部状态", value: "ALL" },
+              ...Object.entries(STATUS_LABELS).map(([value, label]) => ({
+                label,
+                value,
+              })),
+            ]}
             value={statusFilter}
-          >
-            <option value="ALL">全部状态</option>
-            {Object.entries(STATUS_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <button
           className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
@@ -844,26 +910,30 @@ export function PackageTemplateManagementPanel({
                   </span>
                 </td>
                 <td className="px-4 py-4">
-                  <div className="flex justify-end gap-2">
-                    <button
+                  <div className="flex flex-wrap justify-end gap-2 whitespace-nowrap">
+                    <Button
                       aria-label="查看套餐详情"
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                      className="border-[#dbe6dc] text-[#1f8f4f]"
                       onClick={() => openDetailModal(item)}
-                      title="查看详情"
+                      size="sm"
                       type="button"
+                      variant="outline"
                     >
-                      <Eye size={16} />
-                    </button>
+                      <Eye data-icon="inline-start" />
+                      查看
+                    </Button>
                     {canWrite ? (
-                      <button
+                      <Button
                         aria-label="编辑套餐"
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                        className="border-[#dbe6dc] text-[#1f8f4f]"
                         onClick={() => openEditModal(item)}
-                        title="编辑套餐"
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
-                        <Pencil size={16} />
-                      </button>
+                        <Pencil data-icon="inline-start" />
+                        编辑
+                      </Button>
                     ) : null}
                   </div>
                 </td>
@@ -881,6 +951,9 @@ export function PackageTemplateManagementPanel({
         <AdminPagination
           disabled={loadingList}
           onPageChange={(nextPage) => void reloadTemplates(nextPage)}
+          onPageSizeChange={(nextPageSize) =>
+            void reloadTemplates(1, { query, statusFilter }, nextPageSize)
+          }
           pagination={pagination}
         />
       </div>
@@ -967,18 +1040,30 @@ export function PackageTemplateManagementPanel({
                 </div>
               ) : null}
               <div className="grid gap-4 md:grid-cols-2">
-                <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-                  <RequiredLabel>套餐名称</RequiredLabel>
+                <AdminFormField
+                  className="md:col-span-2"
+                  error={formErrors.name}
+                  label="套餐名称"
+                  required
+                >
+                  {(invalid) => (
                   <input
+                    aria-invalid={invalid}
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     onChange={(event) => updateForm("name", event.target.value)}
                     readOnly={modal.mode === "detail"}
                     value={form.name}
                   />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>总次数</RequiredLabel>
+                  )}
+                </AdminFormField>
+                <AdminFormField
+                  error={formErrors.totalTimes}
+                  label="总次数"
+                  required
+                >
+                  {(invalid) => (
                   <input
+                    aria-invalid={invalid}
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     inputMode="numeric"
                     min={1}
@@ -992,10 +1077,16 @@ export function PackageTemplateManagementPanel({
                     type="text"
                     value={form.totalTimes}
                   />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>单次斤数</RequiredLabel>
+                  )}
+                </AdminFormField>
+                <AdminFormField
+                  error={formErrors.weightLimitJin}
+                  label="单次斤数"
+                  required
+                >
+                  {(invalid) => (
                   <input
+                    aria-invalid={invalid}
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     inputMode="decimal"
                     min={0.5}
@@ -1010,10 +1101,16 @@ export function PackageTemplateManagementPanel({
                     type="text"
                     value={form.weightLimitJin}
                   />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>排序</RequiredLabel>
+                  )}
+                </AdminFormField>
+                <AdminFormField
+                  error={formErrors.sortOrder}
+                  label="排序"
+                  required
+                >
+                  {(invalid) => (
                   <input
+                    aria-invalid={invalid}
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     inputMode="numeric"
                     onChange={(event) =>
@@ -1026,21 +1123,31 @@ export function PackageTemplateManagementPanel({
                     type="text"
                     value={form.sortOrder}
                   />
-                </label>
-	                <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-	                  <RequiredLabel>状态</RequiredLabel>
-	                  <select
-                    className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
-                    disabled={modal.mode === "detail"}
-                    onChange={(event) =>
-                      updateForm("status", event.target.value as TemplateStatus)
-                    }
-                    value={form.status}
+                  )}
+                </AdminFormField>
+	                <AdminFormField
+                    className="md:col-span-2"
+                    error={formErrors.status}
+                    label="状态"
+                    required
                   >
-                    <option value="ACTIVE">启用</option>
-                    <option value="DISABLED">停用</option>
-	                  </select>
-	                </label>
+                    {(invalid) => (
+	                  <AdminSelect
+                    ariaInvalid={invalid}
+                    contentLabel="状态"
+                    disabled={modal.mode === "detail"}
+                    onChange={(value) =>
+                      updateForm("status", value as TemplateStatus)
+                    }
+                    options={[
+                      { label: "启用", value: "ACTIVE" },
+                      { label: "停用", value: "DISABLED" },
+                    ]}
+                    triggerClassName="h-11 w-full border-[#dbe6dc] bg-white"
+                    value={form.status}
+                  />
+                    )}
+	                </AdminFormField>
 	              </div>
 
 	              <div className="mt-6 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4">
@@ -1067,9 +1174,14 @@ export function PackageTemplateManagementPanel({
 	                      className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(112px,1fr))] gap-3 rounded-xl border border-[#dbe6dc] bg-white p-3"
 	                      key={`${benefit.id ?? "benefit"}-${index}`}
 	                    >
-	                      <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#66756d]">
-	                        <RequiredLabel>权益名称</RequiredLabel>
+	                      <AdminFormField
+                          error={formErrors.benefits?.[index]?.name}
+                          label="权益名称"
+                          required
+                        >
+                          {(invalid) => (
 	                        <input
+                            aria-invalid={invalid}
 	                          className="h-10 w-full min-w-0 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
 	                          onChange={(event) =>
 	                            updateBenefit(index, "name", event.target.value)
@@ -1077,10 +1189,16 @@ export function PackageTemplateManagementPanel({
 	                          readOnly={modal.mode === "detail"}
 	                          value={benefit.name}
 	                        />
-	                      </label>
-	                      <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#66756d]">
-	                        <RequiredLabel>总数量</RequiredLabel>
+                          )}
+	                      </AdminFormField>
+	                      <AdminFormField
+                          error={formErrors.benefits?.[index]?.totalQuantity}
+                          label="总数量"
+                          required
+                        >
+                          {(invalid) => (
 	                        <input
+                            aria-invalid={invalid}
 	                          className="h-10 w-full min-w-0 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
 	                          inputMode="decimal"
 	                          min={0.01}
@@ -1096,10 +1214,16 @@ export function PackageTemplateManagementPanel({
 	                          type="text"
 	                          value={formatBenefitQuantity(benefit.totalQuantity)}
 	                        />
-	                      </label>
-	                      <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#66756d]">
-	                        <RequiredLabel>单位</RequiredLabel>
+                          )}
+	                      </AdminFormField>
+	                      <AdminFormField
+                          error={formErrors.benefits?.[index]?.unit}
+                          label="单位"
+                          required
+                        >
+                          {(invalid) => (
 	                        <input
+                            aria-invalid={invalid}
 	                          className="h-10 w-full min-w-0 rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
 	                          onChange={(event) =>
 	                            updateBenefit(index, "unit", event.target.value)
@@ -1107,10 +1231,16 @@ export function PackageTemplateManagementPanel({
 	                          readOnly={modal.mode === "detail"}
 	                          value={benefit.unit}
 	                        />
-	                      </label>
-	                      <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#66756d]">
-	                        <RequiredLabel>排序</RequiredLabel>
+                          )}
+	                      </AdminFormField>
+	                      <AdminFormField
+                          error={formErrors.benefits?.[index]?.sortOrder}
+                          label="排序"
+                          required
+                        >
+                          {(invalid) => (
 	                        <input
+                            aria-invalid={invalid}
 	                          className="h-10 w-full rounded-lg border border-[#dbe6dc] px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
 	                          inputMode="numeric"
 	                          onChange={(event) =>
@@ -1127,7 +1257,8 @@ export function PackageTemplateManagementPanel({
 	                          type="text"
 	                          value={String(benefit.sortOrder)}
 	                        />
-	                      </label>
+                          )}
+	                      </AdminFormField>
 	                      <div className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#66756d]">
 	                        类型编码
 	                        <div className="flex h-10 items-center rounded-lg border border-[#dbe6dc] bg-[#f5f8f3] px-3 font-mono text-sm font-normal text-[#405248]">

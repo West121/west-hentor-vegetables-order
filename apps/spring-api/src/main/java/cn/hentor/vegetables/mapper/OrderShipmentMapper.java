@@ -15,6 +15,7 @@ public interface OrderShipmentMapper extends BaseMapper<OrderShipmentEntity> {
   @Update("""
     UPDATE "OrderShipment"
     SET "logisticsNo" = #{logisticsNo},
+        "kuaidicom" = #{kuaidicom},
         "remark" = #{remark},
         "shippedAt" = #{shippedAt},
         "status" = 'SHIPPED',

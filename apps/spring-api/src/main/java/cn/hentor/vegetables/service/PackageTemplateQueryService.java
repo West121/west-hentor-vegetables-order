@@ -12,11 +12,13 @@ import cn.hentor.vegetables.dto.PackageTemplateRequest;
 import cn.hentor.vegetables.dto.PackageTemplateResponse;
 import cn.hentor.vegetables.entity.AdminOperationLogEntity;
 import cn.hentor.vegetables.entity.AdminUserEntity;
+import cn.hentor.vegetables.entity.PackagePurchaseOrderEntity;
 import cn.hentor.vegetables.entity.PackageTemplateBenefitEntity;
 import cn.hentor.vegetables.entity.PackageTemplateEntity;
 import cn.hentor.vegetables.entity.UserPackageEntity;
 import cn.hentor.vegetables.mapper.AdminOperationLogMapper;
 import cn.hentor.vegetables.mapper.AdminUserMapper;
+import cn.hentor.vegetables.mapper.PackagePurchaseOrderMapper;
 import cn.hentor.vegetables.mapper.PackageTemplateBenefitMapper;
 import cn.hentor.vegetables.mapper.PackageTemplateMapper;
 import cn.hentor.vegetables.mapper.UserPackageMapper;
@@ -51,6 +53,7 @@ public class PackageTemplateQueryService {
   private final AdminUserMapper adminUserMapper;
   private final PackageTemplateBenefitMapper benefitMapper;
   private final ObjectMapper objectMapper;
+  private final PackagePurchaseOrderMapper packagePurchaseOrderMapper;
   private final PackageTemplateMapper packageTemplateMapper;
   private final UserPackageMapper userPackageMapper;
 
@@ -59,6 +62,7 @@ public class PackageTemplateQueryService {
     AdminUserMapper adminUserMapper,
     PackageTemplateBenefitMapper benefitMapper,
     ObjectMapper objectMapper,
+    PackagePurchaseOrderMapper packagePurchaseOrderMapper,
     PackageTemplateMapper packageTemplateMapper,
     UserPackageMapper userPackageMapper
   ) {
@@ -66,6 +70,7 @@ public class PackageTemplateQueryService {
     this.adminUserMapper = adminUserMapper;
     this.benefitMapper = benefitMapper;
     this.objectMapper = objectMapper;
+    this.packagePurchaseOrderMapper = packagePurchaseOrderMapper;
     this.packageTemplateMapper = packageTemplateMapper;
     this.userPackageMapper = userPackageMapper;
   }
@@ -114,8 +119,38 @@ public class PackageTemplateQueryService {
       result.getCurrent(),
       result.getSize(),
       result.getTotal(),
-      totalPages
+      totalPages,
+      templateSummary(storeId)
     );
+  }
+
+  private Map<String, Long> templateSummary(String storeId) {
+    long active = countTemplatesByStatus(storeId, "ACTIVE");
+    long disabled = countTemplatesByStatus(storeId, "DISABLED");
+    Long purchaseOrders = packagePurchaseOrderMapper.selectCount(
+      new LambdaQueryWrapper<PackagePurchaseOrderEntity>()
+        .eq(PackagePurchaseOrderEntity::getStoreId, storeId)
+    );
+    Long userPackages = userPackageMapper.selectCount(
+      new LambdaQueryWrapper<UserPackageEntity>()
+        .eq(UserPackageEntity::getStoreId, storeId)
+    );
+    return Map.of(
+      "active", active,
+      "disabled", disabled,
+      "purchaseOrders", purchaseOrders == null ? 0 : purchaseOrders,
+      "total", active + disabled,
+      "userPackages", userPackages == null ? 0 : userPackages
+    );
+  }
+
+  private long countTemplatesByStatus(String storeId, String status) {
+    Long count = packageTemplateMapper.selectCount(
+      new LambdaQueryWrapper<PackageTemplateEntity>()
+        .eq(PackageTemplateEntity::getStoreId, storeId)
+        .eq(PackageTemplateEntity::getStatus, status)
+    );
+    return count == null ? 0 : count;
   }
 
   public PackageTemplateResponse getTemplate(String storeId, String templateId) {

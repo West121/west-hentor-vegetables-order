@@ -9,8 +9,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 
 import { AdminConfirmDialog } from "./admin-confirm-dialog";
+import { AdminFormField } from "./admin-form-field";
 import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
@@ -46,6 +48,12 @@ type ApiResponse<T> = {
     message: string;
   };
   success: boolean;
+};
+
+type DictionaryFormErrors = Partial<
+  Record<"code" | "name" | "sortOrder", string>
+> & {
+  items?: Array<Partial<Record<"code" | "enabled" | "name" | "sortOrder", string>>>;
 };
 
 const DEFAULT_DISH_DICTIONARY: SystemDictionaryMeta = {
@@ -119,6 +127,48 @@ function itemFallback(initialItems: SystemDictionaryItem[]) {
   return initialItems.length ? initialItems : DEFAULT_DISH_CATEGORIES;
 }
 
+function hasDictionaryFormErrors(errors: DictionaryFormErrors) {
+  return Object.entries(errors).some(([key, value]) =>
+    key === "items"
+      ? Array.isArray(value) &&
+        value.some((item) => Object.values(item).some(Boolean))
+      : Boolean(value),
+  );
+}
+
+function validateDictionaryForm(
+  dictionary: SystemDictionaryMeta,
+  items: SystemDictionaryItem[],
+) {
+  const errors: DictionaryFormErrors = {};
+  if (!dictionary.name.trim()) {
+    errors.name = "请输入字典名称";
+  }
+  if (!dictionary.code.trim()) {
+    errors.code = "请输入字典编码";
+  }
+  if (!Number.isFinite(Number(dictionary.sortOrder))) {
+    errors.sortOrder = "请输入排序";
+  }
+  const itemErrors = items.map((item) => {
+    const current: NonNullable<DictionaryFormErrors["items"]>[number] = {};
+    if (!item.name.trim()) {
+      current.name = "请输入字典项名称";
+    }
+    if (!item.code.trim()) {
+      current.code = "请输入字典项编码";
+    }
+    if (!Number.isFinite(Number(item.sortOrder))) {
+      current.sortOrder = "请输入排序";
+    }
+    return current;
+  });
+  if (itemErrors.some((item) => Object.values(item).some(Boolean))) {
+    errors.items = itemErrors;
+  }
+  return errors;
+}
+
 export function SystemDictionaryPanel({
   initialDictionaries,
   initialItems,
@@ -146,6 +196,7 @@ export function SystemDictionaryPanel({
   const [deleteCandidate, setDeleteCandidate] =
     useState<SystemDictionaryMeta | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<DictionaryFormErrors>({});
 
   const activeDictionary =
     dictionaries.find((item) => item.code === selectedCode) ??
@@ -158,6 +209,7 @@ export function SystemDictionaryPanel({
     setSelectedCode(code);
     setDeleteCandidate(null);
     setMessage(null);
+    setFormErrors({});
     if (!store || loadedCodes.has(code)) {
       return;
     }
@@ -200,6 +252,7 @@ export function SystemDictionaryPanel({
         item.code === activeDictionary.code ? { ...item, [key]: value } : item,
       ),
     );
+    setFormErrors((current) => ({ ...current, [key]: undefined }));
   }
 
   function updateItem<K extends keyof SystemDictionaryItem>(
@@ -213,6 +266,7 @@ export function SystemDictionaryPanel({
         itemIndex === index ? { ...item, [key]: value } : item,
       ),
     }));
+    setFormErrors((current) => ({ ...current, items: undefined }));
   }
 
   function addDictionary() {
@@ -233,6 +287,7 @@ export function SystemDictionaryPanel({
     setLoadedCodes((current) => new Set([...current, code]));
     setSelectedCode(code);
     setMessage(null);
+    setFormErrors({});
   }
 
   function addItem() {
@@ -261,6 +316,15 @@ export function SystemDictionaryPanel({
 
   async function saveDictionary() {
     if (!store) {
+      return;
+    }
+
+    const validationErrors = validateDictionaryForm(
+      activeDictionary,
+      activeItems,
+    );
+    setFormErrors(validationErrors);
+    if (hasDictionaryFormErrors(validationErrors)) {
       return;
     }
 
@@ -473,33 +537,44 @@ export function SystemDictionaryPanel({
         <div className="min-w-0 rounded-2xl border border-[#dbe6dc]">
           <div className="border-b border-[#edf2ed] p-4">
             <div className="grid gap-3 lg:grid-cols-[1fr_220px_140px]">
-              <label className="block">
-                <span className="text-sm font-semibold text-[#102017]">
-                  <RequiredLabel>字典名称</RequiredLabel>
-                </span>
+              <AdminFormField
+                error={formErrors.name}
+                label="字典名称"
+                required
+              >
+                {(invalid) => (
                 <input
+                  aria-invalid={invalid}
                   className="mt-2 h-11 w-full rounded-xl border border-[#dbe6dc] px-3 text-sm outline-none focus:border-[#1f8f4f]"
                   onChange={(event) =>
                     updateDictionary("name", event.target.value)
                   }
                   value={activeDictionary.name}
                 />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-[#102017]">
-                  <RequiredLabel>字典编码</RequiredLabel>
-                </span>
+                )}
+              </AdminFormField>
+              <AdminFormField
+                error={formErrors.code}
+                label="字典编码"
+                required
+              >
+                {(invalid) => (
                 <input
+                  aria-invalid={invalid}
                   className="mt-2 h-11 w-full rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-3 font-mono text-sm text-[#66756d] outline-none"
                   readOnly
                   value={activeDictionary.code}
                 />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-[#102017]">
-                  <RequiredLabel>排序</RequiredLabel>
-                </span>
+                )}
+              </AdminFormField>
+              <AdminFormField
+                error={formErrors.sortOrder}
+                label="排序"
+                required
+              >
+                {(invalid) => (
                 <input
+                  aria-invalid={invalid}
                   className="mt-2 h-11 w-full rounded-xl border border-[#dbe6dc] px-3 text-sm outline-none focus:border-[#1f8f4f]"
                   onChange={(event) =>
                     updateDictionary("sortOrder", Number(event.target.value || 0))
@@ -507,7 +582,8 @@ export function SystemDictionaryPanel({
                   type="number"
                   value={activeDictionary.sortOrder}
                 />
-              </label>
+                )}
+              </AdminFormField>
               <label className="block lg:col-span-2">
                 <span className="text-sm font-semibold text-[#102017]">
                   字典说明
@@ -534,19 +610,21 @@ export function SystemDictionaryPanel({
                   />
                   {activeDictionary.enabled ? "启用" : "停用"}
                 </label>
-                <button
+                <Button
                   aria-label="删除字典"
-                  className="grid h-11 w-11 place-items-center rounded-xl border border-red-100 bg-red-50 text-red-600 disabled:cursor-not-allowed disabled:opacity-45"
+                  className="border-red-100 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={
                     Boolean(activeDictionary.builtIn) ||
                     deletingCode === activeDictionary.code
                   }
                   onClick={() => setDeleteCandidate(activeDictionary)}
-                  title="删除字典"
+                  size="sm"
                   type="button"
+                  variant="outline"
                 >
-                  <Trash2 size={17} />
-                </button>
+                  <Trash2 data-icon="inline-start" />
+                  删除字典
+                </Button>
               </div>
             </div>
           </div>
@@ -595,41 +673,68 @@ export function SystemDictionaryPanel({
                 {activeItems.map((item, index) => (
                   <tr key={`${item.code}-${index}`}>
                     <td className="px-4 py-3">
-                      <input
-                        className="h-10 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                        onChange={(event) =>
-                          updateItem(index, "name", event.target.value)
-                        }
-                        placeholder="例如：叶菜"
-                        value={item.name}
-                      />
+                      <AdminFormField
+                        error={formErrors.items?.[index]?.name}
+                        label="字典项名称"
+                        required
+                      >
+                        {(invalid) => (
+                          <input
+                            aria-invalid={invalid}
+                            className="h-10 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                            onChange={(event) =>
+                              updateItem(index, "name", event.target.value)
+                            }
+                            placeholder="例如：叶菜"
+                            value={item.name}
+                          />
+                        )}
+                      </AdminFormField>
                     </td>
                     <td className="px-4 py-3">
-                      <input
-                        className="h-10 w-full rounded-xl border border-[#dbe6dc] px-3 font-mono text-sm outline-none focus:border-[#1f8f4f]"
-                        onBlur={() =>
-                          updateItem(index, "code", normalizeCode(item.code))
-                        }
-                        onChange={(event) =>
-                          updateItem(index, "code", event.target.value)
-                        }
-                        placeholder="例如：LEAFY"
-                        value={item.code}
-                      />
+                      <AdminFormField
+                        error={formErrors.items?.[index]?.code}
+                        label="字典项编码"
+                        required
+                      >
+                        {(invalid) => (
+                          <input
+                            aria-invalid={invalid}
+                            className="h-10 w-full rounded-xl border border-[#dbe6dc] px-3 font-mono text-sm outline-none focus:border-[#1f8f4f]"
+                            onBlur={() =>
+                              updateItem(index, "code", normalizeCode(item.code))
+                            }
+                            onChange={(event) =>
+                              updateItem(index, "code", event.target.value)
+                            }
+                            placeholder="例如：LEAFY"
+                            value={item.code}
+                          />
+                        )}
+                      </AdminFormField>
                     </td>
                     <td className="px-4 py-3">
-                      <input
-                        className="h-10 w-24 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                        onChange={(event) =>
-                          updateItem(
-                            index,
-                            "sortOrder",
-                            Number(event.target.value || 0),
-                          )
-                        }
-                        type="number"
-                        value={item.sortOrder}
-                      />
+                      <AdminFormField
+                        error={formErrors.items?.[index]?.sortOrder}
+                        label="排序"
+                        required
+                      >
+                        {(invalid) => (
+                          <input
+                            aria-invalid={invalid}
+                            className="h-10 w-24 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                            onChange={(event) =>
+                              updateItem(
+                                index,
+                                "sortOrder",
+                                Number(event.target.value || 0),
+                              )
+                            }
+                            type="number"
+                            value={item.sortOrder}
+                          />
+                        )}
+                      </AdminFormField>
                     </td>
                     <td className="px-4 py-3">
                       <label className="inline-flex items-center gap-2 text-sm font-semibold text-[#405248]">
@@ -646,15 +751,17 @@ export function SystemDictionaryPanel({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end">
-                        <button
+                        <Button
                           aria-label="删除字典项"
-                          className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 bg-red-50 text-red-600"
+                          className="border-red-100 text-red-600 hover:bg-red-50"
                           onClick={() => removeItem(index)}
-                          title="删除字典项"
+                          size="sm"
                           type="button"
+                          variant="outline"
                         >
-                          <Trash2 size={16} />
-                        </button>
+                          <Trash2 data-icon="inline-start" />
+                          删除
+                        </Button>
                       </div>
                     </td>
                   </tr>

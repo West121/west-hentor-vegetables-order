@@ -2,8 +2,13 @@ package cn.hentor.vegetables.service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -71,6 +76,47 @@ public class SessionStore {
     localSessions.remove(key);
   }
 
+  public List<SessionEntry> scan(String prefix) {
+    try {
+      Set<String> keys = redisTemplate.keys(prefix + "*");
+      if (keys != null && !keys.isEmpty()) {
+        List<SessionEntry> entries = new ArrayList<>();
+        Instant now = Instant.now();
+        for (String key : keys) {
+          String value = redisTemplate.opsForValue().get(key);
+          if (!StringUtils.hasText(value)) {
+            continue;
+          }
+          Long ttlSeconds = redisTemplate.getExpire(key, TimeUnit.SECONDS);
+          Instant expiresAt = ttlSeconds != null && ttlSeconds > 0
+            ? now.plusSeconds(ttlSeconds)
+            : null;
+          entries.add(new SessionEntry(key, value, expiresAt));
+        }
+        entries.sort(Comparator.comparing(SessionEntry::key));
+        return entries;
+      }
+    } catch (Exception ignored) {
+      // Fall back to process memory when Redis is unavailable.
+    }
+
+    Instant now = Instant.now();
+    List<SessionEntry> entries = new ArrayList<>();
+    for (Map.Entry<String, LocalSession> item : localSessions.entrySet()) {
+      if (!item.getKey().startsWith(prefix)) {
+        continue;
+      }
+      LocalSession session = item.getValue();
+      if (now.isAfter(session.expiresAt())) {
+        localSessions.remove(item.getKey());
+        continue;
+      }
+      entries.add(new SessionEntry(item.getKey(), session.value(), session.expiresAt()));
+    }
+    entries.sort(Comparator.comparing(SessionEntry::key));
+    return entries;
+  }
+
   public Map<String, Object> status() {
     try {
       String pong = redisTemplate.getConnectionFactory()
@@ -90,6 +136,8 @@ public class SessionStore {
       );
     }
   }
+
+  public record SessionEntry(String key, String value, Instant expiresAt) {}
 
   private record LocalSession(String value, Instant expiresAt) {}
 }

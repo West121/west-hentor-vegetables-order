@@ -56,6 +56,7 @@ public interface UserMapper extends BaseMapper<UserEntity> {
   @Update("""
     UPDATE "User"
     SET "disabledReason" = #{disabledReason},
+        "nickname" = #{nickname},
         "remark" = #{remark},
         "updatedAt" = #{updatedAt}
     WHERE "id" = #{id}
@@ -63,6 +64,7 @@ public interface UserMapper extends BaseMapper<UserEntity> {
   int updateAdminMemberProfile(
     @Param("id") String id,
     @Param("disabledReason") String disabledReason,
+    @Param("nickname") String nickname,
     @Param("remark") String remark,
     @Param("updatedAt") LocalDateTime updatedAt
   );

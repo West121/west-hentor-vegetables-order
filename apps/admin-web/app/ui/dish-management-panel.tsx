@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
+import { Button } from "@/components/ui/button";
 import {
   createAdminModalDragState,
   getBoundedAdminModalOffset,
@@ -33,19 +34,18 @@ import {
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import {
   buildDishFormState,
-  buildInventoryFormState,
   hasUnsavedDishModalChanges,
-  hasUnsavedInventoryModalChanges,
   type DishCategory,
   type DishFormState,
   type DishStatus,
-  type InventoryFormState,
 } from "./dish-modal-state";
 import { AdminAlertDialog } from "./admin-confirm-dialog";
 import {
   AdminImportDialog,
   type AdminImportResult,
 } from "./admin-import-dialog";
+import { AdminSelect } from "./admin-select";
+import { AdminFormField } from "./admin-form-field";
 import { downloadXlsxTemplate } from "./admin-import-template";
 import { RequiredLabel } from "./required-mark";
 import { getImportResultFromApiPayload } from "./member-import-response";
@@ -70,14 +70,6 @@ export type DishPanelItem = {
   id: string;
   imageKey: string | null;
   imageUrl: string | null;
-  inventoryLogs?: Array<{
-    afterJin: number;
-    beforeJin: number;
-    changeJin: number;
-    id: string;
-    operator: { id: string; name: string } | null;
-    reason: string;
-  }>;
   name: string;
   sortOrder: number;
   status: DishStatus;
@@ -126,12 +118,14 @@ type DishModalState =
       mode: "create";
     };
 
-type InventoryModalState = {
-  item: DishPanelItem;
-  mode: "inventory";
-};
+type ModalState = DishModalState;
 
-type ModalState = DishModalState | InventoryModalState;
+type DishFormErrors = Partial<
+  Record<
+    "category" | "name" | "sortOrder" | "status" | "stepJin",
+    string
+  >
+>;
 
 const DEFAULT_CATEGORY_OPTIONS: DishCategoryOption[] = [
   { code: "LEAFY", enabled: true, name: "叶菜", sortOrder: 1 },
@@ -155,6 +149,30 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function hasDishFormErrors(errors: DishFormErrors) {
+  return Object.values(errors).some(Boolean);
+}
+
+function validateDishForm(form: DishFormState, mode: ModalState["mode"]) {
+  const errors: DishFormErrors = {};
+  if (!form.name.trim()) {
+    errors.name = "请输入菜品名称";
+  }
+  if (!form.category) {
+    errors.category = "请选择分类";
+  }
+  if (!form.status) {
+    errors.status = "请选择状态";
+  }
+  if (!String(form.stepJin).trim()) {
+    errors.stepJin = "请输入起订步进";
+  }
+  if (!String(form.sortOrder).trim()) {
+    errors.sortOrder = "请输入排序";
+  }
+  return errors;
+}
+
 export function DishManagementPanel({
   canWrite = true,
   categoryOptions,
@@ -173,12 +191,7 @@ export function DishManagementPanel({
   const [initialDishForm, setInitialDishForm] = useState<DishFormState>(
     buildDishFormState(),
   );
-  const [inventoryForm, setInventoryForm] = useState<InventoryFormState>(
-    buildInventoryFormState(),
-  );
-  const [initialInventoryForm, setInitialInventoryForm] =
-    useState<InventoryFormState>(buildInventoryFormState());
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(true);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
@@ -186,6 +199,7 @@ export function DishManagementPanel({
   const [uploading, setUploading] = useState(false);
   const [statusChangingId, setStatusChangingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dishFormErrors, setDishFormErrors] = useState<DishFormErrors>({});
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
@@ -212,6 +226,7 @@ export function DishManagementPanel({
   async function reloadDishes(
     page = pagination.page,
     filters = { categoryFilter, query, statusFilter },
+    pageSize = pagination.pageSize,
   ) {
     if (!store) {
       return;
@@ -219,7 +234,7 @@ export function DishManagementPanel({
 
     const params = new URLSearchParams({
       page: String(page),
-      pageSize: String(pagination.pageSize),
+      pageSize: String(pageSize),
       storeId: store.id,
     });
     const nextQuery = filters.query.trim();
@@ -255,7 +270,7 @@ export function DishManagementPanel({
       const nextList = normalizeAdminListPayload(
         result.data,
         initialSummary,
-        pagination.pageSize,
+        pageSize,
       );
       setItems(nextList.items);
       setPagination(nextList.pagination);
@@ -279,7 +294,7 @@ export function DishManagementPanel({
   }
 
   function resetModal() {
-    setFullscreen(false);
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setError(null);
   }
@@ -296,6 +311,7 @@ export function DishManagementPanel({
     setModal({ item: null, mode: "create" });
     setDishForm(nextForm);
     setInitialDishForm(nextForm);
+    setDishFormErrors({});
     resetModal();
   }
 
@@ -324,12 +340,11 @@ export function DishManagementPanel({
     downloadXlsxTemplate(
       "菜品导入模板.xlsx",
       "菜品导入",
-      ["菜品名称", "分类", "库存斤数", "起订步进", "状态", "排序", "描述"],
+      ["菜品名称", "分类", "起订步进", "状态", "排序", "描述"],
       [
         {
           菜品名称: "番茄",
           分类: category,
-          库存斤数: 37,
           起订步进: 1,
           状态: "上架",
           排序: 1,
@@ -388,6 +403,7 @@ export function DishManagementPanel({
     setModal({ item, mode: "edit" });
     setDishForm(nextForm);
     setInitialDishForm(nextForm);
+    setDishFormErrors({});
     resetModal();
     void hydrateDishDetail(item, "edit");
   }
@@ -397,26 +413,14 @@ export function DishManagementPanel({
     setModal({ item, mode: "detail" });
     setDishForm(nextForm);
     setInitialDishForm(nextForm);
+    setDishFormErrors({});
     resetModal();
     void hydrateDishDetail(item, "detail");
   }
 
-  function openInventoryModal(item: DishPanelItem) {
-    if (!canWrite) {
-      return;
-    }
-
-    const nextForm = buildInventoryFormState();
-    setModal({ item, mode: "inventory" });
-    setInventoryForm(nextForm);
-    setInitialInventoryForm(nextForm);
-    resetModal();
-    void hydrateDishDetail(item, "inventory");
-  }
-
   async function hydrateDishDetail(
     item: DishPanelItem,
-    mode: "detail" | "edit" | "inventory",
+    mode: "detail" | "edit",
   ) {
     if (!store) {
       return;
@@ -433,9 +437,7 @@ export function DishManagementPanel({
       setItems((value) => replaceItemById(value, detail));
       setModal((current) => {
         if (
-          (current?.mode === "detail" ||
-            current?.mode === "edit" ||
-            current?.mode === "inventory") &&
+          (current?.mode === "detail" || current?.mode === "edit") &&
           current.item.id === item.id
         ) {
           return { ...current, item: detail };
@@ -465,11 +467,6 @@ export function DishManagementPanel({
     const hasUnsavedChanges =
       modal?.mode === "detail"
         ? false
-        : modal?.mode === "inventory"
-        ? hasUnsavedInventoryModalChanges({
-            current: inventoryForm,
-            initial: initialInventoryForm,
-          })
         : Boolean(
             modal &&
               hasUnsavedDishModalChanges({
@@ -488,6 +485,7 @@ export function DishManagementPanel({
 
     setModal(null);
     setError(null);
+    setDishFormErrors({});
   }
 
   function handleHeaderPointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -525,6 +523,7 @@ export function DishManagementPanel({
     value: DishFormState[K],
   ) {
     setDishForm((current) => ({ ...current, [key]: value }));
+    setDishFormErrors((current) => ({ ...current, [key]: undefined }));
   }
 
   async function uploadImage(file: File) {
@@ -569,7 +568,13 @@ export function DishManagementPanel({
   }
 
   async function submitDishModal() {
-    if (!canWrite || !modal || modal.mode === "detail" || modal.mode === "inventory" || !store) {
+    if (!canWrite || !modal || modal.mode === "detail" || !store) {
+      return;
+    }
+
+    const validationErrors = validateDishForm(dishForm, modal.mode);
+    setDishFormErrors(validationErrors);
+    if (hasDishFormErrors(validationErrors)) {
       return;
     }
 
@@ -585,7 +590,7 @@ export function DishManagementPanel({
       sortOrder: dishForm.sortOrder,
       status: dishForm.status,
       stepJin: dishForm.stepJin,
-      stockJin: modal.mode === "edit" ? modal.item.stockJin : dishForm.stockJin,
+      stockJin: modal.mode === "edit" ? modal.item.stockJin : 0,
       storeId: store.id,
     };
 
@@ -625,7 +630,7 @@ export function DishManagementPanel({
             sortOrder: dish.sortOrder ?? Number(dishForm.sortOrder || 0),
             status: dish.status ?? "ON_SALE",
             stepJin: dish.stepJin ?? Number(dishForm.stepJin),
-            stockJin: dish.stockJin ?? Number(dishForm.stockJin),
+            stockJin: dish.stockJin ?? 0,
             store: {
               code: "",
               id: store.id,
@@ -651,71 +656,6 @@ export function DishManagementPanel({
       }
 
       await reloadDishes(modal.mode === "create" ? 1 : pagination.page);
-      setModal(null);
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "保存失败");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function submitInventoryModal() {
-    if (!canWrite || !modal || modal.mode !== "inventory" || !store) {
-      return;
-    }
-
-    const changeJin = Number(inventoryForm.changeJin);
-    const reason = inventoryForm.reason.trim();
-
-    if (!Number.isFinite(changeJin) || changeJin === 0) {
-      setError("请输入有效的库存调整斤数");
-      return;
-    }
-
-    if (modal.item.stockJin + changeJin < 0) {
-      setError("库存不能调整为负数");
-      return;
-    }
-
-    if (!reason) {
-      setError("请输入库存调整原因");
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`/api/admin/dishes/${modal.item.id}/inventory`, {
-        body: JSON.stringify({
-          changeJin,
-          reason,
-          storeId: store.id,
-        }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-      const result = (await response.json()) as {
-        data?: { dish: Partial<DishPanelItem> };
-        error?: { message: string };
-        success: boolean;
-      };
-
-      if (!response.ok || !result.success || !result.data?.dish) {
-        throw new Error(result.error?.message ?? "保存失败");
-      }
-
-      setItems((value) =>
-        value.map((item) =>
-          item.id === modal.item.id
-            ? {
-                ...item,
-                ...result.data?.dish,
-              }
-            : item,
-          ),
-      );
-      await reloadDishes(pagination.page);
       setModal(null);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "保存失败");
@@ -787,9 +727,7 @@ export function DishManagementPanel({
         ? `菜品详情 · ${modal.item.name}`
       : modal?.mode === "edit"
         ? `编辑 · ${modal.item.name}`
-        : modal
-          ? `库存调整 · ${modal.item.name}`
-          : "";
+        : "";
 
   return (
     <section className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm">
@@ -803,7 +741,7 @@ export function DishManagementPanel({
             菜品列表
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#66756d]">
-            维护菜品、图片、库存和上下架状态，小程序首页只展示上架菜品。
+            维护菜品、图片和上下架状态；预订可用量由任务配置中的菜品总重量决定。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -811,8 +749,6 @@ export function DishManagementPanel({
             ["全部", summary.total],
             ["上架", summary.onSale],
             ["下架", summary.offSale],
-            ["低库存", summary.lowStock],
-            ["总库存", `${summary.stock.toFixed(1)}斤`],
           ].map(([label, value]) => (
             <div
               className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-2"
@@ -865,37 +801,33 @@ export function DishManagementPanel({
         </label>
         <label className="flex w-36 flex-col gap-1 text-xs font-semibold text-[#66756d]">
           分类
-          <select
-            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-            onChange={(event) =>
-              setCategoryFilter(event.target.value as DishCategory | "ALL")
-            }
+          <AdminSelect
+            contentLabel="分类"
+            onChange={(value) => setCategoryFilter(value as DishCategory | "ALL")}
+            options={[
+              { label: "全部分类", value: "ALL" },
+              ...resolvedCategoryOptions.map((option) => ({
+                label: option.name,
+                value: option.code,
+              })),
+            ]}
             value={categoryFilter}
-          >
-            <option value="ALL">全部分类</option>
-            {resolvedCategoryOptions.map((option) => (
-              <option key={option.code} value={option.code}>
-                {option.name}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label className="flex w-36 flex-col gap-1 text-xs font-semibold text-[#66756d]">
           状态
-          <select
-            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-            onChange={(event) =>
-              setStatusFilter(event.target.value as DishStatus | "ALL")
-            }
+          <AdminSelect
+            contentLabel="状态"
+            onChange={(value) => setStatusFilter(value as DishStatus | "ALL")}
+            options={[
+              { label: "全部状态", value: "ALL" },
+              ...Object.entries(STATUS_LABELS).map(([value, label]) => ({
+                label,
+                value,
+              })),
+            ]}
             value={statusFilter}
-          >
-            <option value="ALL">全部状态</option>
-            {Object.entries(STATUS_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <button
           className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
@@ -921,7 +853,6 @@ export function DishManagementPanel({
             <tr>
               <th className="px-4 py-3 font-medium">菜品</th>
               <th className="px-4 py-3 font-medium">分类</th>
-              <th className="px-4 py-3 font-medium">库存</th>
               <th className="px-4 py-3 font-medium">步进</th>
               <th className="px-4 py-3 font-medium">状态</th>
               <th className="px-4 py-3 text-right font-medium">操作</th>
@@ -956,17 +887,6 @@ export function DishManagementPanel({
                 <td className="px-4 py-4">
                   {categoryLabelByCode.get(item.category) ?? item.category}
                 </td>
-                <td className="px-4 py-4">
-                  <span
-                    className={
-                      item.stockJin <= 5
-                        ? "font-semibold text-[#b85a2b]"
-                        : "font-semibold"
-                    }
-                  >
-                    {item.stockJin}斤
-                  </span>
-                </td>
                 <td className="px-4 py-4">{item.stepJin}斤起</td>
                 <td className="px-4 py-4">
                   <span className="rounded-full bg-[#e8f6ed] px-3 py-1 text-xs font-semibold text-[#1f8f4f]">
@@ -974,56 +894,51 @@ export function DishManagementPanel({
                   </span>
                 </td>
                 <td className="px-4 py-4">
-                  <div className="flex justify-end gap-2">
+                  <div className="flex flex-wrap justify-end gap-2 whitespace-nowrap">
                     {canWrite ? (
-                      <button
+                      <Button
                         aria-label={
                           item.status === "ON_SALE" ? "快捷下架" : "快捷上架"
                         }
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1] disabled:cursor-not-allowed disabled:opacity-60"
+                        className="border-[#dbe6dc] text-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={statusChangingId === item.id || !store}
                         onClick={() => void toggleDishStatus(item)}
-                        title={
-                          item.status === "ON_SALE" ? "快捷下架" : "快捷上架"
-                        }
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
                         {statusChangingId === item.id
                           ? "..."
                           : item.status === "ON_SALE"
-                            ? <PowerOff size={16} />
-                            : <Power size={16} />}
-                      </button>
+                            ? <PowerOff data-icon="inline-start" />
+                            : <Power data-icon="inline-start" />}
+                        {item.status === "ON_SALE" ? "下架" : "上架"}
+                      </Button>
                     ) : null}
-                    <button
+                    <Button
                       aria-label="查看菜品详情"
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                      className="border-[#dbe6dc] text-[#1f8f4f]"
                       onClick={() => openDetailModal(item)}
-                      title="查看详情"
+                      size="sm"
                       type="button"
+                      variant="outline"
                     >
-                      <Eye size={16} />
-                    </button>
+                      <Eye data-icon="inline-start" />
+                      查看
+                    </Button>
                     {canWrite ? (
                       <>
-                        <button
-                          aria-label="库存调整"
-                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                          onClick={() => openInventoryModal(item)}
-                          title="库存调整"
-                          type="button"
-                        >
-                          <SlidersHorizontal size={16} />
-                        </button>
-                        <button
+                        <Button
                           aria-label="编辑菜品"
-                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                          className="border-[#dbe6dc] text-[#1f8f4f]"
                           onClick={() => openEditModal(item)}
-                          title="编辑菜品"
+                          size="sm"
                           type="button"
+                          variant="outline"
                         >
-                          <Pencil size={16} />
-                        </button>
+                          <Pencil data-icon="inline-start" />
+                          编辑
+                        </Button>
                       </>
                     ) : null}
                   </div>
@@ -1032,7 +947,7 @@ export function DishManagementPanel({
             ))}
             {items.length === 0 ? (
               <tr>
-                <td className="px-4 py-10 text-center text-[#66756d]" colSpan={6}>
+                <td className="px-4 py-10 text-center text-[#66756d]" colSpan={5}>
                   暂无菜品
                 </td>
               </tr>
@@ -1042,6 +957,9 @@ export function DishManagementPanel({
         <AdminPagination
           disabled={loadingList}
           onPageChange={(nextPage) => void reloadDishes(nextPage)}
+          onPageSizeChange={(nextPageSize) =>
+            void reloadDishes(1, { categoryFilter, query, statusFilter }, nextPageSize)
+          }
           pagination={pagination}
         />
       </div>
@@ -1075,13 +993,11 @@ export function DishManagementPanel({
             >
               <div className="min-w-0">
                 <div className="truncate text-lg font-semibold">{modalTitle}</div>
-                <div className="mt-1 truncate text-sm text-[#66756d]">
-                  {loadingDetail
-                    ? "正在加载最新菜品详情"
-                    : modal.mode === "inventory"
-                      ? "通过库存调整记录库存变化"
-                      : "维护菜品基础信息、图片和上下架状态"}
-                </div>
+	                <div className="mt-1 truncate text-sm text-[#66756d]">
+	                  {loadingDetail
+	                    ? "正在加载最新菜品详情"
+	                    : "维护菜品基础信息、图片和上下架状态"}
+	                </div>
               </div>
               <div
                 className="flex items-center gap-2"
@@ -1108,59 +1024,8 @@ export function DishManagementPanel({
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-6">
-              {modal.mode === "inventory" ? (
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4">
-                    <div className="font-semibold">{modal.item.name}</div>
-                    <div className="mt-1 text-sm text-[#66756d]">
-                      当前库存 {modal.item.stockJin}斤 ·{" "}
-                      {STATUS_LABELS[modal.item.status]}
-                    </div>
-                    <div className="mt-2 text-xs text-[#66756d]">
-                      库存流水 {modal.item.inventoryLogs?.length ?? 0} 条
-                    </div>
-                  </div>
-                  {modal.item.inventoryLogs?.[0] ? (
-                    <div className="rounded-xl border border-[#dbe6dc] px-4 py-3 text-sm">
-                      最近流水：{modal.item.inventoryLogs[0].reason} ·{" "}
-                      {modal.item.inventoryLogs[0].changeJin > 0 ? "+" : ""}
-                      {modal.item.inventoryLogs[0].changeJin}斤
-                    </div>
-                  ) : null}
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    <RequiredLabel>调整斤数</RequiredLabel>
-                    <input
-                      className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                      onChange={(event) =>
-                        setInventoryForm((value) => ({
-                          ...value,
-                          changeJin: event.target.value,
-                        }))
-                      }
-                      placeholder="入库填正数，出库填负数"
-                      step={0.5}
-                      type="number"
-                      value={inventoryForm.changeJin}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    <RequiredLabel>原因</RequiredLabel>
-                    <textarea
-                      className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
-                      onChange={(event) =>
-                        setInventoryForm((value) => ({
-                          ...value,
-                          reason: event.target.value,
-                        }))
-                      }
-                      placeholder="例如：今日补货、售罄下架"
-                      value={inventoryForm.reason}
-                    />
-                  </label>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-[180px_1fr]">
+	            <div className="flex-1 overflow-auto p-6">
+	                <div className="grid gap-4 md:grid-cols-[180px_1fr]">
                   <div>
                     <div className="overflow-hidden rounded-2xl border border-[#dbe6dc] bg-[#f8fbf7]">
                       {dishForm.imageUrl ? (
@@ -1216,68 +1081,74 @@ export function DishManagementPanel({
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">
-                    <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-                      <RequiredLabel>菜品名称</RequiredLabel>
+                    <AdminFormField
+                      className="md:col-span-2"
+                      error={dishFormErrors.name}
+                      label="菜品名称"
+                      required
+                    >
+                      {(invalid) => (
                       <input
+                        aria-invalid={invalid}
                         className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) => updateDishForm("name", event.target.value)}
                         readOnly={modal.mode === "detail"}
                         value={dishForm.name}
                       />
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                      <RequiredLabel>分类</RequiredLabel>
-                      <select
-                        className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
+                      )}
+                    </AdminFormField>
+                    <AdminFormField
+                      error={dishFormErrors.category}
+                      label="分类"
+                      required
+                    >
+                      {(invalid) => (
+                      <AdminSelect
+                        ariaInvalid={invalid}
+                        contentLabel="分类"
                         disabled={modal.mode === "detail"}
-                        onChange={(event) =>
-                          updateDishForm("category", event.target.value as DishCategory)
+                        onChange={(value) =>
+                          updateDishForm("category", value as DishCategory)
                         }
+                        options={resolvedCategoryOptions.map((option) => ({
+                          label: option.name,
+                          value: option.code,
+                        }))}
+                        triggerClassName="h-11 w-full border-[#dbe6dc] bg-white"
                         value={dishForm.category}
-                      >
-                        {resolvedCategoryOptions.map((option) => (
-                          <option key={option.code} value={option.code}>
-                            {option.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                      <RequiredLabel>状态</RequiredLabel>
-                      <select
-                        className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 outline-none focus:border-[#1f8f4f]"
-                        disabled={modal.mode === "detail"}
-                        onChange={(event) =>
-                          updateDishForm("status", event.target.value as DishStatus)
-                        }
-                        value={dishForm.status}
-                      >
-                        <option value="ON_SALE">{STATUS_LABELS.ON_SALE}</option>
-                        <option value="OFF_SALE">{STATUS_LABELS.OFF_SALE}</option>
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                      <RequiredLabel>库存斤数</RequiredLabel>
-                      <input
-                        className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none read-only:bg-[#f5f8f3] read-only:text-[#66756d] focus:border-[#1f8f4f]"
-                        min={0}
-                        onChange={(event) =>
-                          updateDishForm("stockJin", event.target.value)
-                        }
-                        readOnly={modal.mode !== "create"}
-                        step={0.5}
-                        type="number"
-                        value={dishForm.stockJin}
                       />
-                      {modal.mode !== "create" ? (
-                        <span className="text-xs font-normal leading-5 text-[#66756d]">
-                          库存请通过列表“库存调整”维护。
-                        </span>
-                      ) : null}
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                      <RequiredLabel>起订步进</RequiredLabel>
+                      )}
+                    </AdminFormField>
+                    <AdminFormField
+                      error={dishFormErrors.status}
+                      label="状态"
+                      required
+                    >
+                      {(invalid) => (
+                      <AdminSelect
+                        ariaInvalid={invalid}
+                        contentLabel="状态"
+                        disabled={modal.mode === "detail"}
+                        onChange={(value) =>
+                          updateDishForm("status", value as DishStatus)
+                        }
+                        options={[
+                          { label: STATUS_LABELS.ON_SALE, value: "ON_SALE" },
+                          { label: STATUS_LABELS.OFF_SALE, value: "OFF_SALE" },
+                        ]}
+                        triggerClassName="h-11 w-full border-[#dbe6dc] bg-white"
+                        value={dishForm.status}
+                      />
+                      )}
+                    </AdminFormField>
+                    <AdminFormField
+                      error={dishFormErrors.stepJin}
+                      label="起订步进"
+                      required
+                    >
+                      {(invalid) => (
                       <input
+                        aria-invalid={invalid}
                         className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         min={0.5}
                         onChange={(event) =>
@@ -1288,10 +1159,17 @@ export function DishManagementPanel({
                         type="number"
                         value={dishForm.stepJin}
                       />
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-                      <RequiredLabel>排序</RequiredLabel>
+                      )}
+                    </AdminFormField>
+                    <AdminFormField
+                      className="md:col-span-2"
+                      error={dishFormErrors.sortOrder}
+                      label="排序"
+                      required
+                    >
+                      {(invalid) => (
                       <input
+                        aria-invalid={invalid}
                         className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>
                           updateDishForm("sortOrder", event.target.value)
@@ -1300,7 +1178,8 @@ export function DishManagementPanel({
                         type="number"
                         value={dishForm.sortOrder}
                       />
-                    </label>
+                      )}
+                    </AdminFormField>
                     <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
                       描述
                       <textarea
@@ -1313,10 +1192,9 @@ export function DishManagementPanel({
                       />
                     </label>
                   </div>
-                </div>
-              )}
+	                </div>
 
-            </div>
+	            </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
               <button
@@ -1332,11 +1210,7 @@ export function DishManagementPanel({
                   className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
                   disabled={saving || uploading || loadingDetail || !store}
                   aria-busy={loadingDetail}
-                  onClick={
-                    modal.mode === "inventory"
-                      ? submitInventoryModal
-                      : submitDishModal
-                  }
+	                  onClick={submitDishModal}
                   type="button"
                 >
                   {saving ? "保存中" : "保存"}
@@ -1372,7 +1246,7 @@ export function DishManagementPanel({
           ]}
           rules={[
             "分类可填写系统字典中的分类名称或编码，例如“叶菜”或“LEAFY”。",
-            "新菜品会使用导入文件中的库存作为初始库存；已存在菜品不会通过导入修改库存。",
+            "菜品可用总重量请在任务配置中维护，菜品导入不再处理库存。",
             "状态可填“上架”或“下架”，文件大小不超过 5MB。",
           ]}
           title="导入菜品"

@@ -5,7 +5,7 @@ import { useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import {
   Popover,
   PopoverContent,
@@ -14,7 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { formatDateOnly } from "./date-format";
-import { RequiredMark } from "./required-mark";
+import { RequiredLabel } from "./required-mark";
 
 const HOURS = Array.from({ length: 24 }, (_, index) => index);
 const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
@@ -22,6 +22,7 @@ const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
 type PickerShellProps = {
   children: React.ReactNode;
   className?: string;
+  error?: string | null;
   id: string;
   label?: string;
   required?: boolean;
@@ -32,6 +33,7 @@ type DatePickerProps = {
   className?: string;
   clearable?: boolean;
   disabled?: boolean;
+  error?: string | null;
   id?: string;
   label?: string;
   onChange: (value: string) => void;
@@ -83,6 +85,7 @@ function formatDisplayDate(date: Date) {
 function PickerShell({
   children,
   className,
+  error,
   id,
   label,
   required,
@@ -92,12 +95,12 @@ function PickerShell({
   }
 
   return (
-    <Field className={className}>
+    <Field className={className} data-invalid={Boolean(error)}>
       <FieldLabel htmlFor={id}>
-        {label}
-        {required ? <RequiredMark /> : null}
+        {required ? <RequiredLabel>{label}</RequiredLabel> : label}
       </FieldLabel>
       {children}
+      {error ? <FieldError errors={[{ message: error }]} /> : null}
     </Field>
   );
 }
@@ -163,6 +166,7 @@ export function AdminDatePicker({
   className,
   clearable = true,
   disabled,
+  error,
   id,
   label,
   onChange,
@@ -181,6 +185,7 @@ export function AdminDatePicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
+          aria-invalid={Boolean(error)}
           className={cn("justify-start font-normal", buttonClassName)}
           disabled={isDisabled}
           id={controlId}
@@ -228,6 +233,7 @@ export function AdminDatePicker({
   return (
     <PickerShell
       className={className}
+      error={error}
       id={controlId}
       label={label}
       required={required}
@@ -243,6 +249,7 @@ export function AdminTimePicker({
   clearable = false,
   defaultTime = "18:00",
   disabled,
+  error,
   id,
   label,
   onChange,
@@ -260,6 +267,7 @@ export function AdminTimePicker({
     <Popover>
       <PopoverTrigger asChild>
         <Button
+          aria-invalid={Boolean(error)}
           className={cn("justify-start font-normal", buttonClassName)}
           disabled={isDisabled}
           id={controlId}
@@ -292,6 +300,7 @@ export function AdminTimePicker({
   return (
     <PickerShell
       className={className}
+      error={error}
       id={controlId}
       label={label}
       required={required}
@@ -307,6 +316,7 @@ export function AdminDateTimePicker({
   clearable = false,
   defaultTime = "18:00",
   disabled,
+  error,
   id,
   label,
   onChange,
@@ -337,6 +347,7 @@ export function AdminDateTimePicker({
     <Popover>
       <PopoverTrigger asChild>
         <Button
+          aria-invalid={Boolean(error)}
           className={cn("justify-start font-normal", buttonClassName)}
           disabled={isDisabled}
           id={controlId}
@@ -381,6 +392,7 @@ export function AdminDateTimePicker({
   return (
     <PickerShell
       className={className}
+      error={error}
       id={controlId}
       label={label}
       required={required}

@@ -21,7 +21,7 @@ describe("admin header user menu usage", () => {
     );
 
     expect(menuSource).toContain(
-      'type ActivePanel = "profile" | "roles" | "layout"',
+      'type ActivePanel = "profile" | "password" | "roles" | "layout"',
     );
     expect(menuSource).toContain("openPanel(\"profile\")");
     expect(menuSource).toContain("openPanel(\"roles\")");

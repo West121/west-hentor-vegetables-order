@@ -10,11 +10,14 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Trash2,
   Upload,
   UserRound,
   X,
 } from "lucide-react";
 import { useRef, useState, type ChangeEvent, type PointerEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { adminTransferHref } from "@/app/lib/admin-navigation";
 import {
   createAdminModalDragState,
   getBoundedAdminModalOffset,
@@ -33,7 +36,7 @@ import {
   loadDetailResource,
   replaceItemById,
 } from "./detail-loaders";
-import { AdminAlertDialog } from "./admin-confirm-dialog";
+import { AdminAlertDialog, AdminConfirmDialog } from "./admin-confirm-dialog";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import {
   buildMemberFormState,
@@ -41,8 +44,12 @@ import {
   type MemberFormState,
 } from "./member-modal-state";
 import { getImportResultFromApiPayload } from "./member-import-response";
+import { AdminSelect } from "./admin-select";
+import { AdminRadioGroup } from "./admin-radio-group";
 import { AdminMemberAvatar } from "./admin-member-avatar";
-import { formatDateOnly } from "./date-format";
+import { AdminOverflowText } from "./admin-table-tooltip";
+import { AdminFormField } from "./admin-form-field";
+import { formatDateOnly, formatDateTimeMinute } from "./date-format";
 import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
@@ -50,7 +57,8 @@ type StoreOption = {
   name: string;
 };
 
-type BindingStatus = "ACTIVE" | "DISABLED";
+type BindingStatus = "ACTIVE" | "DISABLED" | "DELETED";
+type EditableBindingStatus = Exclude<BindingStatus, "DELETED">;
 
 export type MemberPanelItem = {
   activePackageCount: number;
@@ -92,16 +100,20 @@ export type MemberPanelItem = {
   orderCount: number;
   userId?: string;
   packages?: Array<{
+    createdAt?: string;
     id: string;
+    lastUsedAt?: string | null;
     nameSnapshot: string;
     remainingTimes: number;
     status: string;
     totalTimes: number;
+    updatedAt?: string;
     usedTimes: number;
     weightLimitJin: number;
   }>;
   phone: string | null;
   recentOrders?: Array<{
+    createdAt?: string;
     id: string;
     items: Array<{
       dishNameSnapshot: string;
@@ -110,6 +122,8 @@ export type MemberPanelItem = {
     orderNo: string;
     status: string;
     totalWeightJin: number;
+    updatedAt?: string;
+    userPackageId?: string;
   }>;
   remark: string | null;
   source: string | null;
@@ -133,6 +147,7 @@ type MemberManagementPanelProps = {
   initialPagination: AdminPaginationMeta;
   initialSummary: {
     active: number;
+    deleted: number;
     disabled: number;
     total: number;
   };
@@ -144,6 +159,29 @@ type MemberModalMode = "detail" | "edit";
 type CreateMemberFormState = MemberFormState & {
   nickname: string;
   phone: string;
+};
+
+type MemberAddressFormErrors = Partial<
+  Record<
+    | "city"
+    | "detail"
+    | "district"
+    | "province"
+    | "receiverName"
+    | "receiverPhone",
+    string
+  >
+>;
+
+type CreateMemberFormErrors = {
+  defaultAddress?: MemberAddressFormErrors;
+  disabledReason?: string;
+  phone?: string;
+};
+
+type MemberFormErrors = {
+  defaultAddress?: MemberAddressFormErrors;
+  disabledReason?: string;
 };
 
 type MemberImportResult = {
@@ -198,8 +236,32 @@ const IMPORT_TEMPLATES: Record<
   packages: {
     fileName: "会员套餐导入模板.xlsx",
     rows: [
-      ["手机号", "套餐名称", "总次数", "已用次数", "单次斤数", "状态", "备注"],
-      ["15295081992", "8斤周套餐", "8", "0", "8", "正常", "后台导入用户套餐"],
+      [
+        "手机号",
+        "昵称",
+        "省",
+        "市",
+        "区",
+        "详细地址",
+        "套餐名称",
+        "总次数",
+        "已用次数",
+        "状态",
+        "备注",
+      ],
+      [
+        "15295081992",
+        "张三",
+        "江苏省",
+        "南京市",
+        "六合区",
+        "龙池街道冠城大通",
+        "8斤周套餐",
+        "8",
+        "0",
+        "正常",
+        "后台导入用户套餐",
+      ],
     ],
   },
 };
@@ -237,8 +299,46 @@ function isPackageImportResult(
 
 const STATUS_LABELS: Record<BindingStatus, string> = {
   ACTIVE: "可服务",
+  DELETED: "已删除",
   DISABLED: "已停用",
 };
+
+const PACKAGE_STATUS_LABELS: Record<string, string> = {
+  ACTIVE: "可预订",
+  EXHAUSTED: "已用完",
+  EXPIRED: "已过期",
+  FROZEN: "已冻结",
+};
+
+const ORDER_STATUS_LABELS: Record<string, string> = {
+  CANCELED: "已取消",
+  DELIVERED: "已签收",
+  PENDING_SHIPMENT: "待配送",
+  SHIPPED: "已发货",
+  VOIDED: "已作废",
+};
+
+const MEMBER_DETAIL_PREVIEW_LIMIT = 3;
+
+function buildMemberRelatedHref(
+  section: "orders" | "user-packages",
+  member: MemberPanelItem,
+  storeId?: string,
+) {
+  const query = (member.phone ?? member.nickname ?? "").trim();
+  return adminTransferHref({ query, section, storeId });
+}
+
+function buildPanelMemberFormState(member: MemberPanelItem) {
+  return buildMemberFormState({
+    ...member,
+    bindingStatus: toEditableBindingStatus(member.bindingStatus),
+  });
+}
+
+function toEditableBindingStatus(status: BindingStatus): EditableBindingStatus {
+  return status === "DISABLED" ? "DISABLED" : "ACTIVE";
+}
 
 function displayPhone(phone: string | null) {
   return phone ?? "未绑定手机号";
@@ -268,15 +368,12 @@ type AddressRegionValue = Pick<
 >;
 
 type AddressRegionCascaderProps = {
+  errors?: Partial<Record<keyof AddressRegionValue, string>>;
   onChange: (nextValue: AddressRegionValue) => void;
   readOnly?: boolean;
   required?: boolean;
   value: AddressRegionValue;
 };
-
-function fieldLabel(label: string, required?: boolean) {
-  return required ? <RequiredLabel>{label}</RequiredLabel> : label;
-}
 
 function appendCurrentOption(options: string[], currentValue: string) {
   const trimmed = currentValue.trim();
@@ -289,6 +386,7 @@ function appendCurrentOption(options: string[], currentValue: string) {
 
 type SearchableRegionSelectProps = {
   disabled?: boolean;
+  error?: string | null;
   label: string;
   onClear: () => void;
   onValueChange: (value: string) => void;
@@ -301,6 +399,7 @@ type SearchableRegionSelectProps = {
 
 function SearchableRegionSelect({
   disabled = false,
+  error,
   label,
   onClear,
   onValueChange,
@@ -324,8 +423,8 @@ function SearchableRegionSelect({
   }
 
   return (
-    <label className="flex flex-col gap-2 font-medium">
-      {fieldLabel(label, required)}
+    <AdminFormField error={error} label={label} required={required}>
+      {(invalid) => (
       <div
         className="relative"
         onBlur={(event) => {
@@ -342,6 +441,7 @@ function SearchableRegionSelect({
           aria-expanded={open}
           aria-haspopup="listbox"
           className="flex h-10 w-full items-center gap-2 rounded-xl border border-[#dbe6dc] bg-white px-3 pr-14 text-left text-sm font-normal text-[#15261d] transition hover:border-[#b8d8bf] disabled:cursor-not-allowed disabled:bg-[#f4f7f2] disabled:text-[#8a9a90]"
+          aria-invalid={invalid}
           disabled={interactiveDisabled}
           onClick={() => setOpen((current) => !current)}
           onKeyDown={(event) => {
@@ -415,11 +515,13 @@ function SearchableRegionSelect({
           </div>
         ) : null}
       </div>
-    </label>
+      )}
+    </AdminFormField>
   );
 }
 
 function AddressRegionCascader({
+  errors,
   onChange,
   readOnly = false,
   required = false,
@@ -447,6 +549,7 @@ function AddressRegionCascader({
   return (
     <>
       <SearchableRegionSelect
+        error={errors?.province}
         label="省"
         onClear={() => onChange({ city: "", district: "", province: "" })}
         onValueChange={(province) =>
@@ -464,6 +567,7 @@ function AddressRegionCascader({
       />
       <SearchableRegionSelect
         disabled={!selectedProvince}
+        error={errors?.city}
         label="市"
         onClear={() =>
           onChange({
@@ -487,6 +591,7 @@ function AddressRegionCascader({
       />
       <SearchableRegionSelect
         disabled={!selectedCity}
+        error={errors?.district}
         label="区"
         onClear={() =>
           onChange({
@@ -522,6 +627,14 @@ function formatRecentOrder(order: NonNullable<MemberPanelItem["recentOrders"]>[n
   return `${order.orderNo} · ${itemSummary}`;
 }
 
+function formatPackageStatus(status: string) {
+  return PACKAGE_STATUS_LABELS[status] ?? status;
+}
+
+function formatOrderStatus(status: string) {
+  return ORDER_STATUS_LABELS[status] ?? status;
+}
+
 function buildCreateMemberFormState(): CreateMemberFormState {
   return {
     defaultAddress: {
@@ -539,6 +652,90 @@ function buildCreateMemberFormState(): CreateMemberFormState {
     remark: "",
     status: "ACTIVE",
   };
+}
+
+function hasMemberFormErrors(
+  errors: CreateMemberFormErrors | MemberFormErrors,
+) {
+  return Object.values(errors).some((value) =>
+    typeof value === "string"
+      ? Boolean(value)
+      : value
+        ? Object.values(value).some(Boolean)
+        : false,
+  );
+}
+
+function validateAddressIfPresent(
+  address: MemberFormState["defaultAddress"],
+  required: boolean,
+) {
+  const errors: MemberAddressFormErrors = {};
+  const hasAnyAddressValue =
+    required ||
+    [
+      address.province,
+      address.city,
+      address.district,
+      address.detail,
+      address.receiverName,
+      address.receiverPhone,
+    ].some((value) => Boolean(value.trim()));
+
+  if (!hasAnyAddressValue) {
+    return errors;
+  }
+
+  if (!address.receiverName.trim()) {
+    errors.receiverName = "请输入收货人";
+  }
+  if (!address.receiverPhone.trim()) {
+    errors.receiverPhone = "请输入联系电话";
+  }
+  if (!address.province.trim()) {
+    errors.province = "请选择省";
+  }
+  if (!address.city.trim()) {
+    errors.city = "请选择市";
+  }
+  if (!address.district.trim()) {
+    errors.district = "请选择区";
+  }
+  if (!address.detail.trim()) {
+    errors.detail = "请输入详细地址";
+  }
+
+  return errors;
+}
+
+function validateCreateMemberForm(form: CreateMemberFormState) {
+  const errors: CreateMemberFormErrors = {};
+
+  if (!form.phone.trim()) {
+    errors.phone = "请输入会员手机号";
+  }
+  const addressErrors = validateAddressIfPresent(form.defaultAddress, false);
+  if (Object.values(addressErrors).some(Boolean)) {
+    errors.defaultAddress = addressErrors;
+  }
+  if (form.status === "DISABLED" && !form.disabledReason.trim()) {
+    errors.disabledReason = "请输入停用原因";
+  }
+
+  return errors;
+}
+
+function validateMemberForm(form: MemberFormState) {
+  const errors: MemberFormErrors = {};
+  const addressErrors = validateAddressIfPresent(form.defaultAddress, true);
+  if (Object.values(addressErrors).some(Boolean)) {
+    errors.defaultAddress = addressErrors;
+  }
+  if (form.status === "DISABLED" && !form.disabledReason.trim()) {
+    errors.disabledReason = "请输入停用原因";
+  }
+
+  return errors;
 }
 
 export function getMemberUserId(member: SpringMemberPanelItem) {
@@ -602,19 +799,23 @@ export function MemberManagementPanel({
   const [modalMode, setModalMode] = useState<MemberModalMode>("edit");
   const [form, setForm] = useState<MemberFormState | null>(null);
   const [initialForm, setInitialForm] = useState<MemberFormState | null>(null);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(true);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<BindingStatus | "ALL">("ALL");
+  const [statusFilter, setStatusFilter] = useState<BindingStatus | "ALL">("ACTIVE");
+  const [deleteCandidate, setDeleteCandidate] = useState<MemberPanelItem | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateMemberFormState>(
     buildCreateMemberFormState,
   );
   const [createError, setCreateError] = useState<string | null>(null);
+  const [createFormErrors, setCreateFormErrors] =
+    useState<CreateMemberFormErrors>({});
+  const [formErrors, setFormErrors] = useState<MemberFormErrors>({});
   const [importOpen, setImportOpen] = useState(false);
   const [importMode, setImportMode] = useState<ImportMode>("members");
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -626,6 +827,7 @@ export function MemberManagementPanel({
   async function reloadMembers(
     page = pagination.page,
     filters = { query, statusFilter },
+    pageSize = pagination.pageSize,
   ) {
     if (!store) {
       return;
@@ -633,16 +835,14 @@ export function MemberManagementPanel({
 
     const params = new URLSearchParams({
       page: String(page),
-      pageSize: String(pagination.pageSize),
+      pageSize: String(pageSize),
       storeId: store.id,
     });
     const nextQuery = filters.query.trim();
     if (nextQuery) {
       params.set("query", nextQuery);
     }
-    if (filters.statusFilter !== "ALL") {
-      params.set("status", filters.statusFilter);
-    }
+    params.set("status", filters.statusFilter);
 
     setLoadingList(true);
     setError(null);
@@ -666,7 +866,7 @@ export function MemberManagementPanel({
       const nextList = normalizeAdminListPayload(
         result.data,
         initialSummary,
-        pagination.pageSize,
+        pageSize,
       );
       setItems(normalizeMemberPanelItems(nextList.items));
       setPagination(nextList.pagination);
@@ -680,8 +880,8 @@ export function MemberManagementPanel({
 
   function resetFilters() {
     setQuery("");
-    setStatusFilter("ALL");
-    void reloadMembers(1, { query: "", statusFilter: "ALL" });
+    setStatusFilter("ACTIVE");
+    void reloadMembers(1, { query: "", statusFilter: "ACTIVE" });
   }
 
   function openCreateModal() {
@@ -691,7 +891,8 @@ export function MemberManagementPanel({
 
     setCreateForm(buildCreateMemberFormState());
     setCreateError(null);
-    setFullscreen(false);
+    setCreateFormErrors({});
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setCreateOpen(true);
   }
@@ -703,6 +904,7 @@ export function MemberManagementPanel({
 
     setCreateOpen(false);
     setCreateError(null);
+    setCreateFormErrors({});
   }
 
   async function submitCreateModal() {
@@ -710,12 +912,9 @@ export function MemberManagementPanel({
       return;
     }
 
-    if (!createForm.phone.trim()) {
-      setCreateError("请输入会员手机号");
-      return;
-    }
-    if (createForm.status === "DISABLED" && !createForm.disabledReason.trim()) {
-      setCreateError("停用会员时必须填写停用原因");
+    const validationErrors = validateCreateMemberForm(createForm);
+    setCreateFormErrors(validationErrors);
+    if (hasMemberFormErrors(validationErrors)) {
       return;
     }
 
@@ -774,13 +973,14 @@ export function MemberManagementPanel({
     }
 
     const normalizedMember = normalizeMemberPanelItem(member);
-    const nextForm = buildMemberFormState(normalizedMember);
+    const nextForm = buildPanelMemberFormState(normalizedMember);
 
     setModalMode("edit");
     setModalMember(normalizedMember);
     setForm(nextForm);
     setInitialForm(nextForm);
-    setFullscreen(false);
+    setFormErrors({});
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setError(null);
     void hydrateMemberDetail(normalizedMember);
@@ -788,25 +988,33 @@ export function MemberManagementPanel({
 
   function openDetailModal(member: MemberPanelItem) {
     const normalizedMember = normalizeMemberPanelItem(member);
-    const nextForm = buildMemberFormState(normalizedMember);
+    const nextForm = buildPanelMemberFormState(normalizedMember);
 
     setModalMode("detail");
     setModalMember(normalizedMember);
     setForm(nextForm);
     setInitialForm(nextForm);
-    setFullscreen(false);
+    setFormErrors({});
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setError(null);
-    void hydrateMemberDetail(normalizedMember);
+    if (normalizedMember.bindingStatus !== "DELETED") {
+      void hydrateMemberDetail(normalizedMember);
+    }
   }
 
-  function openModalWithStatus(member: MemberPanelItem, status: BindingStatus) {
+  function openModalWithStatus(member: MemberPanelItem, status: EditableBindingStatus) {
     if (!canWrite) {
       return;
     }
 
     const normalizedMember = normalizeMemberPanelItem(member);
-    const nextInitialForm = buildMemberFormState(normalizedMember);
+    if (normalizedMember.bindingStatus === "DELETED") {
+      setError("已删除会员仅保留历史记录，不能继续编辑");
+      return;
+    }
+
+    const nextInitialForm = buildPanelMemberFormState(normalizedMember);
 
     setModalMode("edit");
     setModalMember(normalizedMember);
@@ -815,7 +1023,8 @@ export function MemberManagementPanel({
       status,
     });
     setInitialForm(nextInitialForm);
-    setFullscreen(false);
+    setFormErrors({});
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setError(null);
     void hydrateMemberDetail(normalizedMember, status);
@@ -823,7 +1032,7 @@ export function MemberManagementPanel({
 
   async function hydrateMemberDetail(
     member: MemberPanelItem,
-    statusOverride?: BindingStatus,
+    statusOverride?: EditableBindingStatus,
   ) {
     if (!store) {
       return;
@@ -846,12 +1055,12 @@ export function MemberManagementPanel({
       setForm((current) =>
         current
           ? {
-              ...buildMemberFormState(detail),
-              status: statusOverride ?? detail.bindingStatus,
+              ...buildPanelMemberFormState(detail),
+              status: statusOverride ?? toEditableBindingStatus(detail.bindingStatus),
             }
           : current,
       );
-      setInitialForm(buildMemberFormState(detail));
+      setInitialForm(buildPanelMemberFormState(detail));
     } catch (detailError) {
       setError(
         detailError instanceof Error ? detailError.message : "会员详情加载失败",
@@ -884,6 +1093,7 @@ export function MemberManagementPanel({
     setModalMode("edit");
     setForm(null);
     setInitialForm(null);
+    setFormErrors({});
     setError(null);
   }
 
@@ -922,8 +1132,9 @@ export function MemberManagementPanel({
       return;
     }
 
-    if (form.status === "DISABLED" && !form.disabledReason.trim()) {
-      setError("停用会员时必须填写停用原因");
+    const validationErrors = validateMemberForm(form);
+    setFormErrors(validationErrors);
+    if (hasMemberFormErrors(validationErrors)) {
       return;
     }
 
@@ -943,6 +1154,7 @@ export function MemberManagementPanel({
         body: JSON.stringify({
           defaultAddress: shouldSubmitAddress ? form.defaultAddress : null,
           disabledReason: form.disabledReason,
+          nickname: form.nickname,
           remark: form.remark,
           status: form.status,
           storeId: store.id,
@@ -957,6 +1169,7 @@ export function MemberManagementPanel({
             defaultAddress: MemberPanelItem["defaultAddress"];
             disabledReason: string | null;
             id: string;
+            nickname: string | null;
             remark: string | null;
           };
         };
@@ -977,6 +1190,7 @@ export function MemberManagementPanel({
                 bindingStatus: updatedMember.bindingStatus,
                 defaultAddress: updatedMember.defaultAddress,
                 disabledReason: updatedMember.disabledReason,
+                nickname: updatedMember.nickname,
                 remark: updatedMember.remark,
               }
             : item,
@@ -989,6 +1203,38 @@ export function MemberManagementPanel({
       setInitialForm(null);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitDeleteMember() {
+    if (!canWrite || !store || !deleteCandidate) {
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const params = new URLSearchParams({ storeId: store.id });
+      const response = await fetch(
+        `/api/admin/members/${deleteCandidate.id}?${params.toString()}`,
+        { method: "DELETE" },
+      );
+      const result = (await response.json().catch(() => null)) as {
+        error?: { message: string };
+        success?: boolean;
+      } | null;
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error?.message ?? "删除会员失败");
+      }
+
+      setDeleteCandidate(null);
+      await reloadMembers(pagination.page);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "删除会员失败");
     } finally {
       setSaving(false);
     }
@@ -1087,13 +1333,14 @@ export function MemberManagementPanel({
     ? "上传 Excel 或 CSV 后，按手机号查找或自动创建会员，按套餐名称匹配模板。"
     : "上传 Excel 或 CSV 后，按手机号创建或更新会员资料。";
   const importRecommendedHeaders = isPackageImport
-    ? "推荐表头：手机号、套餐名称、总次数、已用次数、单次斤数、状态、备注"
+    ? "推荐表头：手机号、昵称、省、市、区、详细地址、套餐名称、总次数、已用次数、状态、备注"
     : "推荐表头：手机号、姓名、备注、状态、停用原因";
   const importRules = isPackageImport
     ? [
-        "手机号和套餐名称必填；会员不存在时会自动创建，并绑定当前数据范围。",
+        "手机号、昵称、套餐名称和地址必填；会员不存在时会自动创建，并绑定当前数据范围。",
+        "地址需填写省、市、区、详细地址，并且必须在当前配送范围内。",
         "套餐名称优先精确匹配，匹配多个模板时会标记失败。",
-        "导入会新增用户套餐，不覆盖旧套餐；总次数、已用次数、单次斤数可留空，留空时使用模板值。",
+        "导入会新增用户套餐，不覆盖旧套餐；总次数、已用次数可留空，留空时使用模板值。",
         "状态可填：正常、冻结、已用完、过期。",
       ]
     : [
@@ -1153,16 +1400,6 @@ export function MemberManagementPanel({
               <button
                 className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#cfe3d3] bg-[#edf7ef] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:bg-[#edf0ec] disabled:text-[#91a497]"
                 disabled={!store}
-                onClick={() => openImportModal("members")}
-                title={store ? "导入会员" : "当前账号未分配数据范围"}
-                type="button"
-              >
-                <Upload size={16} />
-                导入会员
-              </button>
-              <button
-                className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#cfe3d3] bg-[#edf7ef] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:bg-[#edf0ec] disabled:text-[#91a497]"
-                disabled={!store}
                 onClick={() => openImportModal("packages")}
                 title={store ? "导入会员套餐" : "当前账号未分配数据范围"}
                 type="button"
@@ -1177,6 +1414,7 @@ export function MemberManagementPanel({
               ["全部", summary.total],
               ["可服务", summary.active],
               ["已停用", summary.disabled],
+              ["已删除", summary.deleted],
             ].map(([label, value]) => (
               <div
                 className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-2"
@@ -1207,20 +1445,20 @@ export function MemberManagementPanel({
         </label>
         <label className="flex w-40 flex-col gap-1 text-xs font-semibold text-[#66756d]">
           状态
-          <select
-            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-            onChange={(event) =>
-              setStatusFilter(event.target.value as BindingStatus | "ALL")
+          <AdminSelect
+            contentLabel="状态"
+            onChange={(value) =>
+              setStatusFilter(value as BindingStatus | "ALL")
             }
+            options={[
+              { label: "全部状态", value: "ALL" },
+              ...Object.entries(STATUS_LABELS).map(([value, label]) => ({
+                label,
+                value,
+              })),
+            ]}
             value={statusFilter}
-          >
-            <option value="ALL">全部状态</option>
-            {Object.entries(STATUS_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <button
           className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#a8b9ae]"
@@ -1240,8 +1478,8 @@ export function MemberManagementPanel({
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[#dbe6dc]">
-        <table className="w-full border-collapse text-left text-sm">
+      <div className="overflow-x-auto rounded-xl border border-[#dbe6dc]">
+        <table className="w-full min-w-[980px] border-collapse text-left text-sm">
           <thead className="bg-[#f5f8f3] text-[#66756d]">
             <tr>
               <th className="px-4 py-3 font-medium">会员</th>
@@ -1264,9 +1502,9 @@ export function MemberManagementPanel({
                       size="sm"
                     />
                     <div className="min-w-0">
-                      <div className="truncate font-semibold">
+                      <AdminOverflowText className="font-semibold" content={member.nickname ?? "未命名会员"}>
                         {member.nickname ?? "未命名会员"}
-                      </div>
+                      </AdminOverflowText>
                       <div className="mt-1 text-xs text-[#66756d]">
                         {displayPhone(member.phone)} · {formatDateOnly(member.createdAt)}
                       </div>
@@ -1274,11 +1512,15 @@ export function MemberManagementPanel({
                   </div>
                 </td>
                 <td className="px-4 py-4">
-                  <div className="font-semibold">
-	                    {member.latestActivePackage
-	                      ? `${member.latestActivePackage.remainingTimes}/${member.latestActivePackage.totalTimes} 次`
-	                      : "无可用套餐"}
-	                  </div>
+                  <AdminOverflowText className="font-semibold" content={
+                    member.latestActivePackage
+                      ? `${member.latestActivePackage.remainingTimes}/${member.latestActivePackage.totalTimes} 次`
+                      : "无可用套餐"
+                  }>
+                    {member.latestActivePackage
+                      ? `${member.latestActivePackage.remainingTimes}/${member.latestActivePackage.totalTimes} 次`
+                      : "无可用套餐"}
+                  </AdminOverflowText>
 	                  <div className="mt-1 text-xs text-[#66756d]">
 	                    可用套餐 {member.activePackageCount} 个
                   </div>
@@ -1290,9 +1532,9 @@ export function MemberManagementPanel({
                   </div>
                 </td>
                 <td className="px-4 py-4">
-                  <div className="max-w-52 truncate">
+                  <AdminOverflowText className="max-w-52" content={formatAddress(member.defaultAddress)}>
                     {formatAddress(member.defaultAddress)}
-                  </div>
+                  </AdminOverflowText>
                   <div className="mt-1 text-xs text-[#66756d]">
                     {member.defaultAddress?.receiverName ?? "-"} ·{" "}
                     {displayPhone(member.defaultAddress?.receiverPhone ?? null)}
@@ -1303,52 +1545,78 @@ export function MemberManagementPanel({
                     {STATUS_LABELS[member.bindingStatus]}
                   </span>
                   {member.disabledReason ? (
-                    <div className="mt-2 max-w-36 truncate text-xs text-[#66756d]">
+                    <AdminOverflowText
+                      className="mt-2 max-w-36 text-xs text-[#66756d]"
+                      content={member.disabledReason}
+                    >
                       {member.disabledReason}
-                    </div>
+                    </AdminOverflowText>
                   ) : null}
                 </td>
                 <td className="px-4 py-4">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                      onClick={() => openDetailModal(member)}
-                      title="查看详情"
-                      type="button"
-                    >
-                      <Eye size={16} />
-                    </button>
-                    {canWrite ? (
+                  <div className="flex justify-end gap-2 whitespace-nowrap">
+                    {member.bindingStatus === "DELETED" ? (
+                      <span className="text-xs text-[#8a9a90]">已删除记录</span>
+                    ) : (
                       <>
-                        <button
-                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                          onClick={() => openModal(member)}
-                          title="编辑会员"
+                        <Button
+                          className="border-[#dbe6dc] text-[#1f8f4f]"
+                          onClick={() => openDetailModal(member)}
+                          size="sm"
                           type="button"
+                          variant="outline"
                         >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
-                          onClick={() =>
-                            openModalWithStatus(
-                              member,
-                              member.bindingStatus === "ACTIVE"
-                                ? "DISABLED"
-                                : "ACTIVE",
-                            )
-                          }
-                          title={member.bindingStatus === "ACTIVE" ? "停用" : "启用"}
-                          type="button"
-                        >
-                          {member.bindingStatus === "ACTIVE" ? (
-                            <Ban size={16} />
-                          ) : (
-                            <RotateCcw size={16} />
-                          )}
-                        </button>
+                          <Eye data-icon="inline-start" />
+                          查看
+                        </Button>
+                        {canWrite ? (
+                          <>
+                            <Button
+                              className="border-[#dbe6dc] text-[#1f8f4f]"
+                              onClick={() => openModal(member)}
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              <Pencil data-icon="inline-start" />
+                              编辑
+                            </Button>
+                            <Button
+                              className="border-[#dbe6dc] text-[#1f8f4f]"
+                              onClick={() =>
+                                openModalWithStatus(
+                                  member,
+                                  member.bindingStatus === "ACTIVE"
+                                    ? "DISABLED"
+                                    : "ACTIVE",
+                                )
+                              }
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              {member.bindingStatus === "ACTIVE" ? (
+                                <Ban data-icon="inline-start" />
+                              ) : (
+                                <RotateCcw data-icon="inline-start" />
+                              )}
+                              {member.bindingStatus === "ACTIVE" ? "停用" : "启用"}
+                            </Button>
+                            <Button
+                              className="border-red-100 text-red-600 hover:bg-red-50"
+                              disabled={saving}
+                              onClick={() => setDeleteCandidate(member)}
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              <Trash2 data-icon="inline-start" />
+                              删除
+                            </Button>
+                          </>
+                        ) : null}
                       </>
-                    ) : null}
+                    )}
                   </div>
                 </td>
               </tr>
@@ -1365,6 +1633,9 @@ export function MemberManagementPanel({
       <AdminPagination
         disabled={loadingList}
         onPageChange={(nextPage) => void reloadMembers(nextPage)}
+        onPageSizeChange={(nextPageSize) =>
+          void reloadMembers(1, { query, statusFilter }, nextPageSize)
+        }
         pagination={pagination}
       />
       </div>
@@ -1429,9 +1700,14 @@ export function MemberManagementPanel({
 
             <div className="flex-1 overflow-auto p-6">
               <div className="grid gap-4 md:grid-cols-2">
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>手机号</RequiredLabel>
+                <AdminFormField
+                  error={createFormErrors.phone}
+                  label="手机号"
+                  required
+                >
+                  {(invalid) => (
                   <input
+                    aria-invalid={invalid}
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     onChange={(event) =>
                       setCreateForm((value) => ({
@@ -1439,10 +1715,17 @@ export function MemberManagementPanel({
                         phone: event.target.value,
                       }))
                     }
+                    onFocus={() =>
+                      setCreateFormErrors((value) => ({
+                        ...value,
+                        phone: undefined,
+                      }))
+                    }
                     placeholder="请输入会员手机号"
                     value={createForm.phone}
                   />
-                </label>
+                  )}
+                </AdminFormField>
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   会员昵称
                   <input
@@ -1462,9 +1745,13 @@ export function MemberManagementPanel({
               <section className="mt-5 rounded-xl border border-[#dbe6dc] p-4">
                 <h3 className="font-semibold">默认地址</h3>
                 <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
-                  <label className="flex flex-col gap-2 font-medium">
-                    收货人
+                  <AdminFormField
+                    error={createFormErrors.defaultAddress?.receiverName}
+                    label="收货人"
+                  >
+                    {(invalid) => (
                     <input
+                      aria-invalid={invalid}
                       className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) =>
                         setCreateForm((value) => ({
@@ -1475,13 +1762,27 @@ export function MemberManagementPanel({
                           },
                         }))
                       }
+                      onFocus={() =>
+                        setCreateFormErrors((value) => ({
+                          ...value,
+                          defaultAddress: {
+                            ...value.defaultAddress,
+                            receiverName: undefined,
+                          },
+                        }))
+                      }
                       placeholder="默认使用会员昵称"
                       value={createForm.defaultAddress.receiverName}
                     />
-                  </label>
-                  <label className="flex flex-col gap-2 font-medium">
-                    联系电话
+                    )}
+                  </AdminFormField>
+                  <AdminFormField
+                    error={createFormErrors.defaultAddress?.receiverPhone}
+                    label="联系电话"
+                  >
+                    {(invalid) => (
                     <input
+                      aria-invalid={invalid}
                       className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) =>
                         setCreateForm((value) => ({
@@ -1492,25 +1793,50 @@ export function MemberManagementPanel({
                           },
                         }))
                       }
+                      onFocus={() =>
+                        setCreateFormErrors((value) => ({
+                          ...value,
+                          defaultAddress: {
+                            ...value.defaultAddress,
+                            receiverPhone: undefined,
+                          },
+                        }))
+                      }
                       placeholder="默认使用会员手机号"
                       value={createForm.defaultAddress.receiverPhone}
                     />
-                  </label>
+                    )}
+                  </AdminFormField>
                   <AddressRegionCascader
-                    onChange={(region) =>
+                    errors={createFormErrors.defaultAddress}
+                    onChange={(region) => {
                       setCreateForm((value) => ({
                         ...value,
                         defaultAddress: {
                           ...value.defaultAddress,
                           ...region,
                         },
-                      }))
-                    }
+                      }));
+                      setCreateFormErrors((value) => ({
+                        ...value,
+                        defaultAddress: {
+                          ...value.defaultAddress,
+                          province: undefined,
+                          city: undefined,
+                          district: undefined,
+                        },
+                      }));
+                    }}
                     value={createForm.defaultAddress}
                   />
-                  <label className="flex flex-col gap-2 font-medium md:col-span-2">
-                    详细地址
+                  <AdminFormField
+                    className="md:col-span-2"
+                    error={createFormErrors.defaultAddress?.detail}
+                    label="详细地址"
+                  >
+                    {(invalid) => (
                     <input
+                      aria-invalid={invalid}
                       className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       onChange={(event) =>
                         setCreateForm((value) => ({
@@ -1521,10 +1847,20 @@ export function MemberManagementPanel({
                           },
                         }))
                       }
+                      onFocus={() =>
+                        setCreateFormErrors((value) => ({
+                          ...value,
+                          defaultAddress: {
+                            ...value.defaultAddress,
+                            detail: undefined,
+                          },
+                        }))
+                      }
                       placeholder="街道、小区、楼栋、门牌号"
                       value={createForm.defaultAddress.detail}
                     />
-                  </label>
+                    )}
+                  </AdminFormField>
                 </div>
               </section>
 
@@ -1532,27 +1868,21 @@ export function MemberManagementPanel({
                 <h3 className="font-semibold">
                   <RequiredLabel>服务状态</RequiredLabel>
                 </h3>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {(["ACTIVE", "DISABLED"] as const).map((status) => (
-                    <button
-                      className={[
-                        "h-10 rounded-xl border text-sm font-semibold",
-                        createForm.status === status
-                          ? "border-[#1f8f4f] bg-[#e8f6ed] text-[#1f8f4f]"
-                          : "border-[#dbe6dc] text-[#66756d]",
-                      ].join(" ")}
-                      key={status}
-                      onClick={() =>
-                        setCreateForm((value) => ({
-                          ...value,
-                          status,
-                        }))
-                      }
-                      type="button"
-                    >
-                      {STATUS_LABELS[status]}
-                    </button>
-                  ))}
+                <div className="mt-2">
+                  <AdminRadioGroup
+                    name="create-member-status"
+                    onChange={(status) =>
+                      setCreateForm((value) => ({
+                        ...value,
+                        status,
+                      }))
+                    }
+                    options={[
+                      { label: STATUS_LABELS.ACTIVE, value: "ACTIVE" },
+                      { label: STATUS_LABELS.DISABLED, value: "DISABLED" },
+                    ]}
+                    value={createForm.status}
+                  />
                 </div>
                 <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
                   会员备注
@@ -1568,14 +1898,15 @@ export function MemberManagementPanel({
                     value={createForm.remark}
                   />
                 </label>
-                <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
-                  <span>
-                    停用原因
-                    {createForm.status === "DISABLED" ? (
-                      <span className="ml-1 text-red-500">*</span>
-                    ) : null}
-                  </span>
+                <AdminFormField
+                  className="mt-4"
+                  error={createFormErrors.disabledReason}
+                  label="停用原因"
+                  required={createForm.status === "DISABLED"}
+                >
+                  {(invalid) => (
                   <textarea
+                    aria-invalid={invalid}
                     className="min-h-20 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
                     disabled={createForm.status === "ACTIVE"}
                     onChange={(event) =>
@@ -1584,13 +1915,20 @@ export function MemberManagementPanel({
                         disabledReason: event.target.value,
                       }))
                     }
+                    onFocus={() =>
+                      setCreateFormErrors((value) => ({
+                        ...value,
+                        disabledReason: undefined,
+                      }))
+                    }
                     placeholder={
                       createForm.status === "DISABLED" ? "请输入停用原因" : ""
                     }
                     required={createForm.status === "DISABLED"}
                     value={createForm.disabledReason}
                   />
-                </label>
+                  )}
+                </AdminFormField>
               </section>
 
               {createError ? (
@@ -1611,7 +1949,7 @@ export function MemberManagementPanel({
               </button>
               <button
                 className="h-10 rounded-xl bg-[#1f8f4f] px-5 font-semibold text-white disabled:opacity-60"
-                disabled={saving || !createForm.phone.trim()}
+                disabled={saving}
                 onClick={() => void submitCreateModal()}
                 type="button"
               >
@@ -1816,9 +2154,9 @@ export function MemberManagementPanel({
               </div>
             </div>
 
-            <div className="grid flex-1 gap-5 overflow-auto p-6 md:grid-cols-[1fr_280px]">
-              <div className="flex flex-col gap-4">
-                <section className="rounded-xl border border-[#dbe6dc] p-4">
+            <div className="flex-1 overflow-auto p-5">
+              <div className="space-y-4">
+                <section className="rounded-xl border border-[#dbe6dc] p-3">
                   <div className="flex items-center gap-3">
                     <AdminMemberAvatar
                       avatarUrl={modalMember.avatarUrl}
@@ -1834,7 +2172,27 @@ export function MemberManagementPanel({
                       </div>
                     </div>
                   </div>
-                  <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
+                  <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <AdminFormField label="会员昵称">
+                      {() => (
+                        <input
+                          className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                          maxLength={32}
+                          onChange={(event) =>
+                            setForm((value) =>
+                              value
+                                ? { ...value, nickname: event.target.value }
+                                : value,
+                            )
+                          }
+                          placeholder="未填写时显示微信用户"
+                          readOnly={modalMode === "detail"}
+                          value={form.nickname}
+                        />
+                      )}
+                    </AdminFormField>
+                  </div>
+                  <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
                     <div>
                       <div className="text-[#66756d]">手机号</div>
                       <div className="mt-1 font-medium">
@@ -1862,12 +2220,17 @@ export function MemberManagementPanel({
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-[#dbe6dc] p-4">
+                <section className="rounded-xl border border-[#dbe6dc] p-3">
                   <h3 className="font-semibold">默认地址</h3>
-                  <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
-                    <label className="flex flex-col gap-2 font-medium">
-                      <RequiredLabel>收货人</RequiredLabel>
+                  <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <AdminFormField
+                      error={formErrors.defaultAddress?.receiverName}
+                      label="收货人"
+                      required
+                    >
+                      {(invalid) => (
                       <input
+                        aria-invalid={invalid}
                         className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>
                           setForm((value) =>
@@ -1885,10 +2248,16 @@ export function MemberManagementPanel({
                         readOnly={modalMode === "detail"}
                         value={form.defaultAddress.receiverName}
                       />
-                    </label>
-                    <label className="flex flex-col gap-2 font-medium">
-                      <RequiredLabel>联系电话</RequiredLabel>
+                      )}
+                    </AdminFormField>
+                    <AdminFormField
+                      error={formErrors.defaultAddress?.receiverPhone}
+                      label="联系电话"
+                      required
+                    >
+                      {(invalid) => (
                       <input
+                        aria-invalid={invalid}
                         className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>
                           setForm((value) =>
@@ -1906,8 +2275,10 @@ export function MemberManagementPanel({
                         readOnly={modalMode === "detail"}
                         value={form.defaultAddress.receiverPhone}
                       />
-                    </label>
+                      )}
+                    </AdminFormField>
                     <AddressRegionCascader
+                      errors={formErrors.defaultAddress}
                       onChange={(region) =>
                         setForm((value) =>
                           value
@@ -1925,9 +2296,15 @@ export function MemberManagementPanel({
                       required
                       value={form.defaultAddress}
                     />
-                    <label className="flex flex-col gap-2 font-medium md:col-span-2">
-                      <RequiredLabel>详细地址</RequiredLabel>
+                    <AdminFormField
+                      className="lg:col-span-2"
+                      error={formErrors.defaultAddress?.detail}
+                      label="详细地址"
+                      required
+                    >
+                      {(invalid) => (
                       <input
+                        aria-invalid={invalid}
                         className="h-10 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                         onChange={(event) =>
                           setForm((value) =>
@@ -1946,109 +2323,240 @@ export function MemberManagementPanel({
                         readOnly={modalMode === "detail"}
                         value={form.defaultAddress.detail}
                       />
-                    </label>
+                      )}
+                    </AdminFormField>
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-[#dbe6dc] p-4">
-                  <h3 className="font-semibold">套餐与订单</h3>
-                  <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
-                    <div>
-                      <div className="text-[#66756d]">全部套餐</div>
-                      <div className="mt-1 font-medium">
-                        {modalMember.packages?.length ?? modalMember.activePackageCount} 个
+                <section className="rounded-xl border border-[#dbe6dc] p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="font-semibold">套餐与订单</h3>
+                    <div className="text-xs text-[#66756d]">
+                      套餐 {modalMember.packages?.length ?? modalMember.activePackageCount} 个
+                      <span className="mx-2 text-[#c8d6cc]">/</span>
+                      订单 {modalMember.orderCount} 单
+                      {modalMember.recentOrders?.length ? (
+                        <span className="ml-1">
+                          （最近 {modalMember.recentOrders.length} 条）
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                    <div className="rounded-xl border border-[#edf2ed] bg-[#fbfdf9]">
+                      <div className="flex items-center justify-between gap-2 border-b border-[#edf2ed] px-3 py-2 text-sm">
+                        <div>
+                          <span className="font-semibold">套餐明细</span>
+                          <span className="ml-2 text-xs text-[#66756d]">
+                            最近 {Math.min(modalMember.packages?.length ?? 0, MEMBER_DETAIL_PREVIEW_LIMIT)} / {modalMember.packages?.length ?? 0} 个
+                          </span>
+                        </div>
+                        <Button asChild size="xs" variant="outline">
+                          <a
+                            href={buildMemberRelatedHref(
+                              "user-packages",
+                              modalMember,
+                              store?.id,
+                            )}
+                          >
+                            <Eye size={14} />
+                            查看套餐
+                          </a>
+                        </Button>
+                      </div>
+                      <div>
+                        {modalMember.packages?.length ? (
+                          modalMember.packages.slice(0, MEMBER_DETAIL_PREVIEW_LIMIT).map((userPackage) => (
+                            <div
+                              className="grid grid-cols-[minmax(0,1.4fr)_auto_auto] items-center gap-3 border-b border-[#edf2ed] px-3 py-2 text-sm last:border-b-0"
+                              key={userPackage.id}
+                            >
+                              <div className="min-w-0">
+                                <AdminOverflowText
+                                  className="font-medium"
+                                  content={userPackage.nameSnapshot}
+                                >
+                                  {userPackage.nameSnapshot}
+                                </AdminOverflowText>
+                                <div className="mt-0.5 text-xs text-[#66756d]">
+                                  {formatJin(userPackage.weightLimitJin)}斤/次
+                                  {userPackage.createdAt ? (
+                                    <>
+                                      <span className="mx-1 text-[#c8d6cc]">·</span>
+                                      {formatDateOnly(userPackage.createdAt)}
+                                    </>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="font-semibold">
+                                  {userPackage.remainingTimes}/
+                                  {userPackage.totalTimes} 次
+                                </div>
+                                <div className="mt-0.5 text-xs text-[#66756d]">
+                                  已用 {userPackage.usedTimes} 次
+                                </div>
+                              </div>
+                              <span className="rounded-full bg-[#e8f6ed] px-2 py-1 text-xs font-semibold text-[#1f8f4f]">
+                                {formatPackageStatus(userPackage.status)}
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="px-3 py-4 text-sm text-[#66756d]">
+                            暂无套餐
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div>
-                      <div className="text-[#66756d]">最近订单</div>
-                      <div className="mt-1 font-medium">
-                        {modalMember.recentOrders?.length ?? modalMember.orderCount} 条
+
+                    <div className="rounded-xl border border-[#edf2ed] bg-[#fbfdf9]">
+                      <div className="flex items-center justify-between gap-2 border-b border-[#edf2ed] px-3 py-2 text-sm">
+                        <div>
+                          <span className="font-semibold">最近订单</span>
+                          <span className="ml-2 text-xs text-[#66756d]">
+                            最近 {Math.min(modalMember.recentOrders?.length ?? 0, MEMBER_DETAIL_PREVIEW_LIMIT)} / 共 {modalMember.orderCount} 单
+                          </span>
+                        </div>
+                        <Button asChild size="xs" variant="outline">
+                          <a
+                            href={buildMemberRelatedHref(
+                              "orders",
+                              modalMember,
+                              store?.id,
+                            )}
+                          >
+                            <Eye size={14} />
+                            查看订单
+                          </a>
+                        </Button>
+                      </div>
+                      <div>
+                        {modalMember.recentOrders?.length ? (
+                          modalMember.recentOrders.slice(0, MEMBER_DETAIL_PREVIEW_LIMIT).map((order) => (
+                            <div
+                              className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-[#edf2ed] px-3 py-2 text-sm last:border-b-0"
+                              key={order.id}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <AdminOverflowText
+                                    className="font-medium"
+                                    content={order.orderNo}
+                                  >
+                                    {order.orderNo}
+                                  </AdminOverflowText>
+                                  <span className="shrink-0 rounded-full bg-[#fff7e0] px-2 py-0.5 text-xs font-semibold text-[#9b6b00]">
+                                    {formatOrderStatus(order.status)}
+                                  </span>
+                                </div>
+                                <AdminOverflowText
+                                  className="mt-1 text-xs text-[#66756d]"
+                                  content={
+                                    order.items.length
+                                      ? order.items
+                                          .map(
+                                            (item) =>
+                                              `${item.dishNameSnapshot} ${formatJin(item.weightJin)}斤`,
+                                          )
+                                          .join("、")
+                                      : "无菜品明细"
+                                  }
+                                >
+                                  {order.items.length
+                                    ? order.items
+                                        .map(
+                                          (item) =>
+                                            `${item.dishNameSnapshot} ${formatJin(item.weightJin)}斤`,
+                                        )
+                                        .join("、")
+                                    : "无菜品明细"}
+                                </AdminOverflowText>
+                              </div>
+                              <div className="text-right">
+                                <div className="font-semibold">
+                                  {formatJin(order.totalWeightJin)}斤
+                                </div>
+                                <div className="mt-0.5 text-xs text-[#66756d]">
+                                  {formatDateTimeMinute(order.createdAt, "未记录")}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="px-3 py-4 text-sm text-[#66756d]">
+                            暂无订单
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
-                  {modalMember.packages?.[0] ? (
-                    <div className="mt-4 rounded-xl bg-[#f8fbf7] px-3 py-2 text-sm">
-                      {modalMember.packages[0].nameSnapshot} · 剩余{" "}
-                      {modalMember.packages[0].remainingTimes}/
-                      {modalMember.packages[0].totalTimes} 次
-                    </div>
-                  ) : null}
-                  {modalMember.recentOrders?.[0] ? (
-                    <div className="mt-2 rounded-xl bg-[#f8fbf7] px-3 py-2 text-sm">
-                      {formatRecentOrder(modalMember.recentOrders[0])}
-                    </div>
-                  ) : null}
                 </section>
-              </div>
-
-              <aside className="flex flex-col gap-4">
-                <div className="rounded-xl border border-[#cfe3d3] bg-[#f8fff8] p-4">
+                <section className="rounded-xl border border-[#cfe3d3] bg-[#f8fff8] p-3">
                   <h3 className="font-semibold">
                     <RequiredLabel>服务状态</RequiredLabel>
                   </h3>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    {(["ACTIVE", "DISABLED"] as const).map((status) => (
-                      <button
-                        className={[
-                          "h-10 rounded-xl border text-sm font-semibold",
-                          form.status === status
-                            ? "border-[#1f8f4f] bg-[#e8f6ed] text-[#1f8f4f]"
-                            : "border-[#dbe6dc] text-[#66756d]",
-                        ].join(" ")}
+                  <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                      <div className="mb-2 font-medium text-[#405248]">状态</div>
+                      <AdminRadioGroup
                         disabled={modalMode === "detail"}
-                        key={status}
-                        onClick={() =>
+                        name="member-status"
+                        onChange={(status) =>
                           setForm((value) =>
                             value ? { ...value, status } : value,
                           )
                         }
-                        type="button"
-                      >
-                        {STATUS_LABELS[status]}
-                      </button>
-                    ))}
-                  </div>
-                  <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
-                    会员备注
-                    <textarea
-                      className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
-                      onChange={(event) =>
-                        setForm((value) =>
-                          value ? { ...value, remark: event.target.value } : value,
-                        )
-                      }
-                      readOnly={modalMode === "detail"}
-                      value={form.remark}
-                    />
-                  </label>
-                  <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
-                    <span>
-                      停用原因
-                      {form.status === "DISABLED" ? (
-                        <span className="ml-1 text-red-500">*</span>
-                      ) : null}
-                    </span>
-                    <textarea
-                      className="min-h-20 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
-                      disabled={modalMode === "detail" || form.status === "ACTIVE"}
-                      onChange={(event) =>
-                        setForm((value) =>
-                          value
-                            ? { ...value, disabledReason: event.target.value }
-                            : value,
-                        )
-                      }
-                      placeholder={
-                        form.status === "DISABLED" ? "请输入停用原因" : ""
-                      }
-                      readOnly={modalMode === "detail"}
+                        options={[
+                          { label: STATUS_LABELS.ACTIVE, value: "ACTIVE" },
+                          { label: STATUS_LABELS.DISABLED, value: "DISABLED" },
+                        ]}
+                        value={form.status}
+                      />
+                    </div>
+                    <label className="flex flex-col gap-2 font-medium">
+                      会员备注
+                      <textarea
+                        className="min-h-20 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
+                        onChange={(event) =>
+                          setForm((value) =>
+                            value ? { ...value, remark: event.target.value } : value,
+                          )
+                        }
+                        readOnly={modalMode === "detail"}
+                        value={form.remark}
+                      />
+                    </label>
+                    <AdminFormField
+                      error={formErrors.disabledReason}
+                      label="停用原因"
                       required={form.status === "DISABLED"}
-                      value={form.disabledReason}
-                    />
-                  </label>
-                </div>
-
-              </aside>
+                    >
+                      {(invalid) => (
+                      <textarea
+                        aria-invalid={invalid}
+                        className="min-h-20 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
+                        disabled={modalMode === "detail" || form.status === "ACTIVE"}
+                        onChange={(event) =>
+                          setForm((value) =>
+                            value
+                              ? { ...value, disabledReason: event.target.value }
+                              : value,
+                          )
+                        }
+                        placeholder={
+                          form.status === "DISABLED" ? "请输入停用原因" : ""
+                        }
+                        readOnly={modalMode === "detail"}
+                        required={form.status === "DISABLED"}
+                        value={form.disabledReason}
+                      />
+                      )}
+                    </AdminFormField>
+                  </div>
+                </section>
+              </div>
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
@@ -2075,6 +2583,29 @@ export function MemberManagementPanel({
         </div>
       ) : null}
       {modalMember && error ? (
+        <AdminAlertDialog message={error} onClose={() => setError(null)} />
+      ) : null}
+      {deleteCandidate ? (
+        <AdminConfirmDialog
+          busy={saving}
+          confirmLabel="删除"
+          message={
+            <>
+              删除后该会员将从默认会员列表隐藏，历史订单、套餐和操作日志仍会保留。确认删除
+              「{deleteCandidate.nickname ?? deleteCandidate.phone ?? "未命名会员"}」吗？
+            </>
+          }
+          onCancel={() => {
+            if (!saving) {
+              setDeleteCandidate(null);
+            }
+          }}
+          onConfirm={() => void submitDeleteMember()}
+          title="删除会员"
+          variant="danger"
+        />
+      ) : null}
+      {error && !modalMember ? (
         <AdminAlertDialog message={error} onClose={() => setError(null)} />
       ) : null}
       {importOpen && importError ? (

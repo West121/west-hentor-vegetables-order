@@ -32,6 +32,8 @@ export const ADMIN_SECTION_IDS = [
   "menus",
   "dictionaries",
   "kuaidi-printers",
+  "delivery-ranges",
+  "online-sessions",
   "operation-logs",
   "system-settings",
 ] as const;
@@ -101,7 +103,9 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { icon: "badge-check", label: "角色管理", section: "roles" },
       { icon: "folder-tree", label: "菜单管理", section: "menus" },
       { icon: "settings-2", label: "系统字典", section: "dictionaries" },
-      { icon: "printer", label: "快递100打印机", section: "kuaidi-printers" },
+      { icon: "printer", label: "面单打印", section: "kuaidi-printers" },
+      { icon: "truck", label: "配送范围", section: "delivery-ranges" },
+      { icon: "users", label: "在线用户", section: "online-sessions" },
       { icon: "file-clock", label: "操作日志", section: "operation-logs" },
       { icon: "settings", label: "系统设置", section: "system-settings" },
     ],
@@ -115,6 +119,8 @@ const systemSectionIdSet = new Set<AdminSectionId>([
   "menus",
   "dictionaries",
   "kuaidi-printers",
+  "delivery-ranges",
+  "online-sessions",
   "operation-logs",
   "system-settings",
 ]);
@@ -166,6 +172,54 @@ function canAccessSection(
 
 export function getDefaultAdminSection(): AdminSectionId {
   return "overview";
+}
+
+export function adminSectionHref(
+  searchParams: URLSearchParams,
+  section: string,
+) {
+  const params = new URLSearchParams();
+  const storeId = searchParams.get("storeId")?.trim();
+
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
+  params.set("section", section);
+  return `?${params.toString()}`;
+}
+
+export function adminStoreHref(searchParams: URLSearchParams, storeId: string) {
+  return adminSectionHref(
+    new URLSearchParams({ storeId }),
+    resolveAdminSection(searchParams.get("section")),
+  );
+}
+
+export function adminFilterResetHref(
+  searchParams: URLSearchParams,
+  section: string,
+) {
+  return adminSectionHref(searchParams, section);
+}
+
+export function adminTransferHref({
+  query,
+  section,
+  storeId,
+}: {
+  query?: string | null;
+  section: string;
+  storeId?: string | null;
+}) {
+  const params = new URLSearchParams();
+  if (storeId?.trim()) {
+    params.set("storeId", storeId.trim());
+  }
+  params.set("section", section);
+  if (query?.trim()) {
+    params.set("query", query.trim());
+  }
+  return `/?${params.toString()}`;
 }
 
 export function resolveAdminSection(

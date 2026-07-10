@@ -32,7 +32,11 @@ import {
   type KeyboardEvent,
 } from "react";
 
-import type { AdminNavGroup, AdminNavIcon } from "@/app/lib/admin-navigation";
+import {
+  adminSectionHref,
+  type AdminNavGroup,
+  type AdminNavIcon,
+} from "@/app/lib/admin-navigation";
 import { cn } from "@/app/lib/cn";
 
 const iconMap: Record<AdminNavIcon, ComponentType<LucideProps>> = {
@@ -149,9 +153,7 @@ export function AdminMenuSearch({ groups }: AdminMenuSearchProps) {
   }, []);
 
   function sectionHref(section: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("section", section);
-    return `?${params.toString()}`;
+    return adminSectionHref(searchParams, section);
   }
 
   function navigateTo(section: string) {

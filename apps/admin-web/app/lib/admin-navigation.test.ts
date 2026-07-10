@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   ADMIN_NAV_GROUPS,
+  adminFilterResetHref,
+  adminSectionHref,
+  adminStoreHref,
+  adminTransferHref,
   buildAdminMenuTree,
   buildAdminNavGroups,
   getDefaultAdminSection,
@@ -190,6 +194,8 @@ describe("admin navigation", () => {
       "menus",
       "dictionaries",
       "kuaidi-printers",
+      "delivery-ranges",
+      "online-sessions",
       "operation-logs",
       "system-settings",
     ]);
@@ -203,5 +209,42 @@ describe("admin navigation", () => {
         icon: "printer",
         permissionCodes: ["system.manage"],
       });
+  });
+
+  it("keeps the selected store but drops an order search when switching sections", () => {
+    expect(
+      adminSectionHref(
+        new URLSearchParams("storeId=store-1&section=orders&query=13800138000&page=2"),
+        "members",
+      ),
+    ).toBe("?storeId=store-1&section=members");
+  });
+
+  it("keeps only the active section when the store changes", () => {
+    expect(
+      adminStoreHref(
+        new URLSearchParams("storeId=store-1&section=orders&query=13800138000&page=2"),
+        "store-2",
+      ).toString(),
+    ).toBe("?storeId=store-2&section=orders");
+  });
+
+  it("cleans any list page back to its own global route context", () => {
+    expect(
+      adminFilterResetHref(
+        new URLSearchParams("storeId=store-1&section=orders&query=13800138000&page=2"),
+        "user-packages",
+      ),
+    ).toBe("?storeId=store-1&section=user-packages");
+  });
+
+  it("puts a search only on an explicit one-time transfer", () => {
+    expect(
+      adminTransferHref({
+        query: "13800138000",
+        section: "orders",
+        storeId: "store-1",
+      }),
+    ).toBe("/?storeId=store-1&section=orders&query=13800138000");
   });
 });

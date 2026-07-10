@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { zhCN } from "date-fns/locale"
 import {
   DayPicker,
   getDefaultClassNames,
@@ -11,6 +12,26 @@ import {
 import { cn } from "@/lib/utils"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon } from "lucide-react"
+
+const DEFAULT_CALENDAR_LOCALE = zhCN
+
+const CHINESE_WEEKDAY_LABELS = [
+  "周日",
+  "周一",
+  "周二",
+  "周三",
+  "周四",
+  "周五",
+  "周六",
+] as const
+
+function formatChineseCalendarCaption(month: Date) {
+  return `${month.getFullYear()}年${month.getMonth() + 1}月`
+}
+
+function formatChineseCalendarWeekday(weekday: Date) {
+  return CHINESE_WEEKDAY_LABELS[weekday.getDay()] ?? ""
+}
 
 function Calendar({
   className,
@@ -26,6 +47,7 @@ function Calendar({
   buttonVariant?: React.ComponentProps<typeof Button>["variant"]
 }) {
   const defaultClassNames = getDefaultClassNames()
+  const calendarLocale = locale ?? DEFAULT_CALENDAR_LOCALE
 
   return (
     <DayPicker
@@ -37,10 +59,12 @@ function Calendar({
         className
       )}
       captionLayout={captionLayout}
-      locale={locale}
+      locale={calendarLocale}
       formatters={{
+        formatCaption: formatChineseCalendarCaption,
         formatMonthDropdown: (date) =>
-          date.toLocaleString(locale?.code, { month: "short" }),
+          `${date.getMonth() + 1}月`,
+        formatWeekdayName: formatChineseCalendarWeekday,
         ...formatters,
       }}
       classNames={{
@@ -162,7 +186,7 @@ function Calendar({
           )
         },
         DayButton: ({ ...props }) => (
-          <CalendarDayButton locale={locale} {...props} />
+          <CalendarDayButton locale={calendarLocale} {...props} />
         ),
         WeekNumber: ({ children, ...props }) => {
           return (
@@ -219,4 +243,10 @@ function CalendarDayButton({
   )
 }
 
-export { Calendar, CalendarDayButton }
+export {
+  Calendar,
+  CalendarDayButton,
+  CHINESE_WEEKDAY_LABELS,
+  formatChineseCalendarCaption,
+  formatChineseCalendarWeekday,
+}

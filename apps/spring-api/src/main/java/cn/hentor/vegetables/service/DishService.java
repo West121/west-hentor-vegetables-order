@@ -414,7 +414,7 @@ public class DishService {
   }
 
   private NormalizedDishInput normalizeCreateInput(DishRequest request) {
-    return normalizeInput(request, request.stockJin());
+    return normalizeInput(request, request.stockJin() == null ? BigDecimal.ZERO : request.stockJin());
   }
 
   private NormalizedDishInput normalizeUpdateInput(DishRequest request, DishEntity existing) {
@@ -438,9 +438,7 @@ public class DishService {
       throw new ApiException("STOCK_JIN_INVALID", "库存斤数不正确", HttpStatus.BAD_REQUEST);
     }
     Integer sortOrder = request.sortOrder() == null ? 0 : request.sortOrder();
-    String status = effectiveStockJin.compareTo(BigDecimal.ZERO) <= 0
-      ? "OFF_SALE"
-      : (StringUtils.hasText(request.status()) ? request.status() : "ON_SALE");
+    String status = StringUtils.hasText(request.status()) ? request.status() : "ON_SALE";
 
     return new NormalizedDishInput(
       name,

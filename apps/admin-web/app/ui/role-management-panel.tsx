@@ -2,6 +2,7 @@
 
 import { BadgeCheck, Pencil, Plus, RefreshCcw, Trash2, X } from "lucide-react";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 
 import {
   AdminPagination,
@@ -9,7 +10,7 @@ import {
   type AdminPaginationMeta,
 } from "./admin-pagination";
 import { AdminAlertDialog, AdminConfirmDialog } from "./admin-confirm-dialog";
-import { RequiredLabel } from "./required-mark";
+import { AdminFormField } from "./admin-form-field";
 
 export type RolePermissionOption = {
   code: string;
@@ -53,6 +54,8 @@ type RoleFormState = {
   permissionIds: string[];
 };
 
+type RoleFormErrors = Partial<Record<keyof RoleFormState, string>>;
+
 type ApiResponse<T> = {
   data?: T;
   error?: {
@@ -67,6 +70,24 @@ function buildForm(item: RolePanelItem | null): RoleFormState {
     name: item?.name ?? "",
     permissionIds: item?.permissions.map((permission) => permission.id) ?? [],
   };
+}
+
+function validateRoleForm(form: RoleFormState, mode: RoleModalState["mode"]) {
+  const errors: RoleFormErrors = {};
+  if (!form.name.trim()) {
+    errors.name = "请输入角色名称";
+  }
+  if (mode === "create" && !form.code.trim()) {
+    errors.code = "请输入角色编码";
+  }
+  if (form.permissionIds.length === 0) {
+    errors.permissionIds = "请选择至少一个角色权限";
+  }
+  return errors;
+}
+
+function hasRoleFormErrors(errors: RoleFormErrors) {
+  return Object.values(errors).some(Boolean);
 }
 
 function permissionGroupName(code: string) {
@@ -112,6 +133,7 @@ export function RoleManagementPanel({
   const [summary, setSummary] = useState(initialSummary);
   const [modal, setModal] = useState<RoleModalState | null>(null);
   const [form, setForm] = useState<RoleFormState>(() => buildForm(null));
+  const [formErrors, setFormErrors] = useState<RoleFormErrors>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,19 +145,25 @@ export function RoleManagementPanel({
   function openCreateModal() {
     setModal({ item: null, mode: "create" });
     setForm(buildForm(null));
+    setFormErrors({});
     setError(null);
   }
 
   function openEditModal(item: RolePanelItem) {
     setModal({ item, mode: "edit" });
     setForm(buildForm(item));
+    setFormErrors({});
     setError(null);
   }
 
-  async function reloadRoles(page = pagination.page, filters = { query }) {
+  async function reloadRoles(
+    page = pagination.page,
+    filters = { query },
+    pageSize = pagination.pageSize,
+  ) {
     const params = new URLSearchParams({
       page: String(page),
-      pageSize: String(pagination.pageSize),
+      pageSize: String(pageSize),
     });
     const nextQuery = filters.query.trim();
     if (nextQuery) {
@@ -160,7 +188,7 @@ export function RoleManagementPanel({
       const nextList = normalizeAdminListPayload(
         result.data,
         initialSummary,
-        pagination.pageSize,
+        pageSize,
       );
       setRoles(nextList.items);
       setPagination(nextList.pagination);
@@ -180,6 +208,12 @@ export function RoleManagementPanel({
 
   async function submitRole() {
     if (!modal) {
+      return;
+    }
+
+    const validationErrors = validateRoleForm(form, modal.mode);
+    setFormErrors(validationErrors);
+    if (hasRoleFormErrors(validationErrors)) {
       return;
     }
 
@@ -359,28 +393,33 @@ export function RoleManagementPanel({
                   </td>
                   <td className="px-4 py-4 text-[#66756d]">{role.userCount}</td>
                   <td className="px-4 py-4">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                    <div className="flex flex-wrap justify-end gap-2 whitespace-nowrap">
+                      <Button
+                        className="border-[#dbe6dc] text-[#1f8f4f]"
                         onClick={() => openEditModal(role)}
-                        title="编辑角色权限"
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
-                        <Pencil size={16} />
-                      </button>
-                      <button
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-red-600 transition hover:bg-red-50"
+                        <Pencil data-icon="inline-start" />
+                        权限
+                      </Button>
+                      <Button
+                        className="border-red-100 text-red-600 hover:bg-red-50"
                         disabled={loading || saving}
                         onClick={() => openDeleteConfirm(role)}
+                        size="sm"
                         title={
                           role.userCount > 0
                             ? "该角色已分配给后台用户，不能删除"
                             : "删除角色"
                         }
                         type="button"
+                        variant="outline"
                       >
-                        <Trash2 size={16} />
-                      </button>
+                        <Trash2 data-icon="inline-start" />
+                        删除
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -389,12 +428,24 @@ export function RoleManagementPanel({
           </table>
         </div>
 
-        <AdminPagination pagination={pagination} onPageChange={reloadRoles} />
+        <AdminPagination
+          disabled={loading}
+          onPageChange={(nextPage) => void reloadRoles(nextPage)}
+          onPageSizeChange={(nextPageSize) =>
+            void reloadRoles(1, { query }, nextPageSize)
+          }
+          pagination={pagination}
+        />
       </div>
 
       {modal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#07140c]/40 p-6">
-          <div className="w-full max-w-3xl rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl shadow-[#0f2418]/20">
+          <div
+            aria-modal="true"
+            data-admin-modal-shell
+            className="w-full max-w-3xl rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl shadow-[#0f2418]/20"
+            role="dialog"
+          >
             <div className="flex items-start justify-between border-b border-[#dbe6dc] px-5 py-4">
               <div>
                 <h3 className="text-lg font-semibold">
@@ -417,34 +468,42 @@ export function RoleManagementPanel({
             </div>
 
             <div className="grid max-h-[72vh] gap-4 overflow-y-auto p-5">
-              <label className="grid gap-2 text-sm font-semibold">
-                <RequiredLabel>角色名称</RequiredLabel>
-                <input
-                  className="h-10 rounded-xl border border-[#dbe6dc] px-3 font-normal outline-none focus:border-[#1f8f4f]"
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                  value={form.name}
-                />
-              </label>
+              <AdminFormField error={formErrors.name} label="角色名称" required>
+                {(invalid) => (
+                  <input
+                    aria-invalid={invalid}
+                    className="h-10 rounded-xl border border-[#dbe6dc] px-3 font-normal outline-none focus:border-[#1f8f4f] aria-invalid:border-red-500"
+                    onChange={(event) => {
+                      setForm((current) => ({ ...current, name: event.target.value }));
+                      setFormErrors((current) => ({ ...current, name: undefined }));
+                    }}
+                    value={form.name}
+                  />
+                )}
+              </AdminFormField>
 
-              <label className="grid gap-2 text-sm font-semibold">
-                <RequiredLabel>角色编码</RequiredLabel>
-                <input
-                  className="h-10 rounded-xl border border-[#dbe6dc] px-3 font-normal outline-none disabled:bg-[#f5f8f3] disabled:text-[#8a9a90]"
-                  disabled={modal.mode === "edit"}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, code: event.target.value }))
-                  }
-                  placeholder="operator"
-                  value={form.code}
-                />
-              </label>
+              <AdminFormField error={formErrors.code} label="角色编码" required>
+                {(invalid) => (
+                  <input
+                    aria-invalid={invalid}
+                    className="h-10 rounded-xl border border-[#dbe6dc] px-3 font-normal outline-none disabled:bg-[#f5f8f3] disabled:text-[#8a9a90] aria-invalid:border-red-500"
+                    disabled={modal.mode === "edit"}
+                    onChange={(event) => {
+                      setForm((current) => ({ ...current, code: event.target.value }));
+                      setFormErrors((current) => ({ ...current, code: undefined }));
+                    }}
+                    placeholder="operator"
+                    value={form.code}
+                  />
+                )}
+              </AdminFormField>
 
-              <div>
-                <div className="text-sm font-semibold">
-                  <RequiredLabel>角色权限</RequiredLabel>
-                </div>
+              <AdminFormField
+                error={formErrors.permissionIds}
+                label="角色权限"
+                required
+              >
+                {() => (
                 <div className="mt-3 grid gap-3">
                   {permissionGroups.map(([group, items]) => (
                     <div
@@ -463,15 +522,19 @@ export function RoleManagementPanel({
                             <input
                               checked={form.permissionIds.includes(permission.id)}
                               className="size-4 accent-[#1f8f4f]"
-                              onChange={() =>
+                              onChange={() => {
                                 setForm((current) => ({
                                   ...current,
                                   permissionIds: toggleValue(
                                     current.permissionIds,
                                     permission.id,
                                   ),
-                                }))
-                              }
+                                }));
+                                setFormErrors((current) => ({
+                                  ...current,
+                                  permissionIds: undefined,
+                                }));
+                              }}
                               type="checkbox"
                             />
                             <span className="font-semibold">{permission.name}</span>
@@ -484,7 +547,8 @@ export function RoleManagementPanel({
                     </div>
                   ))}
                 </div>
-              </div>
+                )}
+              </AdminFormField>
 
             </div>
 

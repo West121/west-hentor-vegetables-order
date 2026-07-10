@@ -51,6 +51,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -64,6 +65,12 @@ import org.springframework.util.StringUtils;
 @Service
 public class MemberService {
   private static final Set<String> BINDING_STATUSES = Set.of("ACTIVE", "DISABLED");
+  private static final Set<String> LIST_BINDING_STATUSES = Set.of(
+    "ACTIVE",
+    "DISABLED",
+    "DELETED"
+  );
+  private static final String DELETED_STATUS = "DELETED";
 
   private final AddressMapper addressMapper;
   private final AdminOperationLogMapper adminOperationLogMapper;
@@ -130,8 +137,18 @@ public class MemberService {
         .eq(MemberStoreBindingEntity::getStoreId, storeId)
         .orderByDesc(MemberStoreBindingEntity::getCreatedAt);
 
-    if (StringUtils.hasText(status) && !"ALL".equalsIgnoreCase(status)) {
-      wrapper.eq(MemberStoreBindingEntity::getStatus, status);
+    String normalizedStatus = StringUtils.hasText(status)
+      ? status.trim().toUpperCase(Locale.ROOT)
+      : "";
+    if ("ALL".equals(normalizedStatus)) {
+      // 管理后台“全部”需要包含逻辑删除记录，便于审计和演示历史数据。
+    } else if (StringUtils.hasText(normalizedStatus)) {
+      if (!LIST_BINDING_STATUSES.contains(normalizedStatus)) {
+        throw new ApiException("INVALID_PARAMS", "会员状态不正确", HttpStatus.BAD_REQUEST);
+      }
+      wrapper.eq(MemberStoreBindingEntity::getStatus, normalizedStatus);
+    } else {
+      wrapper.ne(MemberStoreBindingEntity::getStatus, DELETED_STATUS);
     }
 
     if (StringUtils.hasText(query)) {
@@ -152,7 +169,7 @@ public class MemberService {
     );
     enrichMemberListItems(storeId, result.getRecords());
 
-    return toPageResult(result);
+    return toPageResult(result, memberSummary(storeId));
   }
 
   public MemberDetailResponse getMember(String storeId, String userId) {
@@ -382,6 +399,7 @@ public class MemberService {
     AddressEntity beforeDefaultAddress = defaultAddress(addresses);
     MemberAddressDto beforeAddressDto = toAddressDto(beforeDefaultAddress);
     String beforeDisabledReason = user.getDisabledReason();
+    String beforeNickname = user.getNickname();
     String beforeRemark = user.getRemark();
     LocalDateTime now = LocalDateTime.now();
 
@@ -393,7 +411,8 @@ public class MemberService {
     memberStoreBindingMapper.updateAdminBinding(bindingUpdate);
 
     String remark = trimToNull(request.remark());
-    userMapper.updateAdminMemberProfile(userId, disabledReason, remark, now);
+    String nickname = request.nickname() == null ? user.getNickname() : trimToNull(request.nickname());
+    userMapper.updateAdminMemberProfile(userId, disabledReason, nickname, remark, now);
 
     AddressEntity updatedDefaultAddress = beforeDefaultAddress;
     AddressEntity normalizedAddress = normalizeMemberAddressInput(request.defaultAddress(), user, storeId);
@@ -422,10 +441,12 @@ public class MemberService {
       binding.getStatus(),
       beforeAddressDto,
       beforeDisabledReason,
+      beforeNickname,
       beforeRemark,
       request.status(),
       afterAddressDto,
       disabledReason,
+      nickname,
       remark
     );
     return new MemberUpdateResponse(new MemberUpdatedDto(
@@ -433,7 +454,47 @@ public class MemberService {
       afterAddressDto,
       disabledReason,
       userId,
+      nickname,
       remark
+    ));
+  }
+
+  @Transactional
+  public MemberUpdateResponse deleteMember(
+    String storeId,
+    String userId,
+    AdminSessionDto session
+  ) {
+    AdminUserEntity operator = requireActiveOperator(session.adminUserId());
+    MemberStoreBindingEntity binding = requireBinding(storeId, userId);
+    if (DELETED_STATUS.equals(binding.getStatus())) {
+      throw new ApiException("MEMBER_NOT_FOUND", "会员不存在", HttpStatus.NOT_FOUND);
+    }
+    UserEntity user = requireUser(userId);
+    LocalDateTime now = LocalDateTime.now();
+
+    MemberStoreBindingEntity bindingUpdate = new MemberStoreBindingEntity();
+    bindingUpdate.setId(binding.getId());
+    bindingUpdate.setStatus(DELETED_STATUS);
+    bindingUpdate.setIsDefault(false);
+    bindingUpdate.setUpdatedAt(now);
+    memberStoreBindingMapper.updateAdminBinding(bindingUpdate);
+
+    writeMemberDeleteLog(
+      operator.getId(),
+      storeId,
+      userId,
+      binding.getStatus(),
+      user.getPhone(),
+      user.getNickname()
+    );
+    return new MemberUpdateResponse(new MemberUpdatedDto(
+      DELETED_STATUS,
+      null,
+      user.getDisabledReason(),
+      userId,
+      user.getNickname(),
+      user.getRemark()
     ));
   }
 
@@ -527,6 +588,7 @@ public class MemberService {
       new LambdaQueryWrapper<MemberStoreBindingEntity>()
         .eq(MemberStoreBindingEntity::getStoreId, storeId)
         .eq(MemberStoreBindingEntity::getUserId, userId)
+        .ne(MemberStoreBindingEntity::getStatus, DELETED_STATUS)
         .last("limit 1")
     );
     if (binding == null) {
@@ -806,7 +868,28 @@ public class MemberService {
     return false;
   }
 
-  private PageResult<MemberListItem> toPageResult(Page<MemberListItem> result) {
+  private Map<String, Long> memberSummary(String storeId) {
+    long active = countBindingsByStatus(storeId, "ACTIVE");
+    long disabled = countBindingsByStatus(storeId, "DISABLED");
+    long deleted = countBindingsByStatus(storeId, DELETED_STATUS);
+    return Map.of(
+      "active", active,
+      "deleted", deleted,
+      "disabled", disabled,
+      "total", active + disabled + deleted
+    );
+  }
+
+  private long countBindingsByStatus(String storeId, String status) {
+    Long count = memberStoreBindingMapper.selectCount(
+      new LambdaQueryWrapper<MemberStoreBindingEntity>()
+        .eq(MemberStoreBindingEntity::getStoreId, storeId)
+        .eq(MemberStoreBindingEntity::getStatus, status)
+    );
+    return count == null ? 0 : count;
+  }
+
+  private PageResult<MemberListItem> toPageResult(Page<MemberListItem> result, Object summary) {
     long totalPages =
       result.getSize() == 0 ? 0 : (long) Math.ceil((double) result.getTotal() / result.getSize());
     return new PageResult<>(
@@ -814,7 +897,8 @@ public class MemberService {
       result.getCurrent(),
       result.getSize(),
       result.getTotal(),
-      totalPages
+      totalPages,
+      summary
     );
   }
 
@@ -949,22 +1033,26 @@ public class MemberService {
     String beforeBindingStatus,
     MemberAddressDto beforeAddress,
     String beforeDisabledReason,
+    String beforeNickname,
     String beforeRemark,
     String afterBindingStatus,
     MemberAddressDto afterAddress,
     String afterDisabledReason,
+    String afterNickname,
     String afterRemark
   ) {
     Map<String, Object> beforeValue = new LinkedHashMap<>();
     beforeValue.put("bindingStatus", beforeBindingStatus);
     beforeValue.put("defaultAddress", beforeAddress);
     beforeValue.put("disabledReason", beforeDisabledReason);
+    beforeValue.put("nickname", beforeNickname);
     beforeValue.put("remark", beforeRemark);
 
     Map<String, Object> afterValue = new LinkedHashMap<>();
     afterValue.put("bindingStatus", afterBindingStatus);
     afterValue.put("defaultAddress", afterAddress);
     afterValue.put("disabledReason", afterDisabledReason);
+    afterValue.put("nickname", afterNickname);
     afterValue.put("remark", afterRemark);
 
     AdminOperationLogEntity log = new AdminOperationLogEntity();
@@ -977,6 +1065,41 @@ public class MemberService {
     log.setResourceId(userId);
     log.setStoreId(storeId);
     log.setRequestParams(toJson(afterValue));
+    log.setResponseData("{}");
+    log.setStatusCode(200);
+    log.setCreatedAt(LocalDateTime.now());
+    adminOperationLogMapper.insertLog(log);
+  }
+
+  private void writeMemberDeleteLog(
+    String operatorId,
+    String storeId,
+    String userId,
+    String beforeBindingStatus,
+    String phone,
+    String nickname
+  ) {
+    Map<String, Object> beforeValue = new LinkedHashMap<>();
+    beforeValue.put("bindingStatus", beforeBindingStatus);
+    beforeValue.put("nickname", nickname);
+    beforeValue.put("phone", phone);
+
+    Map<String, Object> afterValue = new LinkedHashMap<>();
+    afterValue.put("bindingStatus", DELETED_STATUS);
+    afterValue.put("deleted", true);
+    afterValue.put("nickname", nickname);
+    afterValue.put("phone", phone);
+
+    AdminOperationLogEntity log = new AdminOperationLogEntity();
+    log.setId(id());
+    log.setAction("MEMBER_DELETED");
+    log.setBeforeValue(toJson(beforeValue));
+    log.setAfterValue(toJson(afterValue));
+    log.setOperatorId(operatorId);
+    log.setResource("member");
+    log.setResourceId(userId);
+    log.setStoreId(storeId);
+    log.setRequestParams(toJson(Map.of("storeId", storeId, "userId", userId)));
     log.setResponseData("{}");
     log.setStatusCode(200);
     log.setCreatedAt(LocalDateTime.now());

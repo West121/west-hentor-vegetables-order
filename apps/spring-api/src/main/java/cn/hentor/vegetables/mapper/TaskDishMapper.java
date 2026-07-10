@@ -14,8 +14,8 @@ public interface TaskDishMapper extends BaseMapper<TaskDishEntity> {
   int deleteByTaskId(@Param("taskId") String taskId);
 
   @Insert("""
-    INSERT INTO "TaskDish" ("taskId", "dishId", "sortOrder")
-    VALUES (#{taskId}, #{dishId}, #{sortOrder})
+    INSERT INTO "TaskDish" ("taskId", "dishId", "sortOrder", "totalWeightJin")
+    VALUES (#{taskId}, #{dishId}, #{sortOrder}, #{totalWeightJin})
     """)
   int insertTaskDish(TaskDishEntity taskDish);
 }

@@ -29,6 +29,24 @@ describe("dashboard permission wiring", () => {
     expect(source).toContain("lastLoadedSectionRef");
     expect(source).toContain("setDataRevision");
     expect(source).toContain("refreshDashboardData");
-    expect(source).toContain("key={`${activeSection}-${dataRevision}`}");
+    expect(source).toContain("key={`${activeSection}-${dataRevision}-${initialListQuery}`}");
+  });
+
+  it("renders animated overview statistics without the payment placeholder", () => {
+    expect(source).toContain("dashboardMetrics");
+    expect(source).toContain("fulfillmentSteps");
+    expect(source).toContain("packageHealth");
+    expect(source).toContain("dishHealth");
+    expect(source).toContain("readinessItems");
+    expect(source).toContain("admin-overview-card");
+    expect(source).toContain("admin-overview-ring");
+    expect(source).toContain("admin-overview-bar");
+    expect(source).toContain("履约流程");
+    expect(source).toContain("套餐与会员");
+    expect(source).toContain("菜品库存");
+    expect(source).toContain("今日运营准备");
+    expect(source).not.toContain("stroke=\"#d59a26\"");
+    expect(source).not.toContain("支付预留");
+    expect(source).not.toContain("purchase order");
   });
 });

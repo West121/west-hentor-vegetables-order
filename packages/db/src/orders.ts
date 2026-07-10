@@ -186,7 +186,8 @@ function formatWeight(value: number) {
 }
 
 function csvCell(value: string | number) {
-  const text = String(value);
+  const rawText = String(value);
+  const text = /^[=+\-@]/.test(rawText.trimStart()) ? `'${rawText}` : rawText;
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 

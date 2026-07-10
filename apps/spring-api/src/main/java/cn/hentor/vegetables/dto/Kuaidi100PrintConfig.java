@@ -21,7 +21,9 @@ public record Kuaidi100PrintConfig(
   String printerName,
   Map<String, Object> requestParams,
   String secret,
+  String senderAddress,
   String senderCompany,
+  String senderMobile,
   String siid,
   String tempId
 ) {}

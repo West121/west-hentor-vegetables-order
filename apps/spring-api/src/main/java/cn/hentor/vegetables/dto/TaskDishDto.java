@@ -9,8 +9,11 @@ public record TaskDishDto(
   String imageKey,
   String imageUrl,
   String name,
+  BigDecimal remainingWeightJin,
   Integer sortOrder,
   String status,
   BigDecimal stepJin,
-  BigDecimal stockJin
+  BigDecimal stockJin,
+  BigDecimal totalWeightJin,
+  BigDecimal usedWeightJin
 ) {}

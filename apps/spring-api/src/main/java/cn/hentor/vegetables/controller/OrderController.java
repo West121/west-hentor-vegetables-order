@@ -11,6 +11,7 @@ import cn.hentor.vegetables.dto.AdminOrderRemarkRequest;
 import cn.hentor.vegetables.dto.AdminOrderRemarkResponse;
 import cn.hentor.vegetables.dto.AdminOrderShipRequest;
 import cn.hentor.vegetables.dto.AdminOrderShipResponse;
+import cn.hentor.vegetables.dto.AdminOrderShipmentDto;
 import cn.hentor.vegetables.dto.AdminOrderStatusActionRequest;
 import cn.hentor.vegetables.dto.AdminOrderStatusResponse;
 import cn.hentor.vegetables.dto.AdminSessionDto;
@@ -61,7 +62,7 @@ public class OrderController {
     @RequestParam(required = false) String dateFrom,
     @RequestParam(required = false) String dateTo,
     @RequestParam(defaultValue = "1") long page,
-    @RequestParam(defaultValue = "20") long pageSize,
+    @RequestParam(defaultValue = "10") long pageSize,
     @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
     @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
     @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
@@ -195,6 +196,20 @@ public class OrderController {
     return ApiResponse.ok(orderQueryService.signOrder(orderId, request, session));
   }
 
+  @PostMapping("/{orderId}/cancel")
+  public ApiResponse<AdminOrderStatusResponse> cancelOrder(
+    @PathVariable String orderId,
+    @Valid @RequestBody AdminOrderStatusActionRequest request,
+    @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
+    @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
+  ) {
+    AdminSessionDto session = requireSession(authorization, tokenHeader, tokenCookie);
+    requirePermission(session, "orders.write");
+    requireStoreAccess(session, request.storeId());
+    return ApiResponse.ok(orderQueryService.cancelOrder(orderId, request, session));
+  }
+
   @PostMapping("/{orderId}/void")
   public ApiResponse<AdminOrderStatusResponse> voidOrder(
     @PathVariable String orderId,
@@ -207,6 +222,21 @@ public class OrderController {
     requirePermission(session, "orders.write");
     requireStoreAccess(session, request.storeId());
     return ApiResponse.ok(orderQueryService.voidOrder(orderId, request, session));
+  }
+
+  @PostMapping("/{orderId}/shipments/{shipmentId}/track/refresh")
+  public ApiResponse<AdminOrderShipmentDto> refreshShipmentTrack(
+    @PathVariable String orderId,
+    @PathVariable String shipmentId,
+    @RequestParam String storeId,
+    @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
+    @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
+  ) {
+    AdminSessionDto session = requireSession(authorization, tokenHeader, tokenCookie);
+    requirePermission(session, "orders.read");
+    requireStoreAccess(session, storeId);
+    return ApiResponse.ok(orderQueryService.refreshShipmentTrack(storeId, orderId, shipmentId));
   }
 
   @GetMapping(value = "/print-labels", produces = MediaType.TEXT_HTML_VALUE)

@@ -29,7 +29,7 @@ public class MiniappHomeController {
     @RequestParam(defaultValue = "lotus-garden") String storeCode,
     @RequestParam(required = false) String orderId
   ) {
-    MiniSessionContext session = miniAuthService.requireSession(authorization);
+    MiniSessionContext session = miniAuthService.resolveSessionOrNull(authorization);
     return ApiResponse.ok(miniHomeService.getHome(session, storeCode, orderId));
   }
 }

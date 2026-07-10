@@ -11,7 +11,9 @@ public record MiniStorePublicSettingsDto(
   String loginSubtitle,
   String loginTitle,
   String loginWelcome,
+  String privacyPolicyContent,
   String privacyPolicyUrl,
   MiniStorePublicSummaryDto store,
+  String userAgreementContent,
   String userAgreementUrl
 ) {}

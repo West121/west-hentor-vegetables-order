@@ -61,4 +61,23 @@ describe("admin operation log coverage", () => {
     expect(adminUserPanelSource).not.toContain("刷新日志");
     expect(operationLogPanelSource).toContain("独立展示关键操作记录");
   });
+
+  it("keeps the log list compact and moves verbose payloads into a detail dialog", () => {
+    const panelSource = readAppFile("ui/operation-logs-panel.tsx");
+
+    expect(panelSource).toContain("selectedLog");
+    expect(panelSource).toContain("操作日志详情");
+    expect(panelSource).toContain("openLogDetail");
+    expect(panelSource).toContain("compactText");
+    expect(panelSource).toContain("业务操作记录");
+    expect(panelSource).toContain("路径未采集");
+    expect(panelSource).not.toContain("METHOD");
+    expect(panelSource).not.toContain("未记录路径");
+    expect(panelSource).toContain("title={");
+    expect(panelSource).toContain("truncate");
+    expect(panelSource).toContain("请求信息");
+    expect(panelSource).toContain("响应信息");
+    expect(panelSource).not.toContain('<th className="px-4 py-3 font-medium">请求参数</th>');
+    expect(panelSource).not.toContain('<th className="px-4 py-3 font-medium">返回参数</th>');
+  });
 });

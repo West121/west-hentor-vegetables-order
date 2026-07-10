@@ -63,6 +63,7 @@ public class MiniOrderService {
   private final OrderItemMapper orderItemMapper;
   private final OrderMapper orderMapper;
   private final OrderShipmentMapper orderShipmentMapper;
+  private final OrderShipmentTrackingService orderShipmentTrackingService;
   private final UserMapper userMapper;
   private final UserPackageBenefitMapper userPackageBenefitMapper;
   private final UserPackageMapper userPackageMapper;
@@ -76,6 +77,7 @@ public class MiniOrderService {
     OrderItemMapper orderItemMapper,
     OrderMapper orderMapper,
     OrderShipmentMapper orderShipmentMapper,
+    OrderShipmentTrackingService orderShipmentTrackingService,
     UserMapper userMapper,
     UserPackageBenefitMapper userPackageBenefitMapper,
     UserPackageMapper userPackageMapper
@@ -88,6 +90,7 @@ public class MiniOrderService {
     this.orderItemMapper = orderItemMapper;
     this.orderMapper = orderMapper;
     this.orderShipmentMapper = orderShipmentMapper;
+    this.orderShipmentTrackingService = orderShipmentTrackingService;
     this.userMapper = userMapper;
     this.userPackageBenefitMapper = userPackageBenefitMapper;
     this.userPackageMapper = userPackageMapper;
@@ -151,9 +154,6 @@ public class MiniOrderService {
     }
 
     LocalDateTime now = LocalDateTime.now(BUSINESS_ZONE);
-    for (OrderItemEntity item : loadItems(order.getId())) {
-      dishMapper.incrementStock(item.getDishId(), zeroIfNull(item.getWeightJin()), now);
-    }
     if (StringUtils.hasText(order.getUserPackageId())) {
       userPackageMapper.decrementUsedTimes(order.getUserPackageId(), now);
     }
@@ -371,7 +371,9 @@ public class MiniOrderService {
       shipment.getPackageType(),
       shipment.getShippedAt(),
       shipment.getSignedAt(),
-      shipment.getStatus()
+      shipment.getStatus(),
+      shipment.getKuaidicom(),
+      orderShipmentTrackingService.getTrackDto(shipment.getId())
     );
   }
 

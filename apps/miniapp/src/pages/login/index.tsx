@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 
 import { MiniCustomTop } from "../../components/mini-custom-top";
 import {
+  clearMiniSessionLogout,
   getMiniSessionToken,
+  MINI_PROFILE_COMPLETION_PROMPT_KEY,
   MINI_SESSION_TOKEN_KEY,
 } from "../../lib/auth";
 import { getAgreementEntry } from "../../lib/agreements";
@@ -13,11 +15,11 @@ import {
   buildStoreSettingsUrl,
   getActiveStoreCode,
 } from "../../lib/stores";
+import { useMiniappShare } from "../../lib/share";
 import loginVegetablesImage from "../../assets/login-vegetables.jpg";
 import "./index.scss";
 
-const API_BASE_URL =
-  process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
+import { API_BASE_URL } from "../../lib/api-base-url";
 const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 
 type ApiResponse<T> = {
@@ -32,6 +34,7 @@ type ApiResponse<T> = {
 type PhoneEvent = {
   detail?: {
     code?: string;
+    errMsg?: string;
   };
 };
 
@@ -40,7 +43,9 @@ type PublicSettings = {
   loginSubtitle: string;
   loginTitle: string;
   loginWelcome: string;
+  privacyPolicyContent: string;
   privacyPolicyUrl: string;
+  userAgreementContent: string;
   userAgreementUrl: string;
 };
 
@@ -49,11 +54,16 @@ const DEFAULT_LOGIN_SETTINGS = {
   loginSubtitle: "社区鲜蔬会员",
   loginTitle: "Hentor Fresh",
   loginWelcome: "欢迎来到蔬菜预订",
+  privacyPolicyContent: "",
   privacyPolicyUrl: "",
+  userAgreementContent: "",
   userAgreementUrl: "",
 } satisfies PublicSettings;
 
 export default function LoginPage() {
+  useMiniappShare(DEFAULT_STORE_CODE);
+
+  const [agreementAccepted, setAgreementAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [settings, setSettings] = useState<PublicSettings>(
     DEFAULT_LOGIN_SETTINGS,
@@ -104,8 +114,13 @@ export default function LoginPage() {
     }
   }
 
-  function openAgreement(label: string, url?: string | null) {
-    const entry = getAgreementEntry(label, url);
+  function openAgreement(
+    label: string,
+    url: string | null | undefined,
+    content: string | null | undefined,
+    type: "privacy" | "user",
+  ) {
+    const entry = getAgreementEntry(label, url, content, type);
     if (entry.disabled || !entry.url) {
       Taro.showToast({
         icon: "none",
@@ -126,13 +141,29 @@ export default function LoginPage() {
     Taro.switchTab({ url: "/pages/home/index" });
   }
 
+  function returnToPreviousPage() {
+    goBack();
+  }
+
+  function promptAgreementRequired() {
+    Taro.showToast({
+      icon: "none",
+      title: "请先阅读并同意用户协议和隐私政策",
+    });
+  }
+
   async function handlePhoneLogin(event: PhoneEvent) {
     if (submitting) {
       return;
     }
 
+    if (!agreementAccepted) {
+      promptAgreementRequired();
+      return;
+    }
+
     if (!event.detail?.code) {
-      Taro.showToast({ title: "需要授权手机号", icon: "none" });
+      returnToPreviousPage();
       return;
     }
 
@@ -151,6 +182,9 @@ export default function LoginPage() {
             code: string;
           };
           token: string;
+          user?: {
+            profileIncomplete?: boolean;
+          };
         }>
       >({
         data: {
@@ -168,10 +202,17 @@ export default function LoginPage() {
       const token = payload.data?.token;
 
       if (response.statusCode >= 200 && response.statusCode < 300 && token) {
+        clearMiniSessionLogout();
         Taro.setStorageSync(MINI_SESSION_TOKEN_KEY, token);
         if (payload.data?.store.code) {
           Taro.setStorageSync(ACTIVE_STORE_CODE_KEY, payload.data.store.code);
         }
+        if (payload.data?.user?.profileIncomplete) {
+          Taro.setStorageSync(MINI_PROFILE_COMPLETION_PROMPT_KEY, "1");
+          Taro.switchTab({ url: "/pages/me/index" });
+          return;
+        }
+
         Taro.switchTab({ url: "/pages/home/index" });
         return;
       }
@@ -210,26 +251,56 @@ export default function LoginPage() {
           className="login__button"
           disabled={submitting}
           loading={submitting}
-          openType="getPhoneNumber"
-          onGetPhoneNumber={handlePhoneLogin}
+          openType={agreementAccepted ? "getPhoneNumber" : undefined}
+          onClick={agreementAccepted ? undefined : promptAgreementRequired}
+          onGetPhoneNumber={agreementAccepted ? handlePhoneLogin : undefined}
         >
           立即登录
         </Button>
+        <Button className="login__return-button" onClick={returnToPreviousPage}>
+          返回
+        </Button>
         <View className="login__agreement">
-          我已阅读、理解并接受
           <Text
-            className="login__agreement-link"
-            onClick={() => openAgreement("用户协议", settings.userAgreementUrl)}
+            className={
+              agreementAccepted
+                ? "login__agreement-check login__agreement-check--active"
+                : "login__agreement-check"
+            }
+            onClick={() => setAgreementAccepted((value) => !value)}
           >
-            《用户协议》
+            {agreementAccepted ? "✓" : ""}
           </Text>
-          和
-          <Text
-            className="login__agreement-link"
-            onClick={() => openAgreement("隐私政策", settings.privacyPolicyUrl)}
-          >
-            《隐私政策》
-          </Text>
+          <View className="login__agreement-copy">
+            我已阅读并同意
+            <Text
+              className="login__agreement-link"
+              onClick={() =>
+                openAgreement(
+                  "用户协议",
+                  settings.userAgreementUrl,
+                  settings.userAgreementContent,
+                  "user",
+                )
+              }
+            >
+              《用户协议》
+            </Text>
+            和
+            <Text
+              className="login__agreement-link"
+              onClick={() =>
+                openAgreement(
+                  "隐私政策",
+                  settings.privacyPolicyUrl,
+                  settings.privacyPolicyContent,
+                  "privacy",
+                )
+              }
+            >
+              《隐私政策》
+            </Text>
+          </View>
         </View>
       </View>
     </View>

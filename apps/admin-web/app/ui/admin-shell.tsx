@@ -4,9 +4,12 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   useEffect,
+  useMemo,
+  useRef,
   useState,
   type ComponentType,
   type FocusEvent,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import {
@@ -18,6 +21,7 @@ import {
   FileClock,
   FolderTree,
   LayoutDashboard,
+  MoreHorizontal,
   Package,
   PanelLeftClose,
   PanelLeftOpen,
@@ -32,7 +36,11 @@ import {
   type LucideProps,
 } from "lucide-react";
 
-import type { AdminNavGroup, AdminNavIcon } from "@/app/lib/admin-navigation";
+import {
+  adminSectionHref,
+  type AdminNavGroup,
+  type AdminNavIcon,
+} from "@/app/lib/admin-navigation";
 import { cn } from "@/app/lib/cn";
 
 import {
@@ -48,6 +56,53 @@ import {
   getDefaultOpenAdminNavGroups,
   shouldRenderAdminNavItems,
 } from "./admin-shell-navigation-state";
+
+const HORIZONTAL_VISIBLE_GROUP_LIMIT = 5;
+const HORIZONTAL_MORE_BUTTON_WIDTH = 96;
+
+function estimateHorizontalGroupWidth(group: AdminNavGroup) {
+  const textWidth = Math.max(group.label.length, 2) * 16;
+  const submenuWidth = group.items.length > 0 ? 22 : 0;
+  return 46 + textWidth + submenuWidth;
+}
+
+function getHorizontalVisibleGroupLimit(
+  groups: AdminNavGroup[],
+  availableWidth: number,
+) {
+  if (groups.length === 0) {
+    return 0;
+  }
+
+  if (availableWidth <= 0) {
+    return Math.min(groups.length, HORIZONTAL_VISIBLE_GROUP_LIMIT);
+  }
+
+  let usedWidth = 0;
+  let visibleCount = 0;
+
+  for (let index = 0; index < groups.length; index += 1) {
+    const group = groups[index];
+    if (!group) {
+      continue;
+    }
+
+    const nextWidth = usedWidth + estimateHorizontalGroupWidth(group);
+    const remainingCount = groups.length - index - 1;
+    const reservedOverflowWidth =
+      remainingCount > 0 ? HORIZONTAL_MORE_BUTTON_WIDTH : 0;
+
+    if (nextWidth + reservedOverflowWidth <= availableWidth || visibleCount === 0) {
+      usedWidth = nextWidth;
+      visibleCount += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return Math.min(groups.length, Math.max(1, visibleCount));
+}
 
 const iconMap: Record<AdminNavIcon, ComponentType<LucideProps>> = {
   "badge-check": BadgeCheck,
@@ -92,6 +147,10 @@ export function AdminShell({
   const [horizontalOpenGroup, setHorizontalOpenGroup] = useState<string | null>(
     null,
   );
+  const [horizontalVisibleLimit, setHorizontalVisibleLimit] = useState(
+    HORIZONTAL_VISIBLE_GROUP_LIMIT,
+  );
+  const horizontalNavListRef = useRef<HTMLDivElement | null>(null);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const CollapseIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
 
@@ -146,9 +205,7 @@ export function AdminShell({
   }, [collapsed, density, layoutMode, openGroups, preferencesLoaded, width]);
 
   function sectionHref(section: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("section", section);
-    return `?${params.toString()}`;
+    return adminSectionHref(searchParams, section);
   }
 
   function handleHorizontalGroupBlur(
@@ -168,9 +225,83 @@ export function AdminShell({
     );
   }
 
+  function handleHorizontalTriggerKeyDown(
+    event: KeyboardEvent<HTMLElement>,
+    groupLabel: string,
+  ) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHorizontalOpenGroup(groupLabel);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      setHorizontalOpenGroup(null);
+    }
+  }
+
   const sidebarVisible = layoutMode === "vertical" || layoutMode === "double";
   const activeGroup =
     groups.find((group) => group.items.some((item) => item.active)) ?? groups[0];
+  const horizontalEligibleGroups = useMemo(
+    () =>
+      groups.filter((group) =>
+        Boolean(getCollapsedAdminNavGroupTarget(group)),
+      ),
+    [groups],
+  );
+  useEffect(() => {
+    if (layoutMode !== "horizontal") {
+      return;
+    }
+
+    const element = horizontalNavListRef.current;
+    if (!element) {
+      return;
+    }
+
+    const updateLimit = () => {
+      setHorizontalVisibleLimit(
+        getHorizontalVisibleGroupLimit(
+          horizontalEligibleGroups,
+          element.getBoundingClientRect().width,
+        ),
+      );
+    };
+
+    updateLimit();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const resizeObserver = new ResizeObserver(updateLimit);
+      resizeObserver.observe(element);
+      return () => resizeObserver.disconnect();
+    }
+
+    window.addEventListener("resize", updateLimit);
+    return () => window.removeEventListener("resize", updateLimit);
+  }, [horizontalEligibleGroups, layoutMode]);
+
+  const preferredHorizontalGroups = horizontalEligibleGroups.slice(
+    0,
+    horizontalVisibleLimit,
+  );
+  const activeHorizontalGroup = horizontalEligibleGroups.find((group) =>
+    group.items.some((item) => item.active),
+  );
+  const horizontalVisibleGroups =
+    activeHorizontalGroup &&
+    !preferredHorizontalGroups.some((group) => group.label === activeHorizontalGroup.label)
+      ? [
+          ...preferredHorizontalGroups.slice(0, Math.max(horizontalVisibleLimit - 1, 1)),
+          activeHorizontalGroup,
+        ]
+      : preferredHorizontalGroups;
+  const horizontalVisibleGroupLabels = new Set(
+    horizontalVisibleGroups.map((group) => group.label),
+  );
+  const horizontalOverflowGroups = horizontalEligibleGroups.filter(
+    (group) => !horizontalVisibleGroupLabels.has(group.label),
+  );
   const contentPaddingClass = !sidebarVisible
     ? "pl-0"
     : layoutMode === "double"
@@ -249,28 +380,30 @@ export function AdminShell({
                     >
                       <GroupIcon size={20} />
                     </Link>
-                    <div className="pointer-events-none absolute left-full top-0 z-40 ml-3 min-w-44 translate-x-1 rounded-2xl border border-[#dbe6dc] bg-white p-2 text-[#14231a] opacity-0 shadow-2xl shadow-[#0f2418]/18 transition group-hover/nav:pointer-events-auto group-hover/nav:translate-x-0 group-hover/nav:opacity-100">
-                      <div className="px-3 pb-2 pt-1 text-xs font-semibold text-[#66756d]">
-                        {group.label}
-                      </div>
-                      <div className="space-y-1">
-                        {group.items.map((item) => {
-                          const FlyoutIcon = iconMap[item.icon];
+                    <div className="absolute left-full top-0 z-40 min-w-44 pl-3 translate-x-1 opacity-0 transition group-hover/nav:translate-x-0 group-hover/nav:opacity-100 group-focus-within/nav:translate-x-0 group-focus-within/nav:opacity-100">
+                      <div className="pointer-events-none rounded-2xl border border-[#dbe6dc] bg-white p-2 text-[#14231a] shadow-2xl shadow-[#0f2418]/18 group-hover/nav:pointer-events-auto group-focus-within/nav:pointer-events-auto">
+                        <div className="px-3 pb-2 pt-1 text-xs font-semibold text-[#66756d]">
+                          {group.label}
+                        </div>
+                        <div className="space-y-1">
+                          {group.items.map((item) => {
+                            const FlyoutIcon = iconMap[item.icon];
 
-                          return (
-                            <Link
-                              className={cn(
-                                "flex h-9 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-[#435247] transition hover:bg-[#eef8f0] hover:text-[#1f8f4f]",
-                                item.active && "bg-[#1f8f4f] text-white hover:bg-[#1f8f4f] hover:text-white",
-                              )}
-                              href={sectionHref(item.section)}
-                              key={item.section}
-                            >
-                              <FlyoutIcon size={15} />
-                              <span className="whitespace-nowrap">{item.label}</span>
-                            </Link>
-                          );
-                        })}
+                            return (
+                              <Link
+                                className={cn(
+                                  "flex h-9 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-[#435247] transition hover:bg-[#eef8f0] hover:text-[#1f8f4f]",
+                                  item.active && "bg-[#1f8f4f] text-white hover:bg-[#1f8f4f] hover:text-white",
+                                )}
+                                href={sectionHref(item.section)}
+                                key={item.section}
+                              >
+                                <FlyoutIcon size={15} />
+                                <span className="whitespace-nowrap">{item.label}</span>
+                              </Link>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -401,13 +534,16 @@ export function AdminShell({
       ) : null}
 
       {layoutMode === "horizontal" ? (
-        <div className="sticky top-0 z-20 border-b border-[#dbe6dc] bg-white shadow-sm">
+        <div className="sticky top-0 z-20 border-b border-[#dbe6dc] bg-white shadow-sm dark:border-[#1f3a28] dark:bg-[#07130c]">
           <nav className="flex h-14 items-center gap-4 px-6">
             <div className="mr-2 text-base font-semibold text-[#10251a]">
               {brand}
             </div>
-            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-visible">
-              {groups.map((group) => {
+            <div
+              className="flex min-w-0 flex-1 items-center gap-1 overflow-visible"
+              ref={horizontalNavListRef}
+            >
+              {horizontalVisibleGroups.map((group) => {
                 const GroupIcon = iconMap[group.icon];
                 const groupTarget = getCollapsedAdminNavGroupTarget(group);
                 const groupActive = group.items.some((item) => item.active);
@@ -424,7 +560,6 @@ export function AdminShell({
                     onBlur={(event) =>
                       handleHorizontalGroupBlur(event, group.label)
                     }
-                    onFocus={() => setHorizontalOpenGroup(group.label)}
                     onMouseEnter={() => setHorizontalOpenGroup(group.label)}
                     onMouseLeave={() => setHorizontalOpenGroup(null)}
                   >
@@ -437,6 +572,9 @@ export function AdminShell({
                       )}
                       href={sectionHref(groupTarget.section)}
                       onClick={() => setHorizontalOpenGroup(null)}
+                      onKeyDown={(event) =>
+                        handleHorizontalTriggerKeyDown(event, group.label)
+                      }
                       title={group.label}
                     >
                       <GroupIcon size={16} />
@@ -494,6 +632,107 @@ export function AdminShell({
                   </div>
                 );
               })}
+              {horizontalOverflowGroups.length > 0 ? (
+                <div
+                  className="relative shrink-0"
+                  onBlur={(event) => handleHorizontalGroupBlur(event, "更多")}
+                  onMouseEnter={() => setHorizontalOpenGroup("更多")}
+                  onMouseLeave={() => setHorizontalOpenGroup(null)}
+                >
+                  <button
+                    aria-expanded={horizontalOpenGroup === "更多"}
+                    aria-haspopup="menu"
+                    className={cn(
+                      "flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-[#405248] transition hover:bg-[#eef8f0] hover:text-[#1f8f4f]",
+                      horizontalOverflowGroups.some((group) =>
+                        group.items.some((item) => item.active),
+                      ) && "bg-[#e8f6ed] text-[#1f8f4f]",
+                    )}
+                    onClick={() =>
+                      setHorizontalOpenGroup((value) =>
+                        value === "更多" ? null : "更多",
+                      )
+                    }
+                    onKeyDown={(event) =>
+                      handleHorizontalTriggerKeyDown(event, "更多")
+                    }
+                    title="更多菜单"
+                    type="button"
+                  >
+                    <MoreHorizontal size={16} />
+                    <span className="whitespace-nowrap">更多</span>
+                    <ChevronDown
+                      className={cn(
+                        "text-[#8a9a91] transition",
+                        horizontalOpenGroup === "更多" && "rotate-180",
+                      )}
+                      size={14}
+                    />
+                  </button>
+                  <div
+                    className={cn(
+                      "absolute right-0 top-full z-50 min-w-56 pt-2 transition",
+                      horizontalOpenGroup === "更多"
+                        ? "pointer-events-auto translate-y-0 opacity-100"
+                        : "pointer-events-none translate-y-1 opacity-0",
+                    )}
+                  >
+                    <div
+                      className="max-h-[70vh] overflow-y-auto rounded-2xl border border-[#dbe6dc] bg-white p-2 text-[#14231a] shadow-2xl shadow-[#0f2418]/16"
+                      role="menu"
+                    >
+                      <div className="px-3 pb-2 pt-1 text-xs font-semibold text-[#7a8a81]">
+                        更多菜单
+                      </div>
+                      <div className="space-y-2">
+                        {horizontalOverflowGroups.map((group) => {
+                          const GroupIcon = iconMap[group.icon];
+                          const groupActive = group.items.some((item) => item.active);
+
+                          return (
+                            <div className="rounded-xl bg-[#f8fbf7] p-1" key={group.label}>
+                              <div
+                                className={cn(
+                                  "flex h-8 items-center gap-2 px-2 text-xs font-semibold text-[#6f8076]",
+                                  groupActive && "text-[#1f8f4f]",
+                                )}
+                              >
+                                <GroupIcon size={14} />
+                                <span className="min-w-0 flex-1 truncate">{group.label}</span>
+                              </div>
+                              <div className="space-y-1">
+                                {group.items.map((item) => {
+                                  const ItemIcon = iconMap[item.icon];
+
+                                  return (
+                                    <Link
+                                      className={cn(
+                                        "flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-[#435247] transition hover:bg-[#eef8f0] hover:text-[#1f8f4f]",
+                                        item.active &&
+                                          "bg-[#1f8f4f] text-white hover:bg-[#1f8f4f] hover:text-white",
+                                      )}
+                                      href={sectionHref(item.section)}
+                                      key={item.section}
+                                      onClick={() => setHorizontalOpenGroup(null)}
+                                      role="menuitem"
+                                      title={item.label}
+                                    >
+                                      <ItemIcon size={15} />
+                                      <span className="min-w-0 flex-1 truncate">
+                                        {item.label}
+                                      </span>
+                                    </Link>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
             {topBarActions ? (
               <div className="admin-shell-top-actions flex shrink-0 items-center gap-3">
@@ -516,6 +755,15 @@ export function AdminShell({
             width === "contained" && "mx-auto max-w-[1500px]",
           )}
         >
+          {layoutMode !== "horizontal" &&
+          layoutMode !== "content-full" &&
+          topBarActions ? (
+            <div className="admin-shell-toolbar sticky top-0 z-10 border-b border-[#dbe6dc] bg-white/95 px-7 py-3 shadow-sm backdrop-blur dark:border-[#1f3a28] dark:bg-[#07130c]/95">
+              <div className="admin-shell-toolbar-actions flex min-h-14 items-center justify-end gap-3">
+                {topBarActions}
+              </div>
+            </div>
+          ) : null}
           {children}
         </div>
       </div>

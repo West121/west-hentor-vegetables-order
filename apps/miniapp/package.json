@@ -6,6 +6,8 @@
     "prebuild": "pnpm --filter @hentor/shared build",
     "build": "taro build --type weapp --env production",
     "build:dev": "taro build --type weapp --env development",
+    "build:test": "taro build --type weapp --env development",
+    "build:prod": "taro build --type weapp --env production",
     "dev:weapp": "taro build --type weapp --env development --watch",
     "lint": "tsc --noEmit",
     "test": "vitest run",

@@ -3,6 +3,9 @@ import Taro from "@tarojs/taro";
 import { ACTIVE_STORE_CODE_KEY } from "./stores";
 
 export const MINI_SESSION_TOKEN_KEY = "mini_session_token";
+export const MINI_SESSION_LOGGED_OUT_KEY = "mini_session_logged_out";
+export const MINI_PROFILE_COMPLETION_PROMPT_KEY =
+  "mini_profile_completion_prompt";
 
 type ApiResponse<T> = {
   data?: T;
@@ -18,6 +21,9 @@ type MiniLoginData = {
     code: string;
   };
   token: string;
+  user?: {
+    profileIncomplete?: boolean;
+  };
 };
 
 export type MiniSessionOptions = {
@@ -38,6 +44,19 @@ export function buildWxSessionLoginUrl(apiBaseUrl: string) {
 
 export function getStoredMiniSessionToken() {
   return (Taro.getStorageSync(MINI_SESSION_TOKEN_KEY) as string | undefined)?.trim() ?? "";
+}
+
+export function isMiniSessionLoggedOut() {
+  return Taro.getStorageSync(MINI_SESSION_LOGGED_OUT_KEY) === "1";
+}
+
+export function clearMiniSessionLogout() {
+  Taro.removeStorageSync(MINI_SESSION_LOGGED_OUT_KEY);
+}
+
+export function rememberMiniSessionLogout() {
+  Taro.removeStorageSync(MINI_SESSION_TOKEN_KEY);
+  Taro.setStorageSync(MINI_SESSION_LOGGED_OUT_KEY, "1");
 }
 
 export function redirectToMiniLogin() {
@@ -64,6 +83,7 @@ export async function refreshMiniSessionToken({
   });
   const token = response.data.data?.token;
   if (response.statusCode >= 200 && response.statusCode < 300 && token) {
+    clearMiniSessionLogout();
     Taro.setStorageSync(MINI_SESSION_TOKEN_KEY, token);
     if (response.data.data?.store.code) {
       Taro.setStorageSync(ACTIVE_STORE_CODE_KEY, response.data.data.store.code);
@@ -78,6 +98,9 @@ export async function getMiniSessionToken(options: MiniSessionOptions) {
   const storedToken = getStoredMiniSessionToken();
   if (storedToken) {
     return storedToken;
+  }
+  if (isMiniSessionLoggedOut()) {
+    throw new Error("请先登录");
   }
   return refreshMiniSessionToken(options);
 }

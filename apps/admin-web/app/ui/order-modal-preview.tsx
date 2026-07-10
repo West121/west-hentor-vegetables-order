@@ -5,7 +5,7 @@ import { useState } from "react";
 
 export function OrderModalPreview() {
   const [open, setOpen] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(true);
 
   return (
     <>

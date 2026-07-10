@@ -97,6 +97,7 @@ describe("system settings", () => {
     await expect(
       getSystemSettings({ storeId: fixture.store.id }),
     ).resolves.toMatchObject({
+      adminSystemName: "HanYang Fresh",
       aboutText: "社区蔬菜配送说明",
       cutoffTime: "18:00",
       customerServiceTel: "400-100-2000",
@@ -115,6 +116,7 @@ describe("system settings", () => {
     const fixture = await createFixture();
 
     const settings = await updateSystemSettings({
+      adminSystemName: " HanYang Fresh ",
       aboutText: "门店配送范围：莲花小区。",
       cutoffTime: "17:30",
       customerServiceTel: "400-222-3333",
@@ -131,6 +133,7 @@ describe("system settings", () => {
     });
 
     expect(settings).toMatchObject({
+      adminSystemName: "HanYang Fresh",
       aboutText: "门店配送范围：莲花小区。",
       cutoffTime: "17:30",
       customerServiceTel: "400-222-3333",
@@ -169,6 +172,7 @@ describe("system settings", () => {
       }),
     ).resolves.toEqual([
       { key: "about_text", value: "门店配送范围：莲花小区。" },
+      { key: "admin_system_name", value: "HanYang Fresh" },
       { key: "customer_service_tel", value: "400-222-3333" },
       { key: "cutoff_time", value: "17:30" },
       { key: "login_image_url", value: "/uploads/login.jpg" },
@@ -196,9 +200,14 @@ describe("system settings", () => {
 
     await expect(
       updateSystemSettings({
+        adminSystemName: "HanYang Fresh",
         aboutText: "",
         cutoffTime: "24:10",
         customerServiceTel: "",
+        loginImageUrl: "",
+        loginSubtitle: "",
+        loginTitle: "",
+        loginWelcome: "",
         operatorId: fixture.admin.id,
         privacyPolicyUrl: "",
         storeId: fixture.store.id,

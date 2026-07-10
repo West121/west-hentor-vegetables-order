@@ -47,6 +47,33 @@
   min-width: 0;
 }
 
+.package-card__member {
+  align-items: center;
+  background: rgb(255 255 255 / 10%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0;
+  line-height: 16px;
+  max-width: 118px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px 8px;
+}
+
+.package-card__member-phone {
+  color: #fff;
+  flex: 0 1 auto;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 16px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .package-card__name {
   color: #ffd66b;
   flex: 1;

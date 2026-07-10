@@ -11,6 +11,7 @@ export type MemberFormState = {
     receiverPhone: string;
   };
   disabledReason: string;
+  nickname: string;
   remark: string;
   status: MemberBindingStatus;
 };
@@ -45,6 +46,7 @@ export function buildMemberFormState(member: MemberFormItem): MemberFormState {
       receiverPhone: member.defaultAddress?.receiverPhone ?? member.phone ?? "",
     },
     disabledReason: member.disabledReason ?? "",
+    nickname: member.nickname ?? "",
     remark: member.remark ?? "",
     status: member.bindingStatus,
   };
@@ -67,6 +69,7 @@ export function hasUnsavedMemberModalChanges({
     current.defaultAddress.receiverPhone !==
       initial.defaultAddress.receiverPhone ||
     current.disabledReason !== initial.disabledReason ||
+    current.nickname !== initial.nickname ||
     current.remark !== initial.remark ||
     current.status !== initial.status
   );

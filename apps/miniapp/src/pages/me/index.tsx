@@ -3,9 +3,11 @@ import Taro, { useDidShow } from "@tarojs/taro";
 import { useState } from "react";
 
 import {
-  MINI_SESSION_TOKEN_KEY,
   getMiniSessionToken,
   isUnauthorizedMiniResponse,
+  MINI_PROFILE_COMPLETION_PROMPT_KEY,
+  MINI_SESSION_TOKEN_KEY,
+  rememberMiniSessionLogout,
   redirectToMiniLogin,
   refreshMiniSessionToken,
   requestWithMiniSession,
@@ -14,6 +16,7 @@ import { getAgreementEntry } from "../../lib/agreements";
 import { MiniCustomTop } from "../../components/mini-custom-top";
 import loginVegetablesImage from "../../assets/login-vegetables.jpg";
 import { getMemberLockNotice, getPackageUsageStats } from "../../lib/me";
+import { resolveMediaUrl } from "../../lib/media";
 import {
   ACTIVE_STORE_CODE_KEY,
   buildMiniappAccountAvatarUrl,
@@ -22,11 +25,11 @@ import {
   buildStoreSettingsUrl,
   getActiveStoreCode,
 } from "../../lib/stores";
+import { useMiniappShare } from "../../lib/share";
 
 import "./index.scss";
 
-const API_BASE_URL =
-  process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
+import { API_BASE_URL } from "../../lib/api-base-url";
 const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 
 type ApiResponse<T> = {
@@ -84,7 +87,9 @@ type MeData = {
 };
 
 type PublicSettings = {
+  privacyPolicyContent: string;
   privacyPolicyUrl: string;
+  userAgreementContent: string;
   userAgreementUrl: string;
 };
 
@@ -100,39 +105,12 @@ type UploadImageData = {
   };
 };
 
-function maskPhone(phone?: string | null) {
-  if (!phone || phone.length < 7) {
-    return phone ?? "未绑定手机号";
-  }
-
-  return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
-}
-
 function memberStatusLabel(member?: MeData["member"]) {
   if (member?.bindingStatus === "DISABLED" || member?.status === "DISABLED") {
     return "已停用";
   }
 
   return "正常会员";
-}
-
-function resolveMediaUrl(url?: string | null) {
-  const normalized = url?.trim();
-  if (!normalized) {
-    return "";
-  }
-  if (
-    normalized.startsWith("http://") ||
-    normalized.startsWith("https://") ||
-    normalized.startsWith("wxfile://") ||
-    normalized.startsWith("data:")
-  ) {
-    return normalized;
-  }
-  if (normalized.startsWith("/")) {
-    return `${API_BASE_URL.replace(/\/+$/, "")}${normalized}`;
-  }
-  return normalized;
 }
 
 function parseUploadResponse(data: string) {
@@ -147,16 +125,21 @@ function parseUploadResponse(data: string) {
 }
 
 export default function MePage() {
+  useMiniappShare(DEFAULT_STORE_CODE);
+
   const [data, setData] = useState<MeData | null>(null);
   const [settings, setSettings] = useState<PublicSettings>({
+    privacyPolicyContent: "",
     privacyPolicyUrl: "",
+    userAgreementContent: "",
     userAgreementUrl: "",
   });
   const [loading, setLoading] = useState(true);
   const [nicknameModalOpen, setNicknameModalOpen] = useState(false);
   const [avatarDraft, setAvatarDraft] = useState("");
-  const [avatarUploading, setAvatarUploading] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState("");
+  const [profileCompletionMode, setProfileCompletionMode] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [nicknameSaving, setNicknameSaving] = useState(false);
 
   async function loadPublicSettings() {
@@ -190,21 +173,27 @@ export default function MePage() {
         Taro.getStorageSync(ACTIVE_STORE_CODE_KEY) as string | undefined,
         DEFAULT_STORE_CODE,
       );
-
-      const response = await requestWithMiniSession<MeData>({
+      const token = await getMiniSessionToken({
         apiBaseUrl: API_BASE_URL,
         storeCode,
-        request: (token) =>
-          Taro.request<ApiResponse<MeData>>({
-            header: { authorization: `Bearer ${token}` },
-            method: "GET",
-            url: buildMiniappMeUrl({
-              apiBaseUrl: API_BASE_URL,
-              storeCode,
-            }),
-          }),
+      });
+
+      const response = await Taro.request<ApiResponse<MeData>>({
+        header: { authorization: `Bearer ${token}` },
+        method: "GET",
+        url: buildMiniappMeUrl({
+          apiBaseUrl: API_BASE_URL,
+          storeCode,
+        }),
       });
       const payload = response.data;
+
+      if (isUnauthorizedMiniResponse(payload)) {
+        Taro.removeStorageSync(MINI_SESSION_TOKEN_KEY);
+        setData(null);
+        await loadPublicSettings();
+        return;
+      }
 
       if (!payload.success || !payload.data) {
         throw new Error(payload.error?.message ?? "我的数据加载失败");
@@ -212,11 +201,10 @@ export default function MePage() {
 
       setData(payload.data);
       await loadPublicSettings();
+      maybeOpenProfileCompletion(payload.data);
     } catch (error) {
-      Taro.showToast({
-        icon: "none",
-        title: error instanceof Error ? error.message : "我的数据加载失败",
-      });
+      setData(null);
+      await loadPublicSettings();
     } finally {
       setLoading(false);
     }
@@ -226,7 +214,11 @@ export default function MePage() {
     void loadMe();
   });
 
-  const memberName = data?.member?.nickname || "微信会员";
+  const isLoggedIn = Boolean(data?.member);
+  const memberPhone = data?.member?.phone?.trim() ?? "";
+  const memberName = isLoggedIn
+    ? data?.member?.nickname?.trim() || "微信用户"
+    : "未登录";
   const packageInfo = data?.currentPackage;
   const pendingOrder = data?.recentOrders.find((order) => order.canEdit);
   const lockNotice = getMemberLockNotice(data?.member);
@@ -256,10 +248,20 @@ export default function MePage() {
       onClick: () => void openAccountSettings(),
     },
   ];
-  const memberMeta = `${maskPhone(data?.member?.phone)} · ${memberStatusLabel(data?.member)}`;
+  const memberMeta = isLoggedIn
+    ? memberPhone || "未绑定手机号"
+    : "登录后查看套餐和订单";
+  const memberPackageMeta = isLoggedIn
+    ? memberStatusLabel(data?.member)
+    : "登录后查看套餐等级";
 
-  function openAgreement(label: string, url?: string | null) {
-    const entry = getAgreementEntry(label, url);
+  function openAgreement(
+    label: string,
+    url: string | null | undefined,
+    content: string | null | undefined,
+    type: "privacy" | "user",
+  ) {
+    const entry = getAgreementEntry(label, url, content, type);
     if (entry.disabled || !entry.url) {
       Taro.showToast({
         icon: "none",
@@ -272,29 +274,70 @@ export default function MePage() {
   }
 
   function openProfileEditor() {
+    if (!isLoggedIn) {
+      goLogin();
+      return;
+    }
+
     setAvatarDraft(data?.member?.avatarUrl ?? "");
     setNicknameDraft(data?.member?.nickname ?? "");
+    setProfileCompletionMode(false);
     setNicknameModalOpen(true);
   }
 
-  function openNicknameEditor() {
-    openProfileEditor();
+  function openProfileCompletionEditor(nextData: MeData) {
+    setAvatarDraft(nextData.member?.avatarUrl ?? "");
+    setNicknameDraft(nextData.member?.nickname ?? "");
+    setProfileCompletionMode(true);
+    setNicknameModalOpen(true);
+  }
+
+  function maybeOpenProfileCompletion(nextData: MeData) {
+    const shouldPrompt =
+      Taro.getStorageSync(MINI_PROFILE_COMPLETION_PROMPT_KEY) === "1";
+    if (!shouldPrompt || !nextData.member) {
+      return;
+    }
+
+    Taro.removeStorageSync(MINI_PROFILE_COMPLETION_PROMPT_KEY);
+    if (!nextData.member.nickname || !nextData.member.avatarUrl) {
+      openProfileCompletionEditor(nextData);
+    }
+  }
+
+  function goLogin() {
+    Taro.navigateTo({ url: "/pages/login/index" });
   }
 
   async function openAccountSettings() {
+    if (!isLoggedIn) {
+      goLogin();
+      return;
+    }
+
     try {
       const result = await Taro.showActionSheet({
-        itemList: ["编辑资料", "用户协议", "隐私政策", "退出登录"],
+        itemList: ["设置头像", "用户协议", "隐私政策", "退出登录"],
       });
 
       if (result.tapIndex === 0) {
         openProfileEditor();
       }
       if (result.tapIndex === 1) {
-        openAgreement("用户协议", settings.userAgreementUrl);
+        openAgreement(
+          "用户协议",
+          settings.userAgreementUrl,
+          settings.userAgreementContent,
+          "user",
+        );
       }
       if (result.tapIndex === 2) {
-        openAgreement("隐私政策", settings.privacyPolicyUrl);
+        openAgreement(
+          "隐私政策",
+          settings.privacyPolicyUrl,
+          settings.privacyPolicyContent,
+          "privacy",
+        );
       }
       if (result.tapIndex === 3) {
         logout();
@@ -377,17 +420,11 @@ export default function MePage() {
     }
   }
 
-  async function saveProfile(value?: unknown) {
-    const nickname =
-      typeof value === "string" && value.trim()
-        ? value.trim()
-        : nicknameDraft.trim();
-    if (!nickname) {
-      Taro.showToast({ icon: "none", title: "请输入昵称" });
-      return;
-    }
-    if (nickname.length > 24) {
-      Taro.showToast({ icon: "none", title: "昵称最多 24 个字符" });
+  async function saveProfile() {
+    const avatarUrl = avatarDraft || data?.member?.avatarUrl || "";
+    const nickname = profileCompletionMode ? nicknameDraft.trim() : "";
+    if (!avatarUrl && !nickname) {
+      Taro.showToast({ icon: "none", title: "请选择头像或填写昵称" });
       return;
     }
 
@@ -409,7 +446,7 @@ export default function MePage() {
             ApiResponse<{ member: { avatarUrl?: string | null; nickname: string } }>
           >({
             data: {
-              avatarUrl: avatarDraft || data?.member?.avatarUrl || null,
+              avatarUrl,
               nickname,
               storeCode,
             },
@@ -420,16 +457,19 @@ export default function MePage() {
       });
 
       if (!response.data.success) {
-        throw new Error(response.data.error?.message ?? "昵称保存失败");
+        throw new Error(response.data.error?.message ?? "头像保存失败");
       }
 
       setNicknameModalOpen(false);
       await loadMe();
-      Taro.showToast({ icon: "success", title: "资料已更新" });
+      Taro.showToast({
+        icon: "success",
+        title: profileCompletionMode ? "资料已保存" : "头像已更新",
+      });
     } catch (error) {
       Taro.showToast({
         icon: "none",
-        title: error instanceof Error ? error.message : "资料保存失败",
+        title: error instanceof Error ? error.message : "头像保存失败",
       });
     } finally {
       Taro.hideLoading();
@@ -438,14 +478,14 @@ export default function MePage() {
   }
 
   function logout() {
-    Taro.removeStorageSync(MINI_SESSION_TOKEN_KEY);
+    rememberMiniSessionLogout();
     Taro.removeStorageSync("editing_order_id");
     setData(null);
     Taro.showToast({ icon: "success", title: "已退出登录" });
     Taro.navigateTo({ url: "/pages/login/index" });
   }
 
-  const memberAvatarUrl = resolveMediaUrl(data?.member?.avatarUrl);
+  const memberAvatarUrl = resolveMediaUrl(API_BASE_URL, data?.member?.avatarUrl);
 
   return (
     <View className="me">
@@ -471,20 +511,21 @@ export default function MePage() {
             <View className="profile__body">
               <View
                 className="profile__name"
-                hoverClass="profile__name--active"
-                onClick={openNicknameEditor}
               >
                 {memberName}
               </View>
-              <View className="profile__meta">{memberMeta}</View>
+              <View className="profile__meta">
+                <Text className="profile__meta-line">{memberMeta}</Text>
+                <Text className="profile__meta-line">{memberPackageMeta}</Text>
+              </View>
             </View>
           </View>
+          <Image
+            className="profile-hero__image"
+            mode="aspectFill"
+            src={loginVegetablesImage}
+          />
         </View>
-        <Image
-          className="profile-hero__image"
-          mode="aspectFill"
-          src={loginVegetablesImage}
-        />
       </View>
 
       {lockNotice ? (
@@ -498,6 +539,18 @@ export default function MePage() {
 
       {loading && !data ? (
         <View className="card card--muted">正在加载会员信息...</View>
+      ) : !isLoggedIn ? (
+        <View className="member-card member-card--guest">
+          <View className="member-card__head">
+            <View>
+              <View className="member-card__label">登录后查看套餐</View>
+              <View className="member-card__title">查看订单、套餐、地址和账号资料</View>
+            </View>
+            <Text className="member-card__button" onClick={goLogin}>
+              登录
+            </Text>
+          </View>
+        </View>
       ) : (
         <View className="member-card">
           <View className="member-card__head">
@@ -554,9 +607,13 @@ export default function MePage() {
             <View className="nickname-panel__handle" />
             <View className="nickname-panel__head">
               <View>
-                <View className="nickname-panel__title">编辑资料</View>
+                <View className="nickname-panel__title">
+                  {profileCompletionMode ? "完善资料" : "设置头像"}
+                </View>
                 <View className="nickname-panel__meta">
-                  设置头像和昵称
+                  {profileCompletionMode
+                    ? "头像和昵称可先跳过，后续仍可继续使用"
+                    : "昵称由会员资料同步，不在小程序内修改"}
                 </View>
               </View>
               <Text
@@ -567,10 +624,9 @@ export default function MePage() {
               </Text>
             </View>
             <Form
-              onSubmit={(event) => {
-                const value = event.detail.value as { nickname?: string };
+              onSubmit={() => {
                 if (!nicknameSaving) {
-                  void saveProfile(value.nickname);
+                  void saveProfile();
                 }
               }}
             >
@@ -581,11 +637,17 @@ export default function MePage() {
                   openType="chooseAvatar"
                   onChooseAvatar={handleAvatarChoose}
                 >
-                  {resolveMediaUrl(avatarDraft || data?.member?.avatarUrl) ? (
+                  {resolveMediaUrl(
+                    API_BASE_URL,
+                    avatarDraft || data?.member?.avatarUrl,
+                  ) ? (
                     <Image
                       className="profile-editor__avatar-image"
                       mode="aspectFill"
-                      src={resolveMediaUrl(avatarDraft || data?.member?.avatarUrl)}
+                      src={resolveMediaUrl(
+                        API_BASE_URL,
+                        avatarDraft || data?.member?.avatarUrl,
+                      )}
                     />
                   ) : (
                     <Text>{memberName.slice(0, 1)}</Text>
@@ -598,37 +660,19 @@ export default function MePage() {
                   </View>
                 </View>
               </View>
-              <View className="nickname-panel__label">
-                昵称<Text className="required-mark">*</Text>
-              </View>
-              <Input
-                className="nickname-panel__input"
-                maxlength={24}
-                name="nickname"
-                onBlur={(event) => {
-                  setNicknameDraft(String(event.detail.value ?? ""));
-                }}
-                onConfirm={(event) => {
-                  setNicknameDraft(String(event.detail.value ?? ""));
-                }}
-                onInput={(event) => {
-                  setNicknameDraft(String(event.detail.value ?? ""));
-                }}
-                onNickNameReview={(event) => {
-                  const detail = event.detail as
-                    | { pass?: boolean; timeout?: boolean }
-                    | undefined;
-                  if (detail?.pass === false && !detail.timeout) {
-                    Taro.showToast({
-                      icon: "none",
-                      title: "昵称审核未通过，请调整后再保存",
-                    });
-                  }
-                }}
-                placeholder="请输入昵称"
-                type="nickname"
-                value={nicknameDraft}
-              />
+              {profileCompletionMode ? (
+                <View className="profile-editor__nickname">
+                  <View className="profile-editor__nickname-label">昵称</View>
+                  <Input
+                    className="profile-editor__nickname-input"
+                    maxlength={32}
+                    onInput={(event) => setNicknameDraft(event.detail.value)}
+                    placeholder="请输入昵称"
+                    type="nickname"
+                    value={nicknameDraft}
+                  />
+                </View>
+              ) : null}
               <Button
                 className={
                   nicknameSaving
@@ -638,7 +682,11 @@ export default function MePage() {
                 disabled={nicknameSaving}
                 formType="submit"
               >
-                {nicknameSaving ? "保存中" : "保存资料"}
+                {nicknameSaving
+                  ? "保存中"
+                  : profileCompletionMode
+                    ? "保存资料"
+                    : "保存头像"}
               </Button>
             </Form>
           </View>

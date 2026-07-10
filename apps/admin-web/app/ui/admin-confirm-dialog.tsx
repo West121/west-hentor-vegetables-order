@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 type AdminConfirmDialogProps = {
   busy?: boolean;
   cancelLabel?: string;
+  confirmDisabled?: boolean;
   confirmLabel?: string;
   message: ReactNode;
   onCancel: () => void;
@@ -22,6 +23,7 @@ type AdminAlertDialogProps = {
 export function AdminConfirmDialog({
   busy,
   cancelLabel = "取消",
+  confirmDisabled = false,
   confirmLabel = "确认",
   message,
   onCancel,
@@ -38,6 +40,7 @@ export function AdminConfirmDialog({
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#07140c]/45 p-5">
       <div
         aria-modal="true"
+        data-admin-modal-shell
         className="w-full max-w-md overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl shadow-[#0f2418]/20"
         role="dialog"
       >
@@ -59,7 +62,7 @@ export function AdminConfirmDialog({
               "h-10 rounded-xl px-5 text-sm font-semibold transition disabled:opacity-60",
               confirmClass,
             ].join(" ")}
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             onClick={onConfirm}
             type="button"
           >
@@ -87,6 +90,7 @@ export function AdminAlertDialog({
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[#07140c]/45 p-5">
       <div
         aria-modal="true"
+        data-admin-modal-shell
         className="w-full max-w-md overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl shadow-[#0f2418]/20"
         role="alertdialog"
       >

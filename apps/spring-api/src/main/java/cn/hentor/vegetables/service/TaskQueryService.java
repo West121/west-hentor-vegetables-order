@@ -5,6 +5,7 @@ import cn.hentor.vegetables.dto.AdminSessionDto;
 import cn.hentor.vegetables.dto.PaginationDto;
 import cn.hentor.vegetables.dto.TaskCopyRequest;
 import cn.hentor.vegetables.dto.TaskDishDto;
+import cn.hentor.vegetables.dto.TaskDishInputDto;
 import cn.hentor.vegetables.dto.TaskItemDto;
 import cn.hentor.vegetables.dto.TaskListResponse;
 import cn.hentor.vegetables.dto.TaskRequest;
@@ -27,6 +28,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -147,7 +150,7 @@ public class TaskQueryService {
     task.setCreatedAt(now);
     task.setUpdatedAt(now);
     taskMapper.insertAdminTask(task);
-    replaceTaskDishes(task.getId(), input.dishIds());
+    replaceTaskDishes(task.getId(), input.dishes());
 
     writeOperationLog(
       operator.getId(),
@@ -193,7 +196,7 @@ public class TaskQueryService {
     update.setTag(input.tag());
     update.setUpdatedAt(LocalDateTime.now());
     taskMapper.updateAdminTask(update);
-    replaceTaskDishes(existing.getId(), input.dishIds());
+    replaceTaskDishes(existing.getId(), input.dishes());
 
     TaskEntity updated = requireTask(request.storeId(), existing.getId());
     List<TaskDishEntity> afterLinks = loadLinks(updated.getId());
@@ -218,6 +221,7 @@ public class TaskQueryService {
     NormalizedTaskInput input = normalizeTaskInput(
       new TaskRequest(
         request.cutoffTime(),
+        request.dishes(),
         request.dishIds(),
         request.endsAt(),
         request.name(),
@@ -243,7 +247,7 @@ public class TaskQueryService {
     copied.setCreatedAt(now);
     copied.setUpdatedAt(now);
     taskMapper.insertAdminTask(copied);
-    replaceTaskDishes(copied.getId(), input.dishIds());
+    replaceTaskDishes(copied.getId(), input.dishes());
 
     writeOperationLog(
       operator.getId(),
@@ -430,10 +434,13 @@ public class TaskQueryService {
       detail ? dish.getImageKey() : null,
       dish.getImageUrl(),
       dish.getName(),
+      zeroIfNull(link.getTotalWeightJin()),
       link.getSortOrder(),
       dish.getStatus(),
       detail ? dish.getStepJin() : null,
-      dish.getStockJin()
+      zeroIfNull(link.getTotalWeightJin()),
+      zeroIfNull(link.getTotalWeightJin()),
+      BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
     );
   }
 
@@ -459,9 +466,11 @@ public class TaskQueryService {
     String status = normalizeRequiredText(request.status(), "STATUS_INVALID", "任务状态不正确");
     validateStatus(status);
 
-    List<String> dishIds = normalizeDishIds(request.dishIds());
+    List<TaskDishInputDto> dishes = normalizeTaskDishes(request.dishes(), request.dishIds());
+    List<String> dishIds = dishes.stream().map(TaskDishInputDto::dishId).toList();
     return new NormalizedTaskInput(
       cutoffTime,
+      dishes,
       dishIds,
       request.endsAt(),
       name,
@@ -471,22 +480,46 @@ public class TaskQueryService {
     );
   }
 
-  private List<String> normalizeDishIds(List<String> input) {
-    if (input == null || input.isEmpty()) {
+  private List<TaskDishInputDto> normalizeTaskDishes(
+    List<TaskDishInputDto> dishes,
+    List<String> legacyDishIds
+  ) {
+    if (dishes != null && !dishes.isEmpty()) {
+      List<TaskDishInputDto> normalized = new ArrayList<>();
+      for (TaskDishInputDto value : dishes) {
+        String dishId = nullableText(value == null ? null : value.dishId());
+        if (!StringUtils.hasText(dishId)) {
+          throw new ApiException("DISH_IDS_INVALID", "请选择不重复的菜品", HttpStatus.BAD_REQUEST);
+        }
+        BigDecimal totalWeightJin = value.totalWeightJin();
+        if (totalWeightJin == null || totalWeightJin.compareTo(BigDecimal.ZERO) <= 0) {
+          throw new ApiException("TASK_DISH_WEIGHT_INVALID", "请输入菜品总重量", HttpStatus.BAD_REQUEST);
+        }
+        normalized.add(new TaskDishInputDto(dishId, totalWeightJin.setScale(2, RoundingMode.HALF_UP)));
+      }
+      ensureUniqueDishInputs(normalized);
+      return List.copyOf(normalized);
+    }
+
+    if (legacyDishIds == null || legacyDishIds.isEmpty()) {
       throw new ApiException("DISH_IDS_INVALID", "请选择不重复的菜品", HttpStatus.BAD_REQUEST);
     }
-    List<String> dishIds = new ArrayList<>();
-    for (String value : input) {
+    List<TaskDishInputDto> normalized = new ArrayList<>();
+    for (String value : legacyDishIds) {
       String dishId = nullableText(value);
       if (!StringUtils.hasText(dishId)) {
         throw new ApiException("DISH_IDS_INVALID", "请选择不重复的菜品", HttpStatus.BAD_REQUEST);
       }
-      dishIds.add(dishId);
+      normalized.add(new TaskDishInputDto(dishId, BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)));
     }
-    if (new LinkedHashSet<>(dishIds).size() != dishIds.size()) {
+    ensureUniqueDishInputs(normalized);
+    return List.copyOf(normalized);
+  }
+
+  private void ensureUniqueDishInputs(List<TaskDishInputDto> dishes) {
+    if (new LinkedHashSet<>(dishes.stream().map(TaskDishInputDto::dishId).toList()).size() != dishes.size()) {
       throw new ApiException("DISH_IDS_INVALID", "请选择不重复的菜品", HttpStatus.BAD_REQUEST);
     }
-    return List.copyOf(dishIds);
   }
 
   private void ensureTaskDishes(String storeId, List<String> dishIds) {
@@ -532,13 +565,15 @@ public class TaskQueryService {
     }
   }
 
-  private void replaceTaskDishes(String taskId, List<String> dishIds) {
+  private void replaceTaskDishes(String taskId, List<TaskDishInputDto> dishes) {
     taskDishMapper.deleteByTaskId(taskId);
-    for (int index = 0; index < dishIds.size(); index += 1) {
+    for (int index = 0; index < dishes.size(); index += 1) {
+      TaskDishInputDto input = dishes.get(index);
       TaskDishEntity link = new TaskDishEntity();
       link.setTaskId(taskId);
-      link.setDishId(dishIds.get(index));
+      link.setDishId(input.dishId());
       link.setSortOrder(index);
+      link.setTotalWeightJin(zeroIfNull(input.totalWeightJin()));
       taskDishMapper.insertTaskDish(link);
     }
   }
@@ -587,7 +622,7 @@ public class TaskQueryService {
   private Map<String, Object> taskLogValue(NormalizedTaskInput input) {
     Map<String, Object> value = new LinkedHashMap<>();
     value.put("cutoffTime", input.cutoffTime());
-    value.put("dishIds", input.dishIds());
+    value.put("dishes", input.dishes());
     value.put("endsAt", input.endsAt());
     value.put("name", input.name());
     value.put("startsAt", input.startsAt());
@@ -599,7 +634,12 @@ public class TaskQueryService {
   private Map<String, Object> taskLogValue(TaskEntity task, List<TaskDishEntity> links) {
     Map<String, Object> value = new LinkedHashMap<>();
     value.put("cutoffTime", task.getCutoffTime());
-    value.put("dishIds", links.stream().map(TaskDishEntity::getDishId).toList());
+    value.put("dishes", links.stream().map(link -> {
+      Map<String, Object> dish = new LinkedHashMap<>();
+      dish.put("dishId", link.getDishId());
+      dish.put("totalWeightJin", zeroIfNull(link.getTotalWeightJin()));
+      return dish;
+    }).toList());
     value.put("endsAt", task.getEndsAt());
     value.put("name", task.getName());
     value.put("startsAt", task.getStartsAt());
@@ -657,8 +697,15 @@ public class TaskQueryService {
     return UUID.randomUUID().toString().replace("-", "");
   }
 
+  private BigDecimal zeroIfNull(BigDecimal value) {
+    return value == null
+      ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+      : value.setScale(2, RoundingMode.HALF_UP);
+  }
+
   private record NormalizedTaskInput(
     String cutoffTime,
+    List<TaskDishInputDto> dishes,
     List<String> dishIds,
     LocalDateTime endsAt,
     String name,

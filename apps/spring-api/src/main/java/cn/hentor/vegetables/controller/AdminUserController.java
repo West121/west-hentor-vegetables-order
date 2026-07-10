@@ -15,6 +15,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -46,7 +47,7 @@ public class AdminUserController {
     @RequestParam(required = false) String status,
     @RequestParam(required = false) String storeId,
     @RequestParam(defaultValue = "1") long page,
-    @RequestParam(defaultValue = "20") long pageSize,
+    @RequestParam(defaultValue = "10") long pageSize,
     @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
     @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
     @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
@@ -121,6 +122,18 @@ public class AdminUserController {
     AdminSessionDto session = requireSession(authorization, tokenHeader, tokenCookie);
     requirePermission(session, "system.manage");
     return ApiResponse.ok(systemManagementService.resetAdminUserPassword(session, adminUserId, request));
+  }
+
+  @DeleteMapping("/{adminUserId}")
+  public ApiResponse<AdminUserListResponse> delete(
+    @PathVariable String adminUserId,
+    @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
+    @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
+  ) {
+    AdminSessionDto session = requireSession(authorization, tokenHeader, tokenCookie);
+    requirePermission(session, "system.manage");
+    return ApiResponse.ok(systemManagementService.deleteAdminUser(session, adminUserId));
   }
 
   private AdminSessionDto requireSession(String authorization, String tokenHeader, String tokenCookie) {

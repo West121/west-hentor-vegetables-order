@@ -16,7 +16,7 @@ describe("miniapp orders page interactions", () => {
     expect(source).toContain("MiniConfirmModal");
     expect(source).toContain("showConfirmDialog");
     expect(source).toContain('tone: "danger"');
-    expect(source).toContain("取消后会返还本次套餐次数和菜品库存");
+    expect(source).toContain("取消后会恢复本次套餐次数和附加权益");
     expect(source).not.toContain("openPendingActions");
     expect(source).not.toContain("showActionSheet");
     expect(source).not.toContain("showModal");

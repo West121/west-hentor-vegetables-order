@@ -69,6 +69,27 @@ describe("miniapp home page layout contract", () => {
     expect(source).toContain("place-items: center;");
   });
 
+  it("shows the member phone on the package card without masking it", () => {
+    const pageSource = readFileSync(
+      join(process.cwd(), "src/pages/home/index.tsx"),
+      "utf8",
+    );
+    const styleSource = readFileSync(
+      join(process.cwd(), "src/pages/home/index.scss"),
+      "utf8",
+    );
+
+    expect(pageSource).toContain("homeData?.member?.phone?.trim()");
+    expect(pageSource).toContain('className="package-card__member-phone"');
+    expect(pageSource).not.toContain("package-card__member-label");
+    expect(pageSource).not.toContain("maskPhone(homeData?.member?.phone");
+    expect(styleSource).toContain(".package-card__member-phone");
+    expect(styleSource).toContain("display: inline-flex;");
+    expect(styleSource).toContain("flex: 0 0 auto;");
+    expect(styleSource).toContain("max-width: 118px;");
+    expect(styleSource).not.toContain(".package-card__member-label");
+  });
+
   it("uses runtime system settings for dish columns instead of build-time env", () => {
     const source = readFileSync(
       join(process.cwd(), "src/pages/home/index.tsx"),
@@ -80,23 +101,51 @@ describe("miniapp home page layout contract", () => {
     expect(source).not.toContain("TARO_APP_HOME_DISH_COLUMNS");
   });
 
-  it("keeps home submission as create-only and prompts when today already has an order", () => {
+  it("keeps home submission as create-only and prompts once when selecting after an existing order", () => {
     const source = readFileSync(
       join(process.cwd(), "src/pages/home/index.tsx"),
       "utf8",
     );
 
     expect(source).toContain("今天已有订单");
-    expect(source).toContain("仍然提交");
+    expect(source).toContain("再来一单");
     expect(source).toContain("去修改");
+    expect(source).toContain("confirmExistingOrderBeforeSelection");
+    expect(source).toContain("existingOrderSelectionPromptShownRef");
     expect(source).toContain("MiniConfirmModal");
     expect(source).toContain("showConfirmDialog");
+    expect(source).toContain("await confirmExistingOrderBeforeSelection()");
     expect(source).not.toContain("去订单修改");
+    expect(source).not.toContain("仍然提交");
     expect(source).toContain("提交订单");
     expect(source).toContain("Taro.removeStorageSync(\"editing_order_id\")");
     expect(source).toContain("pages/order-edit/index");
     expect(source).not.toContain("Taro.setStorageSync(\"editing_order_id\"");
     expect(source).not.toContain("switchTab({ url: \"/pages/home/index\" })");
     expect(source).not.toContain("Taro.showModal");
+  });
+
+  it("preserves selected dishes when switching or adding an address", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/pages/home/index.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("preserveSelection?: boolean");
+    expect(source).toContain("if (!options?.preserveSelection)");
+    expect(source).toContain("loadHome({ preserveSelection: true, quiet: true })");
+  });
+
+  it("loads homepage content without forcing phone login on first open", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/pages/home/index.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("requestHomeData");
+    expect(source).toContain("getStoredMiniSessionToken");
+    expect(source).toContain("isUnauthorizedMiniResponse");
+    expect(source).toContain("memberInfo: homeData ? homeData.member : undefined");
+    expect(source).not.toContain("payload.error?.code === \"UNAUTHORIZED\"");
   });
 });

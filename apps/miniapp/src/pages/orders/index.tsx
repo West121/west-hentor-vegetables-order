@@ -20,10 +20,10 @@ import {
   type MiniConfirmTone,
 } from "../../components/mini-confirm-modal";
 import { ACTIVE_STORE_CODE_KEY, getActiveStoreCode } from "../../lib/stores";
+import { useMiniappShare } from "../../lib/share";
 import "./index.scss";
 
-const API_BASE_URL =
-  process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
+import { API_BASE_URL } from "../../lib/api-base-url";
 const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 
 type ApiResponse<T> = {
@@ -45,6 +45,30 @@ type OrderItem = {
   }>;
   logisticsNo: string | null;
   orderNo: string;
+  shipments?: Array<{
+    id: string;
+    logisticsNo: string | null;
+    packageName: string;
+    packageType: string;
+    status: string | null;
+    track?: {
+      events?: Array<{
+        content: string;
+        eventTime: string | null;
+      }>;
+      lastTraceTime?: string | null;
+      mapArrivalTime?: string | null;
+      mapMessage?: string | null;
+      mapRemainTime?: string | null;
+      mapStatus?: string | null;
+      mapSyncedAt?: string | null;
+      mapTotalTime?: string | null;
+      mapTrailUrl?: string | null;
+      stateText?: string | null;
+      subscribeMessage?: string | null;
+      subscribeStatus?: string | null;
+    } | null;
+  }>;
   status: string;
   totalWeightJin: number;
   userPackage: {
@@ -87,6 +111,8 @@ const STATUS_TONE_CLASSES: Record<string, string> = {
 };
 
 export default function OrdersPage() {
+  useMiniappShare(DEFAULT_STORE_CODE);
+
   const [data, setData] = useState<OrdersData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeStatus, setActiveStatus] =
@@ -168,7 +194,7 @@ export default function OrdersPage() {
     const confirmed = await showConfirmDialog({
       cancelText: "再想想",
       confirmText: "确认取消",
-      content: "取消后会返还本次套餐次数和菜品库存，确认取消这笔订单吗？",
+      content: "取消后会恢复本次套餐次数和附加权益，确认取消这笔订单吗？",
       title: "取消订单",
       tone: "danger",
     });
@@ -260,6 +286,42 @@ export default function OrdersPage() {
     });
   }
 
+  function copyTrackMapUrl(mapUrl?: string | null) {
+    if (!mapUrl) {
+      Taro.showToast({ icon: "none", title: "暂无地图" });
+      return;
+    }
+    Taro.setClipboardData({
+      data: mapUrl,
+      success: () => {
+        Taro.showToast({ icon: "none", title: "地图链接已复制" });
+      },
+    });
+  }
+
+  function shipmentTrackSummaries(order: OrderItem) {
+    return (order.shipments ?? []).filter(
+      (item) => item.logisticsNo || item.track,
+    ).map((shipment) => {
+      const track = shipment.track;
+      const latest = track?.events?.[0];
+      return {
+        logisticsNo: shipment.logisticsNo,
+        packageName: shipment.packageName,
+        mapMessage: track?.mapMessage ?? null,
+        mapTrailUrl: track?.mapTrailUrl ?? null,
+        mapSummary: track?.mapRemainTime
+          ? `剩余 ${track.mapRemainTime}`
+          : track?.mapArrivalTime
+            ? `预计 ${track.mapArrivalTime}`
+            : "物流地图",
+        stateText: track?.stateText ?? track?.subscribeStatus ?? "物流",
+        text: latest?.content ?? track?.subscribeMessage ?? "暂无轨迹更新",
+        time: latest?.eventTime ?? track?.lastTraceTime ?? null,
+      };
+    });
+  }
+
   const visibleOrders = useMemo(
     () => filterOrdersByStatus(data?.items ?? [], activeStatus),
     [activeStatus, data?.items],
@@ -298,7 +360,9 @@ export default function OrdersPage() {
         <View className="empty">当前分类暂无订单</View>
       ) : null}
 
-      {visibleOrders.map((order) => (
+      {visibleOrders.map((order) => {
+        const tracks = shipmentTrackSummaries(order);
+        return (
         <View className="order" key={order.id}>
           <View className="order__top">
             <View className="order__no">{order.orderNo}</View>
@@ -311,6 +375,40 @@ export default function OrdersPage() {
               .map((item) => `${item.dishNameSnapshot} ${item.weightJin}斤`)
               .join("、")}
           </View>
+          {tracks.length ? (
+            <View className="order__tracks">
+              {tracks.map((track) => (
+                <View
+                  className="order__track"
+                  key={`${track.packageName}-${track.logisticsNo ?? ""}`}
+                >
+                  <View className="order__track-head">
+                    <Text className="order__track-title">{track.packageName}</Text>
+                    <Text className="order__track-state">{track.stateText}</Text>
+                  </View>
+                  {track.logisticsNo ? (
+                    <Text className="order__track-no">{track.logisticsNo}</Text>
+                  ) : null}
+                  <Text className="order__track-text">{track.text}</Text>
+                  {track.time ? (
+                    <Text className="order__track-time">
+                      {formatMiniDateTimeMinute(track.time)}
+                    </Text>
+                  ) : null}
+                  {track.mapTrailUrl ? (
+                    <View
+                      className="order__track-map"
+                      onClick={() => copyTrackMapUrl(track.mapTrailUrl)}
+                    >
+                      {track.mapSummary}
+                    </View>
+                  ) : track.mapMessage ? (
+                    <Text className="order__track-map-note">{track.mapMessage}</Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : null}
           <View className="order__bottom">
             <View className="order__time">
               {formatMiniDateTimeMinute(order.createdAt)}
@@ -351,7 +449,8 @@ export default function OrdersPage() {
             </View>
           </View>
         </View>
-      ))}
+      );
+      })}
 
       {!loading && data?.items.length === 0 ? (
         <View className="empty">还没有订单，从首页提交预订后会显示在这里。</View>

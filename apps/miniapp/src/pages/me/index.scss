@@ -28,7 +28,8 @@
 .profile-hero__content {
   align-items: center;
   display: flex;
-  margin-top: 22px;
+  gap: 14px;
+  margin-top: 10px;
   position: relative;
   z-index: 1;
 }
@@ -37,19 +38,17 @@
   align-items: center;
   display: flex;
   gap: 14px;
-  max-width: calc(100% - 124px);
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .profile-hero__image {
   border-radius: 14px;
+  display: block;
+  flex: 0 0 104px;
   height: 72px;
   opacity: 0.94;
-  position: absolute;
-  right: 20px;
-  top: 84px;
   width: 104px;
-  z-index: 0;
 }
 
 .profile__avatar {
@@ -79,6 +78,7 @@
 }
 
 .profile__body {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -86,10 +86,9 @@
   font-size: 18px;
   font-weight: 800;
   line-height: 25px;
-  max-width: 176px;
   overflow: hidden;
   transition: opacity 120ms ease;
-  word-break: break-all;
+  white-space: nowrap;
 }
 
 .profile__meta {
@@ -97,9 +96,14 @@
   font-size: 11px;
   line-height: 16px;
   margin-top: 3px;
-  max-width: 176px;
   overflow: hidden;
-  word-break: break-all;
+}
+
+.profile__meta-line {
+  display: block;
+  line-height: 16px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .member-card {
@@ -653,6 +657,30 @@
   font-size: 12px;
   line-height: 18px;
   margin-top: 3px;
+}
+
+.profile-editor__nickname {
+  margin-top: -4px;
+}
+
+.profile-editor__nickname-label {
+  color: #102017;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 18px;
+  margin-bottom: 7px;
+}
+
+.profile-editor__nickname-input {
+  background: #fff;
+  border: 1px solid #dcebd9;
+  border-radius: 14px;
+  box-sizing: border-box;
+  color: #102017;
+  font-size: 15px;
+  height: 46px;
+  padding: 0 13px;
+  width: 100%;
 }
 
 .nickname-panel__input {

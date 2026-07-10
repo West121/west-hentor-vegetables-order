@@ -7,6 +7,7 @@ export default defineAppConfig({
     "pages/order-edit/index",
     "pages/packages/index",
     "pages/login/index",
+    "pages/agreement/index",
     "pages/webview/index",
   ],
   window: {

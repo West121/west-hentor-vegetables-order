@@ -2,6 +2,13 @@
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
+import { AdminSelect } from "./admin-select";
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100].map((value) => ({
+  label: `${value} 条/页`,
+  value: String(value),
+}));
+
 export type AdminPaginationMeta = {
   page: number;
   pageSize: number;
@@ -113,12 +120,14 @@ export function normalizeAdminListPayload<
 type AdminPaginationProps = {
   disabled?: boolean;
   onPageChange: (page: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
   pagination: AdminPaginationMeta;
 };
 
 export function AdminPagination({
   disabled = false,
   onPageChange,
+  onPageSizeChange,
   pagination,
 }: AdminPaginationProps) {
   const totalPages = Math.max(pagination.totalPages, 1);
@@ -133,6 +142,19 @@ export function AdminPagination({
         条，当前 {start}-{end} 条
       </div>
       <div className="flex items-center gap-2">
+        {onPageSizeChange ? (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-[#7a8a81]">每页</span>
+            <AdminSelect
+              contentLabel="每页数量"
+              disabled={disabled}
+              onChange={(value) => onPageSizeChange(Number(value))}
+              options={PAGE_SIZE_OPTIONS}
+              triggerClassName="h-9 w-[116px] border-[#dbe6dc] bg-white text-sm font-semibold"
+              value={String(pagination.pageSize)}
+            />
+          </div>
+        ) : null}
         <button
           className="inline-flex h-9 items-center gap-1 rounded-lg border border-[#dbe6dc] bg-white px-3 font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-45"
           disabled={disabled || page <= 1}

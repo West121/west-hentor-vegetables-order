@@ -23,7 +23,7 @@ try {
 `;
 
 export const metadata: Metadata = {
-  title: "Hentor Fresh 运营台",
+  title: "HanYang Fresh 运营台",
   description: "蔬菜预订系统管理后台",
 };
 

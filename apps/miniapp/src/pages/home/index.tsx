@@ -9,7 +9,12 @@ import {
   MiniConfirmModal,
   type MiniConfirmTone,
 } from "../../components/mini-confirm-modal";
-import { requestWithMiniSession } from "../../lib/auth";
+import {
+  getStoredMiniSessionToken,
+  isUnauthorizedMiniResponse,
+  MINI_SESSION_TOKEN_KEY,
+  requestWithMiniSession,
+} from "../../lib/auth";
 import {
   buildAddressListUrl,
   buildAddressRegionMultiPickerModel,
@@ -35,7 +40,7 @@ import {
   buildSelectedItems,
   changeBenefitSelection,
   changeDishSelection,
-  getDishDisplayImage,
+  getDishFallbackImageKey,
   getDisplayDishes,
   getEditingOrderResolution,
   getPackageCardCutoffBadge,
@@ -51,7 +56,9 @@ import {
   getUnavailableSelectedItems,
   isPastCutoff,
 } from "../../lib/home";
+import { resolveMediaUrl } from "../../lib/media";
 import { ACTIVE_STORE_CODE_KEY, getActiveStoreCode } from "../../lib/stores";
+import { useMiniappShare } from "../../lib/share";
 import cabbageImage from "../../assets/dishes/cabbage.jpg";
 import cucumberImage from "../../assets/dishes/cucumber.jpg";
 import eggImage from "../../assets/dishes/egg.png";
@@ -61,8 +68,7 @@ import spinachImage from "../../assets/dishes/spinach.jpg";
 import tomatoImage from "../../assets/dishes/tomato.jpg";
 import "./index.scss";
 
-const API_BASE_URL =
-  process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
+import { API_BASE_URL } from "../../lib/api-base-url";
 const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 const dishFallbackImages = {
   cabbage: cabbageImage,
@@ -134,13 +140,17 @@ type HomeData = {
     id: string;
     imageUrl: string | null;
     name: string;
+    remainingWeightJin?: number;
     stepJin: number;
     stockJin: number;
+    totalWeightJin?: number;
+    usedWeightJin?: number;
   }>;
   member: null | {
     bindingStatus?: string | null;
     disabledReason?: string | null;
     id: string;
+    phone?: string | null;
     status?: string | null;
   };
   package: null | {
@@ -223,6 +233,8 @@ const emptyAddressForm: AddressFormState = {
 };
 
 export default function HomePage() {
+  useMiniappShare(DEFAULT_STORE_CODE);
+
   const router = Taro.getCurrentInstance().router;
   const isEditPage = router?.path?.includes("pages/order-edit/index") ?? false;
   const routeEditingOrderId = isEditPage
@@ -255,6 +267,7 @@ export default function HomePage() {
   const confirmDialogResolverRef = useRef<
     ((confirmed: boolean) => void) | null
   >(null);
+  const existingOrderSelectionPromptShownRef = useRef(false);
 
   function showConfirmDialog(nextDialog: ConfirmDialogState) {
     return new Promise<boolean>((resolve) => {
@@ -270,7 +283,56 @@ export default function HomePage() {
     resolver?.(confirmed);
   }
 
-  async function loadHome(options?: { quiet?: boolean }) {
+  async function requestHomeData({
+    homeUrl,
+    isEditing,
+    storeCode,
+  }: {
+    homeUrl: string;
+    isEditing: boolean;
+    storeCode: string;
+  }) {
+    if (isEditing) {
+      return requestWithMiniSession<HomeData>({
+        apiBaseUrl: API_BASE_URL,
+        storeCode,
+        request: (token) =>
+          Taro.request<ApiResponse<HomeData>>({
+            url: homeUrl,
+            method: "GET",
+            header: {
+              authorization: `Bearer ${token}`,
+            },
+          }),
+      });
+    }
+
+    const storedToken = getStoredMiniSessionToken();
+    const response = await Taro.request<ApiResponse<HomeData>>({
+      url: homeUrl,
+      method: "GET",
+      header: storedToken
+        ? {
+            authorization: `Bearer ${storedToken}`,
+          }
+        : undefined,
+    });
+
+    if (storedToken && isUnauthorizedMiniResponse(response.data)) {
+      Taro.removeStorageSync(MINI_SESSION_TOKEN_KEY);
+      return Taro.request<ApiResponse<HomeData>>({
+        url: homeUrl,
+        method: "GET",
+      });
+    }
+
+    return response;
+  }
+
+  async function loadHome(options?: {
+    preserveSelection?: boolean;
+    quiet?: boolean;
+  }) {
     if (!options?.quiet) {
       setLoading(true);
     }
@@ -299,26 +361,14 @@ export default function HomePage() {
         storeCode,
       });
 
-      const response = await requestWithMiniSession<HomeData>({
-        apiBaseUrl: API_BASE_URL,
+      const response = await requestHomeData({
+        homeUrl,
+        isEditing: isEditPage,
         storeCode,
-        request: (token) =>
-          Taro.request<ApiResponse<HomeData>>({
-            url: homeUrl,
-            method: "GET",
-            header: {
-              authorization: `Bearer ${token}`,
-            },
-          }),
       });
       const payload = response.data;
 
       if (!payload.success || !payload.data) {
-        if (payload.error?.code === "UNAUTHORIZED") {
-          Taro.navigateTo({ url: "/pages/login/index" });
-          return;
-        }
-
         throw new Error(payload.error?.message ?? "首页数据加载失败");
       }
 
@@ -343,31 +393,34 @@ export default function HomePage() {
         }
       }
       setEditingOrderId(activeEditingOrderId);
-      setSelected(
-        activeEditingOrderId
-          ? payload.data.currentOrder?.items.reduce<Record<string, number>>(
-              (result, item) => ({
-                ...result,
-                [item.dishId]: item.weightJin,
-              }),
-              {},
-            ) ?? {}
-          : {},
-      );
-      setSelectedBenefits(
-        activeEditingOrderId
-          ? payload.data.currentOrder?.benefits?.reduce<Record<string, number>>(
-              (result, benefit) =>
-                benefit.userPackageBenefitId
-                  ? {
-                      ...result,
-                      [benefit.userPackageBenefitId]: benefit.quantity,
-                    }
-                  : result,
-              {},
-            ) ?? {}
-          : {},
-      );
+      if (!options?.preserveSelection) {
+        existingOrderSelectionPromptShownRef.current = false;
+        setSelected(
+          activeEditingOrderId
+            ? payload.data.currentOrder?.items.reduce<Record<string, number>>(
+                (result, item) => ({
+                  ...result,
+                  [item.dishId]: item.weightJin,
+                }),
+                {},
+              ) ?? {}
+            : {},
+        );
+        setSelectedBenefits(
+          activeEditingOrderId
+            ? payload.data.currentOrder?.benefits?.reduce<Record<string, number>>(
+                (result, benefit) =>
+                  benefit.userPackageBenefitId
+                    ? {
+                        ...result,
+                        [benefit.userPackageBenefitId]: benefit.quantity,
+                      }
+                    : result,
+                {},
+              ) ?? {}
+            : {},
+        );
+      }
     } catch (error) {
       Taro.showToast({
         title: error instanceof Error ? error.message : "首页数据加载失败",
@@ -405,7 +458,7 @@ export default function HomePage() {
     hasActiveTask: Boolean(homeData?.task),
     hasCurrentOrder: isEditPage && Boolean(homeData?.currentOrder),
     isPastCutoff: isPastCutoff(homeData?.store.cutoffTime),
-    memberInfo: homeData?.member,
+    memberInfo: homeData ? homeData.member : undefined,
     packageInfo,
   });
   const isEditingCurrentOrder = Boolean(
@@ -476,6 +529,7 @@ export default function HomePage() {
   const packageTotalTimes = packageInfo?.totalTimes ?? 0;
   const packageUsedTimes = packageInfo?.usedTimes ?? 0;
   const packageRemainingTimes = packageInfo?.remainingTimes ?? 0;
+  const memberPhone = homeData?.member?.phone?.trim() ?? "";
   const packageBenefits = getPackageBenefitDisplays(packageInfo?.benefits ?? []);
   const editableBenefitQuantityByPackageId =
     editableCurrentOrder?.benefits?.reduce<Record<string, number>>(
@@ -526,7 +580,11 @@ export default function HomePage() {
       : null;
 
   function getDishImage(dish: HomeData["dishes"][number]) {
-    return getDishDisplayImage(dish, dishFallbackImages);
+    const uploadedImageUrl = dish.imageUrl?.trim();
+    if (uploadedImageUrl) {
+      return resolveMediaUrl(API_BASE_URL, uploadedImageUrl);
+    }
+    return dishFallbackImages[getDishFallbackImageKey(dish.name)];
   }
 
   function getBenefitIcon(benefit: { kind?: string | null; name: string }) {
@@ -545,7 +603,31 @@ export default function HomePage() {
     return null;
   }
 
-  function changeDish(dish: HomeData["dishes"][number], delta: number) {
+  async function confirmExistingOrderBeforeSelection() {
+    if (
+      isEditPage ||
+      !homeData?.currentOrder ||
+      existingOrderSelectionPromptShownRef.current
+    ) {
+      return true;
+    }
+
+    existingOrderSelectionPromptShownRef.current = true;
+    const confirmed = await showConfirmDialog({
+      cancelText: "去修改",
+      confirmText: "再来一单",
+      content:
+        "你今天已有一笔订单。再来一单并提交会生成新订单，并再消耗一次套餐次数；如果只是调整原订单，请去订单列表修改。",
+      title: "今天已有订单",
+    });
+    if (!confirmed) {
+      Taro.navigateTo({ url: "/pages/orders/index" });
+      return false;
+    }
+    return true;
+  }
+
+  async function changeDish(dish: HomeData["dishes"][number], delta: number) {
     if (!reservationGate.canReserve) {
       Taro.showToast({
         title:
@@ -555,6 +637,13 @@ export default function HomePage() {
         icon: "none",
       });
       return;
+    }
+
+    if (delta > 0) {
+      const confirmed = await confirmExistingOrderBeforeSelection();
+      if (!confirmed) {
+        return;
+      }
     }
 
     const currentWeight = selected[dish.id] ?? 0;
@@ -567,7 +656,7 @@ export default function HomePage() {
       return;
     }
     if (delta > 0 && currentWeight + dish.stepJin > availableStockJin) {
-      Taro.showToast({ title: "菜品库存不足", icon: "none" });
+      Taro.showToast({ title: "当前菜品已售罄", icon: "none" });
       return;
     }
 
@@ -597,12 +686,19 @@ export default function HomePage() {
     }));
   }
 
-  function changePackageBenefit(
+  async function changePackageBenefit(
     benefit: NonNullable<HomeData["package"]>["benefits"][number],
     delta: number,
   ) {
     if (!reservationGate.canReserve) {
       return;
+    }
+
+    if (delta > 0) {
+      const confirmed = await confirmExistingOrderBeforeSelection();
+      if (!confirmed) {
+        return;
+      }
     }
 
     setSelectedBenefits((current) =>
@@ -664,6 +760,11 @@ export default function HomePage() {
   }
 
   function openAddressAction() {
+    if (!homeData?.member) {
+      Taro.navigateTo({ url: "/pages/login/index" });
+      return;
+    }
+
     if (!reservationAddress.id) {
       setAddressForm(emptyAddressForm);
       setAddressFormOpen(true);
@@ -724,7 +825,7 @@ export default function HomePage() {
 
       setSelectedAddress(item);
       setAddressSwitchOpen(false);
-      await loadHome({ quiet: true });
+      await loadHome({ preserveSelection: true, quiet: true });
       Taro.showToast({ icon: "success", title: "地址已切换" });
     } catch (error) {
       Taro.showToast({
@@ -837,7 +938,7 @@ export default function HomePage() {
       }
       setAddressFormOpen(false);
       setAddressForm(emptyAddressForm);
-      await loadHome({ quiet: true });
+      await loadHome({ preserveSelection: true, quiet: true });
       Taro.showToast({ icon: "success", title: "地址已保存" });
     } catch (error) {
       Taro.showToast({
@@ -851,6 +952,11 @@ export default function HomePage() {
   }
 
   async function submitOrder() {
+    if (!homeData?.member) {
+      Taro.navigateTo({ url: "/pages/login/index" });
+      return;
+    }
+
     if (!reservationGate.canReserve) {
       Taro.showToast({
         title:
@@ -883,20 +989,6 @@ export default function HomePage() {
     if (summary.isOverLimit) {
       Taro.showToast({ title: "已超过套餐额度", icon: "none" });
       return;
-    }
-
-    if (!isEditPage && homeData.currentOrder) {
-      const confirmed = await showConfirmDialog({
-        cancelText: "去修改",
-        confirmText: "仍然提交",
-        content:
-          "你今天已有一笔待发货订单。如需调整原订单，请到订单列表修改；继续提交会生成一笔新订单，并再消耗一次套餐次数。",
-        title: "今天已有订单",
-      });
-      if (!confirmed) {
-        Taro.navigateTo({ url: "/pages/orders/index" });
-        return;
-      }
     }
 
     setConfirmOpen(true);
@@ -1027,7 +1119,15 @@ export default function HomePage() {
         >
           <View className="package-card__content">
             <View className="package-card__head">
-              <View className="package-card__name">{packageInfo.name}</View>
+              <View className="package-card__member">
+                {memberPhone ? (
+                  <Text className="package-card__member-phone">{memberPhone}</Text>
+                ) : (
+                  <Text className="package-card__member-phone">
+                    {packageInfo.name}
+                  </Text>
+                )}
+              </View>
               <Text className="package-card__cutoff">
                 {getPackageCardCutoffBadge(homeData?.store.cutoffTime)}
               </Text>
@@ -1093,9 +1193,6 @@ export default function HomePage() {
             <View className="package-card__empty-meta">
               {reservationGate.emptyMessage}
             </View>
-            <View className="package-card__empty-reserve">
-              微信支付入口已预留
-            </View>
             <View className="package-card__progress">
               <View className="package-card__progress-fill package-card__progress-fill--empty" />
             </View>
@@ -1129,14 +1226,14 @@ export default function HomePage() {
                 <View className="dish-card__actions">
                   <Text
                     className="step-btn step-btn--minus"
-                    onClick={() => changeDish(dish, -dish.stepJin)}
+                    onClick={() => void changeDish(dish, -dish.stepJin)}
                   >
                     -
                   </Text>
                   <Text className="dish-card__weight">{weight}斤</Text>
                   <Text
                     className={soldOut ? "step-btn step-btn--disabled" : "step-btn"}
-                    onClick={() => changeDish(dish, dish.stepJin)}
+                    onClick={() => void changeDish(dish, dish.stepJin)}
                   >
                     +
                   </Text>
@@ -1166,7 +1263,7 @@ export default function HomePage() {
                 <View className="dish-card__actions">
                   <Text
                     className="step-btn step-btn--minus"
-                    onClick={() => changePackageBenefit(benefit, -1)}
+                    onClick={() => void changePackageBenefit(benefit, -1)}
                   >
                     -
                   </Text>
@@ -1180,7 +1277,7 @@ export default function HomePage() {
                         ? "step-btn step-btn--disabled"
                         : "step-btn"
                     }
-                    onClick={() => changePackageBenefit(benefit, 1)}
+                    onClick={() => void changePackageBenefit(benefit, 1)}
                   >
                     +
                   </Text>

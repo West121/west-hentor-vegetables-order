@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
+import { Button } from "@/components/ui/button";
 import {
   createAdminModalDragState,
   getBoundedAdminModalOffset,
@@ -36,7 +37,8 @@ import { AdminAlertDialog, AdminConfirmDialog } from "./admin-confirm-dialog";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import { hasAdminFormChanges } from "./admin-form-dirty";
 import { formatDateTimeSecond } from "./date-format";
-import { RequiredLabel } from "./required-mark";
+import { AdminFormField } from "./admin-form-field";
+import { AdminRadioGroup } from "./admin-radio-group";
 
 type StoreOption = {
   id: string;
@@ -60,7 +62,9 @@ export type KuaidiPrinterPanelItem = {
   payType: string | null;
   remark: string | null;
   requestParams: Record<string, unknown>;
+  senderAddress: string | null;
   senderCompany: string | null;
+  senderMobile: string | null;
   siid: string;
   sortOrder: number;
   status: PrinterStatus;
@@ -98,12 +102,16 @@ type FormState = {
   payType: string;
   remark: string;
   requestParamsText: string;
+  senderAddress: string;
   senderCompany: string;
+  senderMobile: string;
   siid: string;
   sortOrder: string;
   status: PrinterStatus;
   tempId: string;
 };
+
+type PrinterFormErrors = Partial<Record<keyof FormState, string>>;
 
 const STATUS_LABELS: Record<PrinterStatus, string> = {
   ACTIVE: "启用",
@@ -124,7 +132,9 @@ function emptyForm(): FormState {
     payType: "SHIPPER",
     remark: "",
     requestParamsText: "{}",
+    senderAddress: "",
     senderCompany: "",
+    senderMobile: "",
     siid: "",
     sortOrder: "0",
     status: "ACTIVE",
@@ -150,7 +160,9 @@ function buildForm(item: KuaidiPrinterPanelItem | null): FormState {
     payType: item.payType ?? "",
     remark: item.remark ?? "",
     requestParamsText: JSON.stringify(item.requestParams ?? {}, null, 2),
+    senderAddress: item.senderAddress ?? "",
     senderCompany: item.senderCompany ?? "",
+    senderMobile: item.senderMobile ?? "",
     siid: item.siid,
     sortOrder: String(item.sortOrder ?? 0),
     status: item.status,
@@ -176,18 +188,24 @@ function parseRequestParams(value: string) {
 }
 
 function validateForm(form: FormState) {
+  const errors: PrinterFormErrors = {};
   if (!form.name.trim()) {
-    return "请输入打印机名称";
+    errors.name = "请输入打印机名称";
   }
   if (!form.siid.trim()) {
-    return "请输入快递100打印机 siid";
+    errors.siid = "请输入面单打印 siid";
   }
   try {
     parseRequestParams(form.requestParamsText);
   } catch (caught) {
-    return caught instanceof Error ? caught.message : "请求参数 JSON 格式不正确";
+    errors.requestParamsText =
+      caught instanceof Error ? caught.message : "请求参数 JSON 格式不正确";
   }
-  return null;
+  return errors;
+}
+
+function hasPrinterFormErrors(errors: PrinterFormErrors) {
+  return Object.values(errors).some(Boolean);
 }
 
 function nowIso() {
@@ -205,12 +223,13 @@ export function KuaidiPrinterManagementPanel({
   const [summary, setSummary] = useState(initialSummary);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [formErrors, setFormErrors] = useState<PrinterFormErrors>({});
   const [initialForm, setInitialForm] = useState<FormState>(emptyForm);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<PrinterStatus | "ALL">("ALL");
   const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(true);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] =
@@ -220,6 +239,7 @@ export function KuaidiPrinterManagementPanel({
   async function reloadPrinters(
     page = pagination.page,
     filters = { query, statusFilter },
+    pageSize = pagination.pageSize,
   ) {
     if (!store) {
       return;
@@ -227,7 +247,7 @@ export function KuaidiPrinterManagementPanel({
 
     const params = new URLSearchParams({
       page: String(page),
-      pageSize: String(pagination.pageSize),
+      pageSize: String(pageSize),
       storeId: store.id,
     });
     if (filters.query.trim()) {
@@ -256,7 +276,7 @@ export function KuaidiPrinterManagementPanel({
       const next = normalizeAdminListPayload(
         result.data,
         initialSummary,
-        pagination.pageSize,
+        pageSize,
       );
       setItems(next.items);
       setPagination(next.pagination);
@@ -269,9 +289,10 @@ export function KuaidiPrinterManagementPanel({
   }
 
   function resetModalPosition() {
-    setFullscreen(false);
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setError(null);
+    setFormErrors({});
   }
 
   function openModal(item: KuaidiPrinterPanelItem | null, mode: ModalState["mode"]) {
@@ -297,10 +318,12 @@ export function KuaidiPrinterManagementPanel({
     }
     setModal(null);
     setError(null);
+    setFormErrors({});
   }
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+    setFormErrors((current) => ({ ...current, [key]: undefined }));
   }
 
   function handleHeaderPointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -336,8 +359,8 @@ export function KuaidiPrinterManagementPanel({
       return;
     }
     const validation = validateForm(form);
-    if (validation) {
-      setError(validation);
+    setFormErrors(validation);
+    if (hasPrinterFormErrors(validation)) {
       return;
     }
 
@@ -357,7 +380,9 @@ export function KuaidiPrinterManagementPanel({
         payType: nullable(form.payType),
         remark: nullable(form.remark),
         requestParams: parseRequestParams(form.requestParamsText),
+        senderAddress: nullable(form.senderAddress),
         senderCompany: nullable(form.senderCompany),
+        senderMobile: nullable(form.senderMobile),
         siid: form.siid.trim(),
         sortOrder: Number(form.sortOrder || 0),
         status: form.status,
@@ -398,7 +423,9 @@ export function KuaidiPrinterManagementPanel({
         payType: printer.payType ?? payload.payType,
         remark: printer.remark ?? payload.remark,
         requestParams: printer.requestParams ?? payload.requestParams,
+        senderAddress: printer.senderAddress ?? payload.senderAddress,
         senderCompany: printer.senderCompany ?? payload.senderCompany,
+        senderMobile: printer.senderMobile ?? payload.senderMobile,
         siid: printer.siid ?? payload.siid,
         sortOrder: printer.sortOrder ?? payload.sortOrder,
         status: (printer.status as PrinterStatus | undefined) ?? payload.status,
@@ -453,11 +480,11 @@ export function KuaidiPrinterManagementPanel({
           <div>
             <div className="flex items-center gap-2 text-sm font-semibold text-[#1f8f4f]">
               <Printer className="h-4 w-4" />
-              快递100打印机
+              面单打印
             </div>
             <h2 className="mt-2 text-2xl font-semibold tracking-normal">打印机管理</h2>
             <p className="mt-2 text-sm leading-6 text-[#66756d]">
-              配置快递100云打印参数，电子面单可按打印机选择生成。
+              配置面单打印参数，电子面单可按打印机选择生成。
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -558,6 +585,12 @@ export function KuaidiPrinterManagementPanel({
                     <div className="mt-1 text-xs text-[#66756d]">
                       {item.isDefault ? "默认打印机" : `排序 ${item.sortOrder}`}
                     </div>
+                    <div className="mt-1 max-w-[260px] truncate text-xs text-[#66756d]">
+                      发货：{item.senderAddress || "继承门店地址"}
+                    </div>
+                    <div className="mt-1 max-w-[260px] truncate text-xs text-[#66756d]">
+                      手机：{item.senderMobile || "继承门店电话"}
+                    </div>
                   </td>
                   <td className="px-5 py-4 text-[#405248]">
                     {item.kuaidicom || "继承默认"}
@@ -575,31 +608,37 @@ export function KuaidiPrinterManagementPanel({
                     {formatDateTimeSecond(item.updatedAt)}
                   </td>
                   <td className="px-5 py-4">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] text-[#1f8f4f]"
+                    <div className="flex flex-wrap justify-end gap-2 whitespace-nowrap">
+                      <Button
+                        className="border-[#cfe3d3] text-[#1f8f4f]"
                         onClick={() => openModal(item, "detail")}
-                        title="查看打印机"
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
-                        <Eye className="h-4 w-4" />
-                      </button>
-                      <button
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] text-[#1f8f4f]"
+                        <Eye data-icon="inline-start" />
+                        查看
+                      </Button>
+                      <Button
+                        className="border-[#cfe3d3] text-[#1f8f4f]"
                         onClick={() => openModal(item, "edit")}
-                        title="编辑打印机"
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 bg-red-50 text-red-600"
+                        <Pencil data-icon="inline-start" />
+                        编辑
+                      </Button>
+                      <Button
+                        className="border-red-100 text-red-600 hover:bg-red-50"
                         onClick={() => setConfirmDelete(item)}
-                        title="删除打印机"
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                        <Trash2 data-icon="inline-start" />
+                        删除
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -614,7 +653,14 @@ export function KuaidiPrinterManagementPanel({
             </tbody>
           </table>
         </div>
-        <AdminPagination pagination={pagination} onPageChange={(page) => reloadPrinters(page)} />
+        <AdminPagination
+          disabled={loadingList}
+          onPageChange={(page) => void reloadPrinters(page)}
+          onPageSizeChange={(nextPageSize) =>
+            void reloadPrinters(1, { query, statusFilter }, nextPageSize)
+          }
+          pagination={pagination}
+        />
       </div>
 
       {modal ? (
@@ -650,7 +696,7 @@ export function KuaidiPrinterManagementPanel({
                     ? "新建打印机"
                     : `${modal.mode === "detail" ? "详情" : "编辑"} · ${modal.item.name}`}
                 </h3>
-                <div className="mt-1 text-sm text-[#66756d]">快递100云打印参数</div>
+                <div className="mt-1 text-sm text-[#66756d]">面单打印参数</div>
               </div>
               <div
                 className="flex items-center gap-2"
@@ -677,24 +723,32 @@ export function KuaidiPrinterManagementPanel({
 
             <div className="flex-1 overflow-auto p-6">
               <div className="grid gap-4 md:grid-cols-2">
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>打印机名称</RequiredLabel>
-                  <input
-                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                    onChange={(event) => updateForm("name", event.target.value)}
-                    readOnly={readOnly}
-                    value={form.name}
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>siid</RequiredLabel>
-                  <input
-                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                    onChange={(event) => updateForm("siid", event.target.value)}
-                    readOnly={readOnly}
-                    value={form.siid}
-                  />
-                </label>
+                <AdminFormField
+                  error={formErrors.name}
+                  label="打印机名称"
+                  required
+                >
+                  {(invalid) => (
+                    <input
+                      aria-invalid={invalid}
+                      className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f] aria-invalid:border-red-500"
+                      onChange={(event) => updateForm("name", event.target.value)}
+                      readOnly={readOnly}
+                      value={form.name}
+                    />
+                  )}
+                </AdminFormField>
+                <AdminFormField error={formErrors.siid} label="siid" required>
+                  {(invalid) => (
+                    <input
+                      aria-invalid={invalid}
+                      className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f] aria-invalid:border-red-500"
+                      onChange={(event) => updateForm("siid", event.target.value)}
+                      readOnly={readOnly}
+                      value={form.siid}
+                    />
+                  )}
+                </AdminFormField>
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   快递公司编码
                   <input
@@ -786,6 +840,28 @@ export function KuaidiPrinterManagementPanel({
                   />
                 </label>
                 <label className="flex flex-col gap-2 text-sm font-medium">
+                  发货手机号
+                  <input
+                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    onChange={(event) =>
+                      updateForm("senderMobile", event.target.value.replace(/[^\d+\-\s]/g, ""))
+                    }
+                    placeholder="不填则使用门店电话"
+                    readOnly={readOnly}
+                    value={form.senderMobile}
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-medium">
+                  发货地址
+                  <input
+                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    onChange={(event) => updateForm("senderAddress", event.target.value)}
+                    placeholder="不填则使用门店地址"
+                    readOnly={readOnly}
+                    value={form.senderAddress}
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-medium">
                   排序
                   <input
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
@@ -796,24 +872,16 @@ export function KuaidiPrinterManagementPanel({
                 </label>
                 <div className="flex flex-col gap-2 text-sm font-medium">
                   状态
-                  <div className="grid h-11 grid-cols-2 gap-2 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-1">
-                    {(["ACTIVE", "DISABLED"] as const).map((status) => (
-                      <button
-                        className={[
-                          "rounded-lg text-sm font-semibold transition",
-                          form.status === status
-                            ? "bg-white text-[#1f8f4f] shadow-sm"
-                            : "text-[#66756d] hover:bg-white/70",
-                        ].join(" ")}
-                        disabled={readOnly}
-                        key={status}
-                        onClick={() => updateForm("status", status)}
-                        type="button"
-                      >
-                        {STATUS_LABELS[status]}
-                      </button>
-                    ))}
-                  </div>
+                  <AdminRadioGroup
+                    disabled={readOnly}
+                    name="kuaidi-printer-status"
+                    onChange={(status) => updateForm("status", status)}
+                    options={[
+                      { label: STATUS_LABELS.ACTIVE, value: "ACTIVE" },
+                      { label: STATUS_LABELS.DISABLED, value: "DISABLED" },
+                    ]}
+                    value={form.status}
+                  />
                 </div>
                 <label className="inline-flex items-center gap-3 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-3 text-sm font-medium">
                   <input
@@ -825,15 +893,23 @@ export function KuaidiPrinterManagementPanel({
                   />
                   设为默认打印机
                 </label>
-                <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
-                  额外请求参数 JSON
-                  <textarea
-                    className="min-h-32 rounded-xl border border-[#dbe6dc] px-3 py-3 font-mono text-sm outline-none focus:border-[#1f8f4f]"
-                    onChange={(event) => updateForm("requestParamsText", event.target.value)}
-                    readOnly={readOnly}
-                    value={form.requestParamsText}
-                  />
-                </label>
+                <AdminFormField
+                  className="md:col-span-2"
+                  error={formErrors.requestParamsText}
+                  label="额外请求参数 JSON"
+                >
+                  {(invalid) => (
+                    <textarea
+                      aria-invalid={invalid}
+                      className="min-h-32 rounded-xl border border-[#dbe6dc] px-3 py-3 font-mono text-sm outline-none focus:border-[#1f8f4f] aria-invalid:border-red-500"
+                      onChange={(event) =>
+                        updateForm("requestParamsText", event.target.value)
+                      }
+                      readOnly={readOnly}
+                      value={form.requestParamsText}
+                    />
+                  )}
+                </AdminFormField>
                 <label className="flex flex-col gap-2 text-sm font-medium md:col-span-2">
                   备注
                   <textarea

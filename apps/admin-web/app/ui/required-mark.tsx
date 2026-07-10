@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 export function RequiredMark() {
   return (
-    <span aria-hidden="true" className="ml-1 text-red-500">
+    <span aria-hidden="true" className="mr-1 text-red-500">
       *
     </span>
   );
@@ -11,8 +11,8 @@ export function RequiredMark() {
 export function RequiredLabel({ children }: { children: ReactNode }) {
   return (
     <span>
-      {children}
       <RequiredMark />
+      {children}
     </span>
   );
 }

@@ -8,6 +8,9 @@ public record MiniHomeDishDto(
   String category,
   BigDecimal stepJin,
   BigDecimal stockJin,
+  BigDecimal totalWeightJin,
+  BigDecimal usedWeightJin,
+  BigDecimal remainingWeightJin,
   String imageUrl,
   String description
 ) {}

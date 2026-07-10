@@ -2,6 +2,7 @@ package cn.hentor.vegetables.service;
 
 import cn.hentor.vegetables.common.ApiException;
 import cn.hentor.vegetables.common.PageResult;
+import cn.hentor.vegetables.dto.AdminOrderItemDto;
 import cn.hentor.vegetables.dto.AdminSessionDto;
 import cn.hentor.vegetables.dto.ImportFailureDto;
 import cn.hentor.vegetables.dto.UserPackageAdjustRequest;
@@ -19,8 +20,10 @@ import cn.hentor.vegetables.dto.UserPackageTemplateDto;
 import cn.hentor.vegetables.dto.UserPackageUserDto;
 import cn.hentor.vegetables.entity.AdminOperationLogEntity;
 import cn.hentor.vegetables.entity.AdminUserEntity;
+import cn.hentor.vegetables.entity.AddressEntity;
 import cn.hentor.vegetables.entity.MemberStoreBindingEntity;
 import cn.hentor.vegetables.entity.OrderEntity;
+import cn.hentor.vegetables.entity.OrderItemEntity;
 import cn.hentor.vegetables.entity.PackageOperationLogEntity;
 import cn.hentor.vegetables.entity.PackageTemplateBenefitEntity;
 import cn.hentor.vegetables.entity.PackageTemplateEntity;
@@ -30,7 +33,9 @@ import cn.hentor.vegetables.entity.UserPackageBenefitEntity;
 import cn.hentor.vegetables.entity.UserPackageEntity;
 import cn.hentor.vegetables.mapper.AdminOperationLogMapper;
 import cn.hentor.vegetables.mapper.AdminUserMapper;
+import cn.hentor.vegetables.mapper.AddressMapper;
 import cn.hentor.vegetables.mapper.MemberStoreBindingMapper;
+import cn.hentor.vegetables.mapper.OrderItemMapper;
 import cn.hentor.vegetables.mapper.OrderMapper;
 import cn.hentor.vegetables.mapper.PackageOperationLogMapper;
 import cn.hentor.vegetables.mapper.PackageTemplateBenefitMapper;
@@ -71,8 +76,11 @@ public class UserPackageQueryService {
 
   private final AdminOperationLogMapper adminOperationLogMapper;
   private final AdminUserMapper adminUserMapper;
+  private final AddressMapper addressMapper;
+  private final ChinaRegionService chinaRegionService;
   private final MemberStoreBindingMapper memberStoreBindingMapper;
   private final ObjectMapper objectMapper;
+  private final OrderItemMapper orderItemMapper;
   private final OrderMapper orderMapper;
   private final PackageOperationLogMapper packageOperationLogMapper;
   private final PackageTemplateBenefitMapper packageTemplateBenefitMapper;
@@ -85,8 +93,11 @@ public class UserPackageQueryService {
   public UserPackageQueryService(
     AdminOperationLogMapper adminOperationLogMapper,
     AdminUserMapper adminUserMapper,
+    AddressMapper addressMapper,
+    ChinaRegionService chinaRegionService,
     MemberStoreBindingMapper memberStoreBindingMapper,
     ObjectMapper objectMapper,
+    OrderItemMapper orderItemMapper,
     OrderMapper orderMapper,
     PackageOperationLogMapper packageOperationLogMapper,
     PackageTemplateBenefitMapper packageTemplateBenefitMapper,
@@ -98,8 +109,11 @@ public class UserPackageQueryService {
   ) {
     this.adminOperationLogMapper = adminOperationLogMapper;
     this.adminUserMapper = adminUserMapper;
+    this.addressMapper = addressMapper;
+    this.chinaRegionService = chinaRegionService;
     this.memberStoreBindingMapper = memberStoreBindingMapper;
     this.objectMapper = objectMapper;
+    this.orderItemMapper = orderItemMapper;
     this.orderMapper = orderMapper;
     this.packageOperationLogMapper = packageOperationLogMapper;
     this.packageTemplateBenefitMapper = packageTemplateBenefitMapper;
@@ -173,8 +187,32 @@ public class UserPackageQueryService {
       result.getCurrent(),
       result.getSize(),
       result.getTotal(),
-      totalPages
+      totalPages,
+      userPackageSummary(storeId)
     );
+  }
+
+  private Map<String, Long> userPackageSummary(String storeId) {
+    long active = countUserPackagesByStatus(storeId, "ACTIVE");
+    long frozen = countUserPackagesByStatus(storeId, "FROZEN");
+    long unavailable =
+      countUserPackagesByStatus(storeId, "EXPIRED") + countUserPackagesByStatus(storeId, "USED_UP");
+    return Map.of(
+      "active", active,
+      "expired", unavailable,
+      "frozen", frozen,
+      "total", countUserPackagesByStatus(storeId, null)
+    );
+  }
+
+  private long countUserPackagesByStatus(String storeId, String status) {
+    LambdaQueryWrapper<UserPackageEntity> wrapper = new LambdaQueryWrapper<UserPackageEntity>()
+      .eq(UserPackageEntity::getStoreId, storeId);
+    if (StringUtils.hasText(status)) {
+      wrapper.eq(UserPackageEntity::getStatus, status);
+    }
+    Long count = userPackageMapper.selectCount(wrapper);
+    return count == null ? 0 : count;
   }
 
   public UserPackageDetailResponse getUserPackage(String storeId, String packageId) {
@@ -193,6 +231,7 @@ public class UserPackageQueryService {
         .orderByDesc(OrderEntity::getCreatedAt)
         .last("LIMIT 10")
     );
+    Map<String, List<OrderItemEntity>> orderItemsByOrderId = loadOrderItemsByOrderId(orders);
     List<PackageOperationLogEntity> logs = packageOperationLogMapper.selectList(
       new LambdaQueryWrapper<PackageOperationLogEntity>()
         .eq(PackageOperationLogEntity::getUserPackageId, userPackage.getId())
@@ -238,6 +277,11 @@ public class UserPackageQueryService {
         .map(order -> new UserPackageRecentOrderDto(
           order.getCreatedAt(),
           order.getId(),
+          orderItemsByOrderId
+            .getOrDefault(order.getId(), List.of())
+            .stream()
+            .map(this::toOrderItemDto)
+            .toList(),
           order.getOrderNo(),
           order.getStatus(),
           order.getTotalWeightJin(),
@@ -260,6 +304,31 @@ public class UserPackageQueryService {
           );
         })
         .toList()
+    );
+  }
+
+  private Map<String, List<OrderItemEntity>> loadOrderItemsByOrderId(List<OrderEntity> orders) {
+    List<String> orderIds = orders.stream().map(OrderEntity::getId).toList();
+    if (orderIds.isEmpty()) {
+      return Map.of();
+    }
+
+    return orderItemMapper
+      .selectList(
+        new LambdaQueryWrapper<OrderItemEntity>()
+          .in(OrderItemEntity::getOrderId, orderIds)
+          .orderByAsc(OrderItemEntity::getId)
+      )
+      .stream()
+      .collect(Collectors.groupingBy(OrderItemEntity::getOrderId));
+  }
+
+  private AdminOrderItemDto toOrderItemDto(OrderItemEntity item) {
+    return new AdminOrderItemDto(
+      item.getDishId(),
+      item.getDishNameSnapshot(),
+      item.getId(),
+      item.getWeightJin()
     );
   }
 
@@ -351,7 +420,7 @@ public class UserPackageQueryService {
     }
 
     ImportUserPackageAccumulator result = new ImportUserPackageAccumulator(rows.size());
-    List<UserPackageImportRow> validRows = validateImportRows(rows, result.failures());
+    List<UserPackageImportRow> validRows = validateImportRows(rows, store, result.failures());
 
     for (UserPackageImportRow row : validRows) {
       List<PackageTemplateEntity> templates = findActiveTemplates(storeId, row.templateName());
@@ -390,7 +459,13 @@ public class UserPackageQueryService {
         continue;
       }
 
-      MemberStoreBindingEntity binding = findOrCreateBindingByPhone(storeId, row.phone(), result);
+      MemberStoreBindingEntity binding = findOrCreateBindingByPhone(
+        storeId,
+        row.phone(),
+        row.nickname(),
+        result
+      );
+      upsertImportedDefaultAddress(binding.getUserId(), storeId, row);
       String status = row.status() == null ? (usedTimes >= totalTimes ? "USED_UP" : "ACTIVE") : row.status();
       String reason = row.remark() == null ? "会员套餐导入" : row.remark();
       UserPackageEntity created = createImportedPackage(
@@ -571,6 +646,7 @@ public class UserPackageQueryService {
 
   private List<UserPackageImportRow> validateImportRows(
     List<UserPackageImportRow> rows,
+    StoreEntity store,
     List<ImportFailureDto> failures
   ) {
     Set<String> seenRows = new java.util.HashSet<>();
@@ -580,13 +656,33 @@ public class UserPackageQueryService {
       int rowNumber = row.rowNumber() == null ? index + 1 : row.rowNumber();
       String phone = normalizeImportedPhone(row.phone());
       String templateName = trimToNull(row.templateName());
+      String nickname = trimToNull(row.nickname());
+      ImportedAddress importedAddress = normalizeImportedAddress(row);
 
       if (!phone.matches("^1\\d{10}$")) {
         failures.add(new ImportFailureDto(trimToNull(row.phone()), "手机号格式不正确", rowNumber, templateName));
         continue;
       }
+      if (!StringUtils.hasText(nickname)) {
+        failures.add(new ImportFailureDto(phone, "昵称不能为空", rowNumber, templateName));
+        continue;
+      }
       if (!StringUtils.hasText(templateName)) {
         failures.add(new ImportFailureDto(phone, "套餐模板名称不能为空", rowNumber, null));
+        continue;
+      }
+      if (importedAddress == null) {
+        failures.add(new ImportFailureDto(phone, "地址不能为空，请填写省、市、区、详细地址", rowNumber, templateName));
+        continue;
+      }
+      String addressError = validateImportedAddress(importedAddress, store);
+      if (StringUtils.hasText(addressError)) {
+        failures.add(new ImportFailureDto(phone, addressError, rowNumber, templateName));
+        continue;
+      }
+      String receiverPhone = trimToNull(row.receiverPhone());
+      if (StringUtils.hasText(receiverPhone) && !normalizeImportedPhone(receiverPhone).matches("^1\\d{10}$")) {
+        failures.add(new ImportFailureDto(phone, "收货电话格式不正确", rowNumber, templateName));
         continue;
       }
       String duplicateKey = phone + ":" + templateName.toLowerCase();
@@ -613,7 +709,15 @@ public class UserPackageQueryService {
 
       seenRows.add(duplicateKey);
       validRows.add(new UserPackageImportRow(
+        null,
+        importedAddress.city(),
+        importedAddress.detail(),
+        importedAddress.district(),
+        nickname,
         phone,
+        importedAddress.province(),
+        trimToNull(row.receiverName()),
+        trimToNull(row.receiverPhone()),
         trimToNull(row.remark()),
         rowNumber,
         row.status(),
@@ -650,10 +754,12 @@ public class UserPackageQueryService {
   private MemberStoreBindingEntity findOrCreateBindingByPhone(
     String storeId,
     String phone,
+    String nickname,
     ImportUserPackageAccumulator result
   ) {
     MemberStoreBindingEntity existingBinding = findBindingByPhone(storeId, phone);
     if (existingBinding != null) {
+      updateImportedNickname(existingBinding.getUserId(), nickname, storeId);
       return existingBinding;
     }
 
@@ -668,6 +774,7 @@ public class UserPackageQueryService {
       user = new UserEntity();
       user.setId(id());
       user.setDefaultStoreId(storeId);
+      user.setNickname(nickname);
       user.setOpenid("imported-phone:" + phone);
       user.setPhone(phone);
       user.setStatus("ACTIVE");
@@ -675,12 +782,14 @@ public class UserPackageQueryService {
       user.setUpdatedAt(now);
       userMapper.insert(user);
       result.createdUsers += 1;
-    } else if (!StringUtils.hasText(user.getDefaultStoreId())) {
+    } else {
       UserEntity update = new UserEntity();
       update.setId(user.getId());
-      update.setDefaultStoreId(storeId);
+      update.setDefaultStoreId(StringUtils.hasText(user.getDefaultStoreId()) ? user.getDefaultStoreId() : storeId);
+      update.setNickname(nickname);
       update.setUpdatedAt(now);
       userMapper.updateById(update);
+      user = userMapper.selectById(user.getId());
     }
 
     MemberStoreBindingEntity binding = new MemberStoreBindingEntity();
@@ -695,6 +804,158 @@ public class UserPackageQueryService {
     memberStoreBindingMapper.insertAdminBinding(binding);
     result.createdBindings += 1;
     return binding;
+  }
+
+  private void updateImportedNickname(String userId, String nickname, String storeId) {
+    UserEntity user = userMapper.selectById(userId);
+    if (user == null || nickname == null || nickname.equals(user.getNickname())) {
+      return;
+    }
+    UserEntity update = new UserEntity();
+    update.setId(user.getId());
+    update.setDefaultStoreId(StringUtils.hasText(user.getDefaultStoreId()) ? user.getDefaultStoreId() : storeId);
+    update.setNickname(nickname);
+    update.setUpdatedAt(LocalDateTime.now());
+    userMapper.updateById(update);
+  }
+
+  private void upsertImportedDefaultAddress(String userId, String storeId, UserPackageImportRow row) {
+    LocalDateTime now = LocalDateTime.now();
+    AddressEntity existing = addressMapper.selectOne(
+      new LambdaQueryWrapper<AddressEntity>()
+        .eq(AddressEntity::getUserId, userId)
+        .eq(AddressEntity::getStoreId, storeId)
+        .eq(AddressEntity::getIsDefault, true)
+        .orderByDesc(AddressEntity::getUpdatedAt)
+        .last("LIMIT 1")
+    );
+    AddressEntity address = new AddressEntity();
+    address.setCity(row.city());
+    address.setDetail(row.detail());
+    address.setDistrict(row.district());
+    address.setIsDefault(true);
+    address.setProvince(row.province());
+    address.setReceiverName(StringUtils.hasText(row.receiverName()) ? row.receiverName() : row.nickname());
+    address.setReceiverPhone(StringUtils.hasText(row.receiverPhone()) ? normalizeImportedPhone(row.receiverPhone()) : row.phone());
+    address.setStoreId(storeId);
+    address.setUpdatedAt(now);
+
+    if (existing == null) {
+      address.setId(id());
+      address.setUserId(userId);
+      address.setCreatedAt(now);
+      addressMapper.clearOtherDefaults(address);
+      addressMapper.insert(address);
+      return;
+    }
+
+    address.setId(existing.getId());
+    address.setUserId(userId);
+    address.setCreatedAt(existing.getCreatedAt());
+    addressMapper.clearOtherDefaults(address);
+    addressMapper.updateMiniAddress(address);
+  }
+
+  private ImportedAddress normalizeImportedAddress(UserPackageImportRow row) {
+    String province = trimToNull(row.province());
+    String city = trimToNull(row.city());
+    String district = trimToNull(row.district());
+    String detail = trimToNull(row.detail());
+    if (
+      StringUtils.hasText(province) ||
+        StringUtils.hasText(city) ||
+        StringUtils.hasText(district) ||
+        StringUtils.hasText(detail)
+    ) {
+      return new ImportedAddress(province, city, district, detail);
+    }
+
+    String address = trimToNull(row.address());
+    if (!StringUtils.hasText(address)) {
+      return null;
+    }
+    return parseFullAddress(address);
+  }
+
+  private ImportedAddress parseFullAddress(String address) {
+    String remaining = address.trim().replaceAll("\\s+", "");
+    String province = null;
+    for (String candidate : chinaRegionService.provinceNames()) {
+      if (remaining.startsWith(candidate)) {
+        province = candidate;
+        remaining = remaining.substring(candidate.length());
+        break;
+      }
+    }
+    if (!StringUtils.hasText(province)) {
+      return new ImportedAddress(null, null, null, address);
+    }
+
+    String city = null;
+    if (chinaRegionService.isDirectCityProvince(province) && remaining.startsWith(province)) {
+      city = province;
+      remaining = remaining.substring(province.length());
+    } else if (chinaRegionService.isDirectCityProvince(province)) {
+      city = province;
+    } else {
+      city = takeRegionPart(remaining, List.of("自治州", "地区", "盟", "市", "州"));
+      if (StringUtils.hasText(city)) {
+        remaining = remaining.substring(city.length());
+      }
+    }
+
+    String district = takeRegionPart(remaining, List.of("自治县", "新区", "开发区", "区", "县", "市", "旗"));
+    if (StringUtils.hasText(district)) {
+      remaining = remaining.substring(district.length());
+    }
+    return new ImportedAddress(province, city, district, trimToNull(remaining));
+  }
+
+  private String takeRegionPart(String value, List<String> suffixes) {
+    if (!StringUtils.hasText(value)) {
+      return null;
+    }
+    int bestIndex = -1;
+    String bestSuffix = null;
+    for (String suffix : suffixes) {
+      int index = value.indexOf(suffix);
+      if (index >= 0 && (bestIndex < 0 || index < bestIndex)) {
+        bestIndex = index;
+        bestSuffix = suffix;
+      }
+    }
+    return bestIndex < 0 ? null : value.substring(0, bestIndex + bestSuffix.length());
+  }
+
+  private String validateImportedAddress(ImportedAddress address, StoreEntity store) {
+    if (!StringUtils.hasText(address.province())) {
+      return "地址省份不能为空";
+    }
+    if (!chinaRegionService.isValidProvince(address.province())) {
+      return "地址省份不正确：" + address.province();
+    }
+    if (!StringUtils.hasText(address.city())) {
+      return "地址城市不能为空";
+    }
+    if (!chinaRegionService.isValidCity(address.province(), address.city())) {
+      return "地址城市不正确：" + address.province() + " / " + address.city();
+    }
+    if (!StringUtils.hasText(address.district())) {
+      return "地址区县不能为空";
+    }
+    if (!chinaRegionService.isValidDistrict(address.province(), address.city(), address.district())) {
+      return "地址区县不正确：" + address.province() + " / " + address.city() + " / " + address.district();
+    }
+    if (!StringUtils.hasText(address.detail())) {
+      return "详细地址不能为空";
+    }
+
+    List<String> provinces = DeliveryRangeSupport.readJsonStringArray(objectMapper, store.getDeliveryProvinces());
+    List<String> cities = DeliveryRangeSupport.readJsonStringArray(objectMapper, store.getDeliveryCities());
+    if (!DeliveryRangeSupport.allows(address.province(), address.city(), provinces, cities)) {
+      return "地址不在配送范围内，仅配送：" + DeliveryRangeSupport.rangeText(provinces, cities);
+    }
+    return null;
   }
 
   private UserEntity findUserByPhone(String phone) {
@@ -990,6 +1251,13 @@ public class UserPackageQueryService {
   private String id() {
     return UUID.randomUUID().toString().replace("-", "");
   }
+
+  private record ImportedAddress(
+    String province,
+    String city,
+    String district,
+    String detail
+  ) {}
 
   private static class ImportUserPackageAccumulator {
     private int createdBindings = 0;

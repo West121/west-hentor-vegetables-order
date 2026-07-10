@@ -8,10 +8,12 @@ import {
   Minimize2,
   Pencil,
   ShieldCheck,
+  Trash2,
   UserPlus,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { Button } from "@/components/ui/button";
 import {
   createAdminModalDragState,
   getBoundedAdminModalOffset,
@@ -23,7 +25,7 @@ import {
   normalizeAdminListPayload,
   type AdminPaginationMeta,
 } from "./admin-pagination";
-import { AdminAlertDialog } from "./admin-confirm-dialog";
+import { AdminAlertDialog, AdminConfirmDialog } from "./admin-confirm-dialog";
 import { RequiredLabel } from "./required-mark";
 import {
   buildDetailPath,
@@ -32,6 +34,11 @@ import {
 } from "./detail-loaders";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import { hasAdminFormChanges } from "./admin-form-dirty";
+import { AdminSelect } from "./admin-select";
+import { AdminRadioGroup } from "./admin-radio-group";
+import { AdminFormField } from "./admin-form-field";
+import { AdminSearchMultiSelect } from "./admin-search-multi-select";
+import { validateNewAdminUsername } from "./admin-username-policy";
 import { formatDateTimeSecond } from "./date-format";
 
 type AdminStatus = "ACTIVE" | "DISABLED";
@@ -106,12 +113,17 @@ type FormState = {
   username: string;
 };
 
+type FormErrors = Partial<Record<keyof FormState, string>>;
+
 const STATUS_LABELS: Record<AdminStatus, string> = {
   ACTIVE: "启用",
   DISABLED: "停用",
 };
 
+const ADMIN_USER_STORE_SCOPE_LABEL = "系统数据";
 const ROLE_OPTIONS_ENDPOINT = "/api/admin/roles?page=1&pageSize=200";
+const ADMIN_USER_INPUT_CLASS =
+  "h-10 rounded-xl border border-[#dbe6dc] px-3 text-sm outline-none focus:border-[#1f8f4f] disabled:bg-[#f5f8f3] aria-invalid:border-red-500 aria-invalid:ring-2 aria-invalid:ring-red-100";
 
 type ApiResponse<T> = {
   data?: T;
@@ -151,40 +163,48 @@ function validateAdminUserForm(
   form: FormState,
   roleOptions: RoleOption[],
 ) {
+  const errors: FormErrors = {};
+
   if (mode === "password") {
-    return form.password.trim().length < 8 ? "新密码至少需要 8 位" : null;
+    if (form.password.trim().length < 8) {
+      errors.password = "新密码至少需要 8 位";
+    }
+    return errors;
   }
 
-  if (!form.username.trim()) {
-    return "请输入登录账号";
+  if (mode === "create") {
+    const usernameError = validateNewAdminUsername(form.username);
+    if (usernameError) {
+      errors.username = usernameError;
+    }
+  } else if (!form.username.trim()) {
+    errors.username = "请输入登录账号";
   }
   if (!form.name.trim()) {
-    return "请输入用户姓名";
+    errors.name = "请输入用户姓名";
   }
   if (mode === "create" && form.password.trim().length < 8) {
-    return "初始密码至少需要 8 位";
+    errors.password = "初始密码至少需要 8 位";
   }
   if (form.roleIds.length === 0) {
-    return "请选择后台角色";
+    errors.roleIds = "请选择后台角色";
   }
   if (!form.status) {
-    return "请选择用户状态";
+    errors.status = "请选择用户状态";
   }
   if (!hasAllDataScope(roleOptions, form.roleIds) && form.storeIds.length === 0) {
-    return "请选择至少一个数据范围";
+    errors.storeIds = "请选择至少一个数据范围";
   }
 
-  return null;
+  return errors;
+}
+
+function getFirstFormError(errors: FormErrors) {
+  return Object.values(errors).find(Boolean) ?? null;
 }
 
 function displayPhone(phone: string | null) {
   return phone ?? "未填写";
-}
-
-function toggleValue(values: string[], value: string) {
-  return values.includes(value)
-    ? values.filter((item) => item !== value)
-    : [...values, value];
 }
 
 function formatDataScope(
@@ -194,7 +214,11 @@ function formatDataScope(
   if (hasAllDataScope(roleOptions, item.roleIds)) {
     return "全部数据";
   }
-  return item.storeNames.length ? item.storeNames.join("、") : "未分配";
+  return item.storeNames.length ? ADMIN_USER_STORE_SCOPE_LABEL : "未分配";
+}
+
+function formatAssignableDataScopeLabel(_store: StoreOption) {
+  return ADMIN_USER_STORE_SCOPE_LABEL;
 }
 
 export function SystemManagementPanel({
@@ -215,7 +239,7 @@ export function SystemManagementPanel({
   const [initialForm, setInitialForm] = useState<FormState>(() =>
     buildFormState(null, roleOptions, stores),
   );
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(true);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
@@ -223,6 +247,9 @@ export function SystemManagementPanel({
   const [saving, setSaving] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<FormErrors>({});
+  const [deleteCandidate, setDeleteCandidate] =
+    useState<AdminUserPanelItem | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<AdminStatus | "ALL">("ALL");
   const [storeFilter, setStoreFilter] = useState("ALL");
@@ -233,9 +260,10 @@ export function SystemManagementPanel({
   }, []);
 
   function resetModalPosition() {
-    setFullscreen(false);
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setError(null);
+    setFormErrors({});
     setPasswordVisible(false);
   }
 
@@ -374,6 +402,15 @@ export function SystemManagementPanel({
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+    setFormErrors((current) => {
+      if (!current[key]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
   }
 
   async function reloadRoleOptions(defaultCreateRole: boolean) {
@@ -410,10 +447,11 @@ export function SystemManagementPanel({
   async function reloadAdminUsers(
     page = pagination.page,
     filters = { query, statusFilter, storeFilter },
+    pageSize = pagination.pageSize,
   ) {
     const params = new URLSearchParams({
       page: String(page),
-      pageSize: String(pagination.pageSize),
+      pageSize: String(pageSize),
     });
     const nextQuery = filters.query.trim();
     if (nextQuery) {
@@ -443,7 +481,7 @@ export function SystemManagementPanel({
       const nextList = normalizeAdminListPayload(
         result.data,
         initialSummary,
-        pagination.pageSize,
+        pageSize,
       );
       setAdminUsers(nextList.items);
       setPagination(nextList.pagination);
@@ -468,17 +506,19 @@ export function SystemManagementPanel({
       return;
     }
 
-    const validationMessage = validateAdminUserForm(
+    const validationErrors = validateAdminUserForm(
       modal.mode,
       form,
       roleOptions,
     );
+    const validationMessage = getFirstFormError(validationErrors);
     if (validationMessage) {
-      setError(validationMessage);
+      setFormErrors(validationErrors);
       return;
     }
 
     setSaving(true);
+    setFormErrors({});
     setError(null);
 
     const endpoint =
@@ -519,6 +559,38 @@ export function SystemManagementPanel({
       setModal(null);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function canDeleteAdminUser(item: AdminUserPanelItem) {
+    return !hasAllDataScope(roleOptions, item.roleIds);
+  }
+
+  async function deleteAdminUser(item: AdminUserPanelItem) {
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/admin-users/${item.id}`, {
+        method: "DELETE",
+      });
+      const result = (await response.json()) as {
+        data?: {
+          items: AdminUserPanelItem[];
+          pagination: AdminPaginationMeta;
+          summary: typeof initialSummary;
+        };
+        error?: { message: string };
+        success: boolean;
+      };
+      if (!response.ok || !result.success) {
+        throw new Error(result.error?.message ?? "删除后台用户失败");
+      }
+      setDeleteCandidate(null);
+      await reloadAdminUsers(1);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "删除后台用户失败");
     } finally {
       setSaving(false);
     }
@@ -584,35 +656,35 @@ export function SystemManagementPanel({
           </label>
           <label className="flex w-36 flex-col gap-1 text-xs font-semibold text-[#66756d]">
             状态
-            <select
-              className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-              onChange={(event) =>
-                setStatusFilter(event.target.value as AdminStatus | "ALL")
+            <AdminSelect
+              contentLabel="状态"
+              onChange={(value) =>
+                setStatusFilter(value as AdminStatus | "ALL")
               }
+              options={[
+                { label: "全部状态", value: "ALL" },
+                ...Object.entries(STATUS_LABELS).map(([value, label]) => ({
+                  label,
+                  value,
+                })),
+              ]}
               value={statusFilter}
-            >
-              <option value="ALL">全部状态</option>
-              {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <label className="flex w-44 flex-col gap-1 text-xs font-semibold text-[#66756d]">
             数据范围
-            <select
-              className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-              onChange={(event) => setStoreFilter(event.target.value)}
+            <AdminSelect
+              contentLabel="数据范围"
+              onChange={setStoreFilter}
+              options={[
+                { label: "全部范围", value: "ALL" },
+                ...stores.map((store) => ({
+                  label: formatAssignableDataScopeLabel(store),
+                  value: store.id,
+                })),
+              ]}
               value={storeFilter}
-            >
-              <option value="ALL">全部范围</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <button
             className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
@@ -683,31 +755,49 @@ export function SystemManagementPanel({
                     {formatDateTimeSecond(item.lastLoginAt, "未登录")}
                   </td>
                   <td className="px-4 py-4">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                    <div className="flex flex-wrap justify-end gap-2 whitespace-nowrap">
+                      <Button
+                        className="border-[#dbe6dc] text-[#1f8f4f]"
                         onClick={() => openDetailModal(item)}
-                        title="查看详情"
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
-                        <Eye size={16} />
-                      </button>
-                      <button
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                        <Eye data-icon="inline-start" />
+                        查看
+                      </Button>
+                      <Button
+                        className="border-[#dbe6dc] text-[#1f8f4f]"
                         onClick={() => openEditModal(item)}
-                        title="编辑用户"
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
-                        <Pencil size={16} />
-                      </button>
-                      <button
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#66756d] hover:bg-[#f3f7f1]"
+                        <Pencil data-icon="inline-start" />
+                        编辑
+                      </Button>
+                      <Button
+                        className="border-[#dbe6dc] text-[#66756d]"
                         onClick={() => openPasswordModal(item)}
-                        title="重置密码"
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
-                        <KeyRound size={16} />
-                      </button>
+                        <KeyRound data-icon="inline-start" />
+                        重置密码
+                      </Button>
+                      {canDeleteAdminUser(item) ? (
+                        <Button
+                          className="border-red-100 text-red-600 hover:bg-red-50"
+                          onClick={() => setDeleteCandidate(item)}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          <Trash2 data-icon="inline-start" />
+                          删除
+                        </Button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -724,6 +814,13 @@ export function SystemManagementPanel({
           <AdminPagination
             disabled={loadingList}
             onPageChange={(nextPage) => void reloadAdminUsers(nextPage)}
+            onPageSizeChange={(nextPageSize) =>
+              void reloadAdminUsers(
+                1,
+                { query, statusFilter, storeFilter },
+                nextPageSize,
+              )
+            }
             pagination={pagination}
           />
         </div>
@@ -798,65 +895,23 @@ export function SystemManagementPanel({
             <div className="flex-1 overflow-auto p-6">
               {modal.mode === "password" ? (
                 <div className="space-y-4">
-                <div className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4 text-sm">
-                  <div className="font-semibold">{modal.item.name}</div>
-                  <div className="mt-1 text-[#66756d]">
-                    {modal.item.roleNames.join("、") || "未分配角色"} ·{" "}
-                    数据范围已按当前系统配置保留
+                  <div className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4 text-sm">
+                    <div className="font-semibold">{modal.item.name}</div>
+                    <div className="mt-1 text-[#66756d]">
+                      {modal.item.roleNames.join("、") || "未分配角色"} ·{" "}
+                      数据范围已按当前系统配置保留
+                    </div>
                   </div>
-                </div>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>新密码</RequiredLabel>
-                  <div className="relative">
-                    <input
-                      className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 pr-11 outline-none focus:border-[#1f8f4f]"
-                      minLength={8}
-                      onChange={(event) => updateForm("password", event.target.value)}
-                      type={passwordVisible ? "text" : "password"}
-                      value={form.password}
-                    />
-                    <button
-                      className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-[#66756d] hover:bg-[#eff8f1] hover:text-[#1f8f4f]"
-                      onClick={() => setPasswordVisible((value) => !value)}
-                      title={passwordVisible ? "隐藏密码" : "显示密码"}
-                      type="button"
-                    >
-                      {passwordVisible ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                </label>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    <RequiredLabel>登录账号</RequiredLabel>
-                    <input
-                      className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f] disabled:bg-[#f5f8f3]"
-                      disabled={modal.mode !== "create"}
-                      onChange={(event) => updateForm("username", event.target.value)}
-                      readOnly={modal.mode === "detail"}
-                      value={form.username}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    <RequiredLabel>姓名</RequiredLabel>
-                    <input
-                      className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                      onChange={(event) => updateForm("name", event.target.value)}
-                      readOnly={modal.mode === "detail"}
-                      value={form.name}
-                    />
-                  </label>
-                  {modal.mode === "create" ? (
-                    <label className="flex flex-col gap-2 text-sm font-medium">
-                      <RequiredLabel>初始密码</RequiredLabel>
+                  <AdminFormField
+                    error={formErrors.password}
+                    label="新密码"
+                    required
+                  >
+                    {(invalid) => (
                       <div className="relative">
                         <input
-                          className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 pr-11 outline-none focus:border-[#1f8f4f]"
+                          aria-invalid={invalid}
+                          className={`${ADMIN_USER_INPUT_CLASS} w-full pr-11`}
                           minLength={8}
                           onChange={(event) =>
                             updateForm("password", event.target.value)
@@ -865,7 +920,7 @@ export function SystemManagementPanel({
                           value={form.password}
                         />
                         <button
-                          className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-[#66756d] hover:bg-[#eff8f1] hover:text-[#1f8f4f]"
+                          className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg text-[#66756d] hover:bg-[#eff8f1] hover:text-[#1f8f4f]"
                           onClick={() => setPasswordVisible((value) => !value)}
                           title={passwordVisible ? "隐藏密码" : "显示密码"}
                           type="button"
@@ -877,136 +932,167 @@ export function SystemManagementPanel({
                           )}
                         </button>
                       </div>
-                    </label>
-                  ) : null}
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    手机号
-                    <input
-                      className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                      onChange={(event) => updateForm("phone", event.target.value)}
-                      readOnly={modal.mode === "detail"}
-                      value={form.phone}
-                    />
-                  </label>
-                  <div className="flex flex-col gap-2 text-sm font-medium">
-                    <RequiredLabel>状态</RequiredLabel>
-                    <div className="grid h-11 grid-cols-2 gap-2 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-1">
-                      {(["ACTIVE", "DISABLED"] as const).map((status) => (
-                        <button
-                          className={[
-                            "rounded-lg text-sm font-semibold transition",
-                            form.status === status
-                              ? "bg-white text-[#1f8f4f] shadow-sm"
-                              : "text-[#66756d] hover:bg-white/70",
-                          ].join(" ")}
-                          disabled={modal.mode === "detail"}
-                          key={status}
-                          onClick={() => updateForm("status", status)}
-                          type="button"
-                        >
-                          {STATUS_LABELS[status]}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="md:col-span-2">
-                    <div className="mb-2 text-sm font-medium">
-                      <RequiredLabel>
-                        角色{loadingRoles ? "（刷新中）" : ""}
-                      </RequiredLabel>
-                    </div>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {roleOptions.map((role) => {
-                        const checked = form.roleIds.includes(role.id);
-                        return (
-                          <button
-                            aria-pressed={checked}
-                            className={[
-                              "flex h-11 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition",
-                              checked
-                                ? "border-[#8ecaa1] bg-[#eef8f0] text-[#1f8f4f]"
-                                : "border-[#dbe6dc] bg-white text-[#405248] hover:bg-[#f8fbf7]",
-                            ].join(" ")}
-                            disabled={modal.mode === "detail"}
-                            key={role.id}
-                            onClick={() =>
-                              updateForm("roleIds", toggleValue(form.roleIds, role.id))
+                    )}
+                  </AdminFormField>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <AdminFormField
+                    error={formErrors.username}
+                    label="登录账号"
+                    required
+                  >
+                    {(invalid) => (
+                      <input
+                        aria-invalid={invalid}
+                        className={ADMIN_USER_INPUT_CLASS}
+                        disabled={modal.mode !== "create"}
+                        onChange={(event) =>
+                          updateForm("username", event.target.value)
+                        }
+                        readOnly={modal.mode === "detail"}
+                        value={form.username}
+                      />
+                    )}
+                  </AdminFormField>
+                  <AdminFormField error={formErrors.name} label="姓名" required>
+                    {(invalid) => (
+                      <input
+                        aria-invalid={invalid}
+                        className={ADMIN_USER_INPUT_CLASS}
+                        onChange={(event) =>
+                          updateForm("name", event.target.value)
+                        }
+                        readOnly={modal.mode === "detail"}
+                        value={form.name}
+                      />
+                    )}
+                  </AdminFormField>
+                  {modal.mode === "create" ? (
+                    <AdminFormField
+                      error={formErrors.password}
+                      label="初始密码"
+                      required
+                    >
+                      {(invalid) => (
+                        <div className="relative">
+                          <input
+                            aria-invalid={invalid}
+                            className={`${ADMIN_USER_INPUT_CLASS} w-full pr-11`}
+                            minLength={8}
+                            onChange={(event) =>
+                              updateForm("password", event.target.value)
                             }
+                            type={passwordVisible ? "text" : "password"}
+                            value={form.password}
+                          />
+                          <button
+                            className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg text-[#66756d] hover:bg-[#eff8f1] hover:text-[#1f8f4f]"
+                            onClick={() => setPasswordVisible((value) => !value)}
+                            title={passwordVisible ? "隐藏密码" : "显示密码"}
                             type="button"
                           >
-                            <span>{role.name}</span>
-                            <span
-                              className={[
-                                "grid h-5 w-5 place-items-center rounded-full border text-xs",
-                                checked
-                                  ? "border-[#1f8f4f] bg-[#1f8f4f] text-white"
-                                  : "border-[#bfd5c6] text-transparent",
-                              ].join(" ")}
-                            >
-                              ✓
-                            </span>
+                            {passwordVisible ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
                           </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div className="md:col-span-2">
-                    <div className="mb-2 flex items-center justify-between gap-3 text-sm font-medium">
-                      <RequiredLabel>数据范围</RequiredLabel>
-                      <span className="text-xs font-normal text-[#66756d]">
-                        {formHasAllDataScope
-                          ? "超级管理员默认可访问全部数据"
-                          : "决定该账号可查看和操作的业务数据"}
-                      </span>
-                    </div>
-                    {formHasAllDataScope ? (
-                      <div className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-3 text-sm font-semibold text-[#1f8f4f]">
-                        全部数据
-                      </div>
-                    ) : (
-                      <div className="grid gap-2 md:grid-cols-2">
-                        {stores.map((store) => {
-                          const checked = form.storeIds.includes(store.id);
-                          return (
-                            <button
-                              aria-pressed={checked}
-                              className={[
-                                "flex h-11 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition",
-                                checked
-                                  ? "border-[#8ecaa1] bg-[#eef8f0] text-[#1f8f4f]"
-                                  : "border-[#dbe6dc] bg-white text-[#405248] hover:bg-[#f8fbf7]",
-                              ].join(" ")}
-                              disabled={modal.mode === "detail"}
-                              key={store.id}
-                              onClick={() =>
-                                updateForm(
-                                  "storeIds",
-                                  toggleValue(form.storeIds, store.id),
-                                )
-                              }
-                              type="button"
-                            >
-                              <span className="truncate">{store.name}</span>
-                              <span
-                                className={[
-                                  "grid h-5 w-5 shrink-0 place-items-center rounded-full border text-xs",
-                                  checked
-                                    ? "border-[#1f8f4f] bg-[#1f8f4f] text-white"
-                                    : "border-[#bfd5c6] text-transparent",
-                                ].join(" ")}
-                              >
-                                ✓
-                              </span>
-                            </button>
-                          );
-                        })}
-                        {stores.length === 0 ? (
-                          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 md:col-span-2">
-                            暂无可分配的数据范围
-                          </div>
-                        ) : null}
-                      </div>
+                        </div>
+                      )}
+                    </AdminFormField>
+                  ) : null}
+                  <AdminFormField label="手机号">
+                    {(invalid) => (
+                      <input
+                        aria-invalid={invalid}
+                        className={ADMIN_USER_INPUT_CLASS}
+                        onChange={(event) =>
+                          updateForm("phone", event.target.value)
+                        }
+                        readOnly={modal.mode === "detail"}
+                        value={form.phone}
+                      />
                     )}
+                  </AdminFormField>
+                  <AdminFormField
+                    error={formErrors.status}
+                    label="状态"
+                    required
+                  >
+                    {() => (
+                      <AdminRadioGroup
+                        disabled={modal.mode === "detail"}
+                        name="admin-user-status"
+                        onChange={(status) => updateForm("status", status)}
+                        options={[
+                          { label: STATUS_LABELS.ACTIVE, value: "ACTIVE" },
+                          { label: STATUS_LABELS.DISABLED, value: "DISABLED" },
+                        ]}
+                        value={form.status}
+                      />
+                    )}
+                  </AdminFormField>
+                  <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
+                    <AdminFormField
+                      error={formErrors.roleIds}
+                      label={loadingRoles ? "角色（刷新中）" : "角色"}
+                      required
+                    >
+                      {(invalid) => (
+                        <AdminSearchMultiSelect
+                          contentLabel="角色"
+                          disabled={modal.mode === "detail"}
+                          emptyText="暂无匹配角色"
+                          invalid={invalid}
+                          onChange={(nextRoleIds) =>
+                            updateForm("roleIds", nextRoleIds)
+                          }
+                          options={roleOptions.map((role) => ({
+                            helper: role.code,
+                            label: role.name,
+                            value: role.id,
+                          }))}
+                          placeholder="请选择角色"
+                          searchPlaceholder="搜索角色名称或编码"
+                          value={form.roleIds}
+                        />
+                      )}
+                    </AdminFormField>
+                    <AdminFormField
+                      description={
+                        formHasAllDataScope
+                          ? "超级管理员默认可访问全部数据"
+                          : "决定该账号可查看和操作的业务数据"
+                      }
+                      error={formErrors.storeIds}
+                      label="数据范围"
+                      required
+                    >
+                      {(invalid) => (
+                        <AdminSearchMultiSelect
+                          contentLabel="数据范围"
+                          disabled={modal.mode === "detail" || formHasAllDataScope}
+                          emptyText="暂无可分配的数据范围"
+                          invalid={invalid}
+                          onChange={(nextStoreIds) =>
+                            updateForm("storeIds", nextStoreIds)
+                          }
+                          options={
+                            formHasAllDataScope
+                              ? [{ label: "全部数据", value: "__all" }]
+                              : stores.map((store) => ({
+                                  helper: store.name,
+                                  label: formatAssignableDataScopeLabel(store),
+                                  value: store.id,
+                                }))
+                          }
+                          placeholder="请选择数据范围"
+                          searchPlaceholder="搜索数据范围"
+                          value={formHasAllDataScope ? ["__all"] : form.storeIds}
+                        />
+                      )}
+                    </AdminFormField>
                   </div>
                 </div>
               )}
@@ -1036,8 +1122,20 @@ export function SystemManagementPanel({
           </div>
         </div>
       ) : null}
-      {modal && error ? (
+      {error ? (
         <AdminAlertDialog message={error} onClose={() => setError(null)} />
+      ) : null}
+
+      {deleteCandidate ? (
+        <AdminConfirmDialog
+          busy={saving}
+          confirmLabel="删除"
+          message={`确认删除后台用户「${deleteCandidate.name}」吗？删除后该账号将无法登录，已有会话会被强制下线。`}
+          onCancel={() => setDeleteCandidate(null)}
+          onConfirm={() => void deleteAdminUser(deleteCandidate)}
+          title="删除后台用户"
+          variant="danger"
+        />
       ) : null}
     </section>
   );

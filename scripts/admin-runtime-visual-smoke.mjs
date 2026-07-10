@@ -138,11 +138,18 @@ export const ADMIN_RUNTIME_SECTION_TARGETS = [
     requiredTexts: ["操作日志", "独立展示关键操作记录", "刷新日志"],
   },
   {
+    fileName: "admin-section-delivery-ranges.png",
+    name: "section-delivery-ranges",
+    section: "delivery-ranges",
+    type: "section",
+    requiredTexts: ["配送范围", "编辑范围", "当前范围"],
+  },
+  {
     fileName: "admin-section-system-settings.png",
     name: "section-system-settings",
     section: "system-settings",
     type: "section",
-    requiredTexts: ["系统设置", "编辑设置", "客服电话", "配送范围"],
+    requiredTexts: ["系统设置", "编辑设置", "客服电话", "首页菜品列数"],
   },
 ];
 
@@ -202,6 +209,14 @@ export const ADMIN_RUNTIME_MODAL_TARGETS = [
     triggerText: "编辑设置",
     type: "modal",
     requiredTexts: ["编辑系统设置", "客服电话", "用户协议链接"],
+  },
+  {
+    fileName: "admin-delivery-range-modal.png",
+    name: "delivery-range-modal",
+    section: "delivery-ranges",
+    triggerText: "编辑范围",
+    type: "modal",
+    requiredTexts: ["编辑配送范围", "全省配送", "保存范围"],
   },
 ];
 

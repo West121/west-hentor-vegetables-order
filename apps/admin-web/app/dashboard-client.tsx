@@ -1,12 +1,24 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  Boxes,
+  CalendarClock,
+  CheckCircle2,
+  PackageCheck,
+  Sprout,
+  Truck,
+  Users,
+  Warehouse,
+  type LucideIcon,
+} from "lucide-react";
 
 import {
   buildAdminMenuTree,
   buildAdminNavGroups,
-  getAdminSectionLabel,
   resolveAdminSection,
   type AdminSectionId,
 } from "@/app/lib/admin-navigation";
@@ -15,10 +27,12 @@ import { AdminShell } from "./ui/admin-shell";
 import { AdminMenuSearch } from "./ui/admin-menu-search";
 import { AdminThemeToggle } from "./ui/admin-theme-toggle";
 import { AdminUserMenu } from "./ui/admin-user-menu";
+import { DeliveryRangePanel } from "./ui/delivery-range-panel";
 import { DishManagementPanel, type DishPanelItem } from "./ui/dish-management-panel";
 import { MemberManagementPanel, type MemberPanelItem } from "./ui/member-management-panel";
 import { MenuManagementPanel } from "./ui/menu-management-panel";
 import { OperationLogsPanel, type OperationLogPanelItem } from "./ui/operation-logs-panel";
+import { OnlineSessionManagementPanel } from "./ui/online-session-management-panel";
 import { OrderManagementPanel, type OrderPanelItem } from "./ui/order-management-panel";
 import { PackageManagementPanel, type PackagePanelItem } from "./ui/package-management-panel";
 import {
@@ -45,7 +59,7 @@ import { SystemSettingsPanel, type SystemSettingsPanelItem } from "./ui/system-s
 import { TaskManagementPanel, type TaskDishOption, type TaskPanelItem } from "./ui/task-management-panel";
 
 const ADMIN_LIST_PAGE_SIZE = 10;
-const ADMIN_LOG_PAGE_SIZE = 20;
+const ADMIN_LOG_PAGE_SIZE = 10;
 const ADMIN_OPTION_LIMIT = 200;
 const STORE_SCOPED_SECTIONS = new Set<AdminSectionId>([
   "orders",
@@ -57,6 +71,7 @@ const STORE_SCOPED_SECTIONS = new Set<AdminSectionId>([
   "tasks",
   "dictionaries",
   "kuaidi-printers",
+  "delivery-ranges",
   "system-settings",
 ]);
 
@@ -282,6 +297,51 @@ function countFromSummary(summary: Record<string, number>) {
   return Number(summary.total ?? summary.active ?? 0);
 }
 
+function metricValue(value: unknown) {
+  return Number(value ?? 0);
+}
+
+function formatMetric(value: number, unit = "") {
+  return `${new Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits: value % 1 === 0 ? 0 : 1,
+  }).format(value)}${unit}`;
+}
+
+function ratioText(value: number, total: number) {
+  if (total <= 0) {
+    return "0%";
+  }
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+function ratioNumber(value: number, total: number) {
+  if (total <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, Math.round((value / total) * 100)));
+}
+
+function ringOffset(percent: number, circumference = 126) {
+  return circumference - (Math.max(0, Math.min(100, percent)) / 100) * circumference;
+}
+
+type OverviewMetric = {
+  badge: string;
+  description: string;
+  icon: LucideIcon;
+  label: string;
+  miniItems: Array<{
+    label: string;
+    tone: "amber" | "green" | "muted";
+    value: number;
+  }>;
+  miniLabel: string;
+  tone: "green" | "amber" | "blue" | "slate";
+  trend: "down" | "up";
+  trendText: string;
+  value: string;
+};
+
 async function loadDashboardData(
   session: AdminSession,
   selectedStoreId?: string | null,
@@ -348,7 +408,7 @@ async function loadDashboardData(
       : Promise.resolve(emptyList<OrderPanelItem, Record<string, number>>({ canceled: 0, pendingShipment: 0, shipped: 0, signed: 0, total: 0 })),
     activeStore
       ? readList<MemberPanelItem, Record<string, number>>(
-          withStore("/api/admin/members"),
+          `${withStore("/api/admin/members")}&status=ACTIVE`,
           { active: 0, disabled: 0, purchaseOrders: 0, total: 0, userPackages: 0 },
         )
       : Promise.resolve(emptyList<MemberPanelItem, Record<string, number>>({ active: 0, disabled: 0, purchaseOrders: 0, total: 0, userPackages: 0 })),
@@ -501,6 +561,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedStoreId = searchParams.get("storeId");
+  const initialListQuery = searchParams.get("query") ?? "";
   const [session, setSession] = useState<AdminSession | null>(null);
   const [data, setData] = useState<DashboardData | null>(null);
   const [dataRevision, setDataRevision] = useState(0);
@@ -633,12 +694,177 @@ export default function DashboardPage() {
   }
 
   const activeStore = data.activeStore;
-  const activeSectionLabel = getAdminSectionLabel(activeSection);
-  const isOrderSection = activeSection === "orders";
   const showStoreScopeNotice =
     STORE_SCOPED_SECTIONS.has(activeSection) && !activeStore;
   const userDisplay = data.userDisplay;
   const scopeLabel = data.storeAccessScope === "ALL" ? "全部数据" : "授权数据";
+  const orderTotal = metricValue(data.storeOrderSummary.total ?? data.orders);
+  const pendingOrders = metricValue(data.storeOrderSummary.pendingShipment);
+  const shippedOrders = metricValue(data.storeOrderSummary.shipped);
+  const signedOrders = metricValue(data.storeOrderSummary.signed);
+  const activeMembers = metricValue(data.storeMemberSummary.active ?? data.members);
+  const disabledMembers = metricValue(data.storeMemberSummary.disabled);
+  const activePackages = metricValue(data.userPackageSummary.active ?? data.activePackages);
+  const frozenPackages = metricValue(data.userPackageSummary.frozen);
+  const packageTotal = metricValue(data.userPackageSummary.total);
+  const onSaleDishes = metricValue(data.dishSummary.onSale);
+  const offSaleDishes = metricValue(data.dishSummary.offSale);
+  const lowStockDishes = metricValue(data.dishSummary.lowStock);
+  const dishTotal = metricValue(data.dishSummary.total);
+  const dishStock = metricValue(data.dishSummary.stock);
+  const activeTasks = metricValue(data.taskSummary.active);
+  const draftTasks = metricValue(data.taskSummary.draft);
+  const disabledTasks = metricValue(data.taskSummary.disabled);
+  const activePrinters = metricValue(data.kuaidiPrinterSummary.active);
+  const dictionaryCount = data.dictionaries.length;
+  const serviceRate = ratioText(activeMembers, activeMembers + disabledMembers);
+  const shipmentRate = ratioText(shippedOrders + signedOrders, orderTotal);
+  const onSaleRate = ratioText(onSaleDishes, dishTotal);
+  const packageRate = ratioText(activePackages, packageTotal);
+  const dashboardMetrics: OverviewMetric[] = [
+    {
+      badge: `可服务 ${serviceRate}`,
+      description: "可服务会员占比",
+      icon: Users,
+      label: "会员服务",
+      miniItems: [
+        { label: "可服务", tone: "green", value: activeMembers },
+        { label: "停用", tone: "amber", value: disabledMembers },
+      ],
+      miniLabel: "会员结构",
+      tone: "green",
+      trend: "up",
+      trendText: `停用 ${formatMetric(disabledMembers)} 人`,
+      value: formatMetric(data.members, " 人"),
+    },
+    {
+      badge: `可用 ${packageRate}`,
+      description: "正在可预订的套餐",
+      icon: PackageCheck,
+      label: "套餐状态",
+      miniItems: [
+        { label: "可用", tone: "green", value: activePackages },
+        { label: "冻结", tone: "amber", value: frozenPackages },
+        { label: "其他", tone: "muted", value: Math.max(0, packageTotal - activePackages - frozenPackages) },
+      ],
+      miniLabel: "套餐结构",
+      tone: "green",
+      trend: "up",
+      trendText: `冻结 ${formatMetric(frozenPackages)} 个`,
+      value: formatMetric(activePackages, " 个"),
+    },
+    {
+      badge: `完成 ${shipmentRate}`,
+      description: "订单履约进度",
+      icon: Truck,
+      label: "订单履约",
+      miniItems: [
+        { label: "待配送", tone: "amber", value: pendingOrders },
+        { label: "已发货", tone: "green", value: shippedOrders },
+        { label: "已签收", tone: "muted", value: signedOrders },
+      ],
+      miniLabel: "履约结构",
+      tone: pendingOrders > 0 ? "amber" : "green",
+      trend: pendingOrders > 0 ? "down" : "up",
+      trendText: `已发 ${formatMetric(shippedOrders)} 单 · 签收 ${formatMetric(signedOrders)} 单`,
+      value: formatMetric(pendingOrders, " 单"),
+    },
+    {
+      badge: `上架 ${onSaleRate}`,
+      description: "当前菜品总库存",
+      icon: Warehouse,
+      label: "库存总量",
+      miniItems: [
+        { label: "上架", tone: "green", value: onSaleDishes },
+        { label: "下架", tone: "amber", value: offSaleDishes },
+        { label: "低库存", tone: "muted", value: lowStockDishes },
+      ],
+      miniLabel: "菜品状态",
+      tone: "green",
+      trend: "up",
+      trendText: `低库存 ${formatMetric(lowStockDishes)} 个`,
+      value: formatMetric(dishStock, " 斤"),
+    },
+  ];
+  const serviceScore = ratioNumber(activeMembers, activeMembers + disabledMembers);
+  const packageScore = ratioNumber(activePackages, packageTotal);
+  const shipmentScore = ratioNumber(shippedOrders + signedOrders, orderTotal);
+  const onSaleScore = ratioNumber(onSaleDishes, dishTotal);
+  const inventoryScore = Math.max(0, 100 - ratioNumber(lowStockDishes, dishTotal));
+  const fulfillmentSteps = [
+    {
+      helper: "等待处理",
+      label: "待配送",
+      tone: "amber",
+      value: pendingOrders,
+    },
+    {
+      helper: "已生成物流",
+      label: "已发货",
+      tone: "green",
+      value: shippedOrders,
+    },
+    {
+      helper: "完成履约",
+      label: "已签收",
+      tone: "blue",
+      value: signedOrders,
+    },
+  ];
+  const packageHealth = [
+    {
+      detail: `冻结 ${formatMetric(frozenPackages, " 个")}`,
+      label: "可预订套餐",
+      percent: packageScore,
+      value: activePackages,
+    },
+    {
+      detail: `停用 ${formatMetric(disabledMembers, " 人")}`,
+      label: "可服务会员",
+      percent: serviceScore,
+      value: activeMembers,
+    },
+  ];
+  const dishHealth = [
+    {
+      detail: `下架 ${formatMetric(offSaleDishes, " 个")}`,
+      label: "上架菜品",
+      percent: onSaleScore,
+      tone: "green",
+      value: onSaleDishes,
+    },
+    {
+      detail: `总库存 ${formatMetric(dishStock, " 斤")}`,
+      label: "库存健康",
+      percent: inventoryScore,
+      tone: lowStockDishes > 0 ? "amber" : "green",
+      value: lowStockDishes,
+    },
+  ];
+  const readinessItems = [
+    {
+      detail: `草稿 ${formatMetric(draftTasks, " 个")} · 停用 ${formatMetric(disabledTasks, " 个")}`,
+      icon: CalendarClock,
+      label: "今日任务",
+      ready: activeTasks > 0,
+      value: formatMetric(activeTasks, " 个启用"),
+    },
+    {
+      detail: "用于电子面单打印",
+      icon: Truck,
+      label: "面单打印",
+      ready: activePrinters > 0,
+      value: formatMetric(activePrinters, " 台启用"),
+    },
+    {
+      detail: "菜品类型、状态等基础配置",
+      icon: Boxes,
+      label: "系统字典",
+      ready: dictionaryCount > 0,
+      value: formatMetric(dictionaryCount, " 类"),
+    },
+  ];
+  const fulfillmentRingOffset = ringOffset(shipmentScore);
 
   function renderTopBarActions() {
     return (
@@ -657,35 +883,10 @@ export default function DashboardPage() {
 
   return (
     <AdminShell
-      brand="Hentor Fresh"
+      brand={data.systemSettings?.adminSystemName || "HanYang Fresh"}
       groups={navGroups}
       topBarActions={renderTopBarActions()}
     >
-      <header className="admin-shell-header flex min-h-20 items-center justify-between border-b border-[#dbe6dc] bg-white px-7">
-        <div>
-          {isOrderSection ? (
-            <>
-              <h1 className="text-2xl font-semibold tracking-normal">订单管理</h1>
-              <div className="mt-1 text-sm font-medium text-[#66756d]">
-                高频运营入口：筛选、电子面单、弹窗处理
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="text-sm font-medium text-[#66756d]">
-                蔬菜预订运营台
-              </div>
-              <h1 className="mt-1 text-2xl font-semibold tracking-normal">
-                {activeSectionLabel}
-              </h1>
-            </>
-          )}
-        </div>
-        <div className="admin-shell-header-actions flex items-center gap-3">
-          {renderTopBarActions()}
-        </div>
-      </header>
-
       <main className="admin-shell-main space-y-6 p-7">
         {showStoreScopeNotice ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900 shadow-sm">
@@ -693,40 +894,316 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
-        <div key={`${activeSection}-${dataRevision}`} className="contents">
+        <div key={`${activeSection}-${dataRevision}-${initialListQuery}`} className="contents">
           {activeSection === "overview" ? (
-            <>
-            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {[
-                ["活跃会员", data.members, "会员与后台用户分开管理"],
-                ["有效套餐", data.activePackages, "支持冻结、次数调整"],
-                [
-                  "待发货订单",
-                  data.storeOrderSummary.pendingShipment,
-                  "按今日待处理订单推进配送",
-                ],
-                ["累计订单", data.orders, "详情/编辑/新建统一弹窗打开"],
-              ].map(([label, value, desc]) => (
-                <div
-                  className="rounded-2xl border border-[#dbe6dc] bg-white p-5 shadow-sm"
-                  key={label}
-                >
-                  <div className="text-sm font-medium text-[#66756d]">{label}</div>
-                  <div className="mt-3 text-3xl font-semibold">{value}</div>
-                  <div className="mt-3 text-sm leading-6 text-[#66756d]">
-                    {desc}
+            <div className="space-y-4">
+              <section className="grid gap-3 xl:grid-cols-4 md:grid-cols-2">
+                {dashboardMetrics.map((metric, index) => {
+                  const MetricIcon = metric.icon;
+                  const TrendIcon = metric.trend === "up" ? ArrowUpRight : ArrowDownRight;
+                  const isAmber = metric.tone === "amber";
+                  const miniMax = Math.max(
+                    ...metric.miniItems.map((item) => item.value),
+                    1,
+                  );
+                  const miniTitle = `${metric.miniLabel}：${metric.miniItems
+                    .map((item) => `${item.label} ${formatMetric(item.value)}`)
+                    .join("，")}`;
+                  return (
+                    <div
+                      className={[
+                        "admin-overview-card relative min-h-[106px] overflow-hidden rounded-2xl border bg-white/95 p-4 text-[#102017] shadow-[0_10px_24px_rgba(20,45,28,0.06)]",
+                        "dark:bg-[#0d1d14] dark:text-white dark:shadow-[0_18px_40px_rgba(0,0,0,0.22)]",
+                        isAmber ? "border-[#ecd49d] dark:border-[#5b451a]" : "border-[#dfe8df] dark:border-[#1f3a28]",
+                      ].join(" ")}
+                      key={metric.label}
+                      style={{ "--admin-stat-index": index } as CSSProperties}
+                    >
+                      <div className="pointer-events-none absolute inset-x-4 bottom-0 h-px bg-gradient-to-r from-transparent via-[#dfe8df] to-transparent dark:via-white/10" />
+                      <div className="relative flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 text-xs font-semibold text-[#607268] dark:text-white/55">
+                            <MetricIcon data-icon="inline-start" />
+                            {metric.label}
+                          </div>
+                          <div className="mt-1.5 truncate text-3xl font-semibold tracking-normal text-[#102017] dark:text-white">
+                            {metric.value}
+                          </div>
+                        </div>
+                        <div
+                          className={[
+                            "flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold",
+                            isAmber
+                              ? "border-[#ecd49d] bg-[#fff7df] text-[#9b6508] dark:border-[#5b451a] dark:bg-[#2a2111] dark:text-[#f0b84a]"
+                              : "border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f] dark:border-white/10 dark:bg-white/10 dark:text-[#86d79f]",
+                          ].join(" ")}
+                        >
+                          <TrendIcon data-icon="inline-start" />
+                          {metric.badge}
+                        </div>
+                      </div>
+                      <div className="relative mt-2.5 flex items-end justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-semibold text-[#102017] dark:text-white/85">{metric.trendText}</div>
+                          <div className="mt-0.5 truncate text-xs text-[#607268] dark:text-white/45">{metric.description}</div>
+                        </div>
+                        <div
+                          aria-label={miniTitle}
+                          className="flex shrink-0 items-end gap-1.5"
+                          title={miniTitle}
+                        >
+                          <span className="mr-1 mb-0.5 hidden text-[10px] font-semibold text-[#8a9a91] 2xl:inline dark:text-white/35">
+                            {metric.miniLabel}
+                          </span>
+                          {metric.miniItems.map((item, itemIndex) => {
+                            const height = Math.max(
+                              item.value > 0 ? 10 : 6,
+                              Math.round((item.value / miniMax) * 30),
+                            );
+                            return (
+                              <span
+                                className={[
+                                  "admin-overview-bar w-2 rounded-full",
+                                  item.tone === "green"
+                                    ? "bg-[#1f8f4f]"
+                                    : item.tone === "amber"
+                                      ? "bg-[#d59a26]"
+                                      : "bg-[#dce5dc] dark:bg-white/30",
+                                ].join(" ")}
+                                key={item.label}
+                                style={
+                                  {
+                                    "--admin-bar-height": `${height}px`,
+                                    "--admin-stat-index": index + itemIndex,
+                                  } as CSSProperties
+                                }
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </section>
+
+              <section
+                className="admin-overview-card rounded-2xl border border-[#dfe8df] bg-white/90 p-4 shadow-[0_14px_34px_rgba(20,45,28,0.07)] dark:border-[#1f3a28] dark:bg-[#0d1d14]"
+                style={{ "--admin-stat-index": 4 } as CSSProperties}
+              >
+                <div className="flex items-center justify-between gap-4 border-b border-[#edf2ed] pb-3 dark:border-white/10">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-[#1f8f4f] dark:text-[#86d79f]">
+                      <CheckCircle2 data-icon="inline-start" />
+                      核心运营看板
+                    </div>
+                    <div className="mt-1 text-xs text-[#607268] dark:text-white/45">
+                      履约、套餐、库存、准备状态集中展示
+                    </div>
+                  </div>
+                  <div className="rounded-full border border-[#edf2ed] bg-[#f8fbf7] px-3 py-1 text-xs font-semibold text-[#607268] dark:border-white/10 dark:bg-white/[0.06] dark:text-white/50">
+                    范围 · {scopeLabel}
                   </div>
                 </div>
-              ))}
-            </section>
 
-            <section className="rounded-2xl border border-[#dbe6dc] bg-[#f9fff9] p-5 shadow-sm">
-              <h2 className="text-lg font-semibold">支付预留</h2>
-              <p className="mt-3 text-sm leading-6 text-[#66756d]">
-                套餐购买已预留 purchase order、payment order 和微信支付字段，当前状态为未启用支付。
-              </p>
-            </section>
-            </>
+                <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_1fr_1fr]">
+                  <div className="relative overflow-hidden rounded-xl border border-[#dfe8df] bg-[#fbfdfb] p-4 text-[#102017] dark:border-white/10 dark:bg-white/[0.04] dark:text-white">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-[#1f8f4f] dark:text-[#86d79f]">
+                      <Truck data-icon="inline-start" />
+                      履约流程
+                    </div>
+                    <div className="rounded-full border border-[#cfe3d3] bg-[#eff8f1] px-2.5 py-1 text-xs font-semibold text-[#1f8f4f] dark:border-white/10 dark:bg-white/10 dark:text-[#86d79f]">
+                      完成 {shipmentRate}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-[100px_1fr] items-center gap-4">
+                    <div className="relative grid h-24 w-24 place-items-center">
+                      <svg className="h-24 w-24 -rotate-90" viewBox="0 0 48 48" aria-hidden="true">
+                        <circle cx="24" cy="24" fill="none" r="20" stroke="rgba(31,143,79,0.12)" strokeWidth="5" />
+                        <circle
+                          className="admin-overview-ring"
+                          cx="24"
+                          cy="24"
+                          fill="none"
+                          r="20"
+                          stroke="#1f8f4f"
+                          strokeLinecap="round"
+                          strokeDasharray="126"
+                          strokeDashoffset={fulfillmentRingOffset}
+                          strokeWidth="5"
+                        />
+                      </svg>
+                      <div className="absolute text-center">
+                        <div className="text-2xl font-semibold">{formatMetric(orderTotal)}</div>
+                        <div className="text-[11px] text-[#607268] dark:text-white/45">今日订单</div>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      {fulfillmentSteps.map((step, index) => (
+                        <div className="grid grid-cols-[4rem_1fr_2rem] items-center gap-2" key={step.label}>
+                          <div className="text-xs font-semibold text-[#607268] dark:text-white/60">{step.label}</div>
+                          <div className="h-2 overflow-hidden rounded-full bg-[#e6eee6] dark:bg-white/10">
+                            <div
+                              className={[
+                                "admin-overview-progress h-full rounded-full",
+                                step.tone === "amber" ? "bg-[#d59a26]" : "bg-[#1f8f4f]",
+                              ].join(" ")}
+                              style={
+                                {
+                                  "--admin-progress-width": `${Math.max(ratioNumber(step.value, orderTotal), step.value > 0 ? 10 : 0)}%`,
+                                  "--admin-stat-index": index + 5,
+                                } as CSSProperties
+                              }
+                            />
+                          </div>
+                          <div className="text-right text-sm font-semibold">{formatMetric(step.value)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    {fulfillmentSteps.map((step, index) => (
+                      <div className="rounded-xl border border-[#e4ece4] bg-[#f8fbf7] px-3 py-2 dark:border-white/10 dark:bg-white/[0.06]" key={`${step.label}-tile`}>
+                        <div className="text-[11px] text-[#607268] dark:text-white/45">{step.helper}</div>
+                        <div className="mt-0.5 flex items-end justify-between gap-2">
+                          <span className="text-lg font-semibold">{formatMetric(step.value)}</span>
+                          <span className={index === 0 ? "text-xs font-semibold text-[#9b6508] dark:text-[#f0b84a]" : "text-xs font-semibold text-[#1f8f4f] dark:text-[#86d79f]"}>
+                            {step.label}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  </div>
+
+                  <div className="relative overflow-hidden rounded-xl border border-[#dfe8df] bg-[#fbfdfb] p-4 text-[#102017] dark:border-white/10 dark:bg-white/[0.04] dark:text-white">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-[#1f8f4f] dark:text-[#86d79f]">
+                    <PackageCheck data-icon="inline-start" />
+                    套餐与会员
+                  </div>
+                  <div className="mt-3 grid grid-cols-[84px_1fr] items-center gap-4">
+                    <div className="relative grid h-20 w-20 place-items-center">
+                      <svg className="h-20 w-20 -rotate-90" viewBox="0 0 48 48" aria-hidden="true">
+                        <circle cx="24" cy="24" fill="none" r="19" stroke="rgba(31,143,79,0.12)" strokeWidth="5" />
+                        <circle
+                          className="admin-overview-ring"
+                          cx="24"
+                          cy="24"
+                          fill="none"
+                          r="19"
+                          stroke="#1f8f4f"
+                          strokeLinecap="round"
+                          strokeDasharray="119"
+                          strokeDashoffset={ringOffset(packageScore, 119)}
+                          strokeWidth="5"
+                        />
+                      </svg>
+                      <div className="absolute text-center">
+                        <div className="text-lg font-semibold leading-none">{packageScore}%</div>
+                        <div className="mt-1 text-[10px] leading-none text-[#607268] dark:text-white/45">套餐可用</div>
+                      </div>
+                    </div>
+                    <div className="space-y-2.5">
+                      {packageHealth.map((item) => (
+                        <div key={item.label}>
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="text-[#607268] dark:text-white/60">{item.label}</span>
+                            <span className="font-semibold">{formatMetric(item.value)} · {item.percent}%</span>
+                          </div>
+                          <div className="mt-1 h-2 overflow-hidden rounded-full bg-[#e6eee6] dark:bg-white/10">
+                            <div
+                              className="admin-overview-progress h-full rounded-full bg-[#1f8f4f]"
+                              style={{ "--admin-progress-width": `${item.percent}%` } as CSSProperties}
+                            />
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-[#607268] dark:text-white/40">{item.detail}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  </div>
+
+                  <div className="rounded-xl border border-[#dfe8df] bg-[#fbfdfb] p-4 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-[#1f8f4f] dark:text-[#86d79f]">
+                      <Sprout data-icon="inline-start" />
+                      菜品库存
+                    </div>
+                    <div className="text-xs font-semibold text-[#607268] dark:text-white/55">{formatMetric(dishStock, " 斤")}</div>
+                  </div>
+                  <div className="mt-3 grid gap-2.5">
+                    {dishHealth.map((item, index) => (
+                      <div className="grid grid-cols-[4.25rem_1fr_4.5rem] items-center gap-2.5" key={item.label}>
+                        <div className="text-xs font-semibold text-[#405248] dark:text-white/70">{item.label}</div>
+                        <div className="h-6 overflow-hidden rounded-lg border border-[#dcebdd] bg-[#f4faf5] p-1 dark:border-white/10 dark:bg-white/10">
+                          <div
+                            className={[
+                              "admin-overview-progress h-full rounded-md",
+                              item.tone === "amber" ? "bg-[#d59a26]" : "bg-[#1f8f4f]",
+                            ].join(" ")}
+                            style={
+                              {
+                                "--admin-progress-width": `${item.percent}%`,
+                                "--admin-stat-index": index + 8,
+                              } as CSSProperties
+                            }
+                          />
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-semibold text-[#102017] dark:text-white">{formatMetric(item.value)}</div>
+                          <div className="truncate text-[10px] text-[#607268] dark:text-white/45">{item.detail}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 divide-x divide-[#e4ece4] rounded-xl border border-[#edf2ed] bg-[#f8fbf7] text-center text-xs text-[#607268] dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.06] dark:text-white/50">
+                    <span className="px-2 py-2">上架 {formatMetric(onSaleDishes)}</span>
+                    <span className="px-2 py-2">下架 {formatMetric(offSaleDishes)}</span>
+                    <span className="px-2 py-2">低库存 {formatMetric(lowStockDishes)}</span>
+                  </div>
+                  </div>
+
+                  <div className="rounded-xl border border-[#dfe8df] bg-[#fbfdfb] p-3.5 dark:border-white/10 dark:bg-white/[0.04] xl:col-span-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-[#1f8f4f] dark:text-[#86d79f]">
+                      <CheckCircle2 data-icon="inline-start" />
+                      今日运营准备
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    {readinessItems.map((item) => {
+                      const ItemIcon = item.icon;
+                      return (
+                        <div
+                          className="grid grid-cols-[2rem_1fr_auto] items-center gap-2.5 rounded-xl border border-[#edf2ed] bg-[#f8fbf7] px-3 py-2 dark:border-white/10 dark:bg-white/[0.06]"
+                          key={item.label}
+                        >
+                          <div className="grid h-8 w-8 place-items-center rounded-lg bg-white text-[#1f8f4f] shadow-sm dark:bg-white/10 dark:text-[#86d79f]">
+                            <ItemIcon data-icon="inline-start" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-[#102017] dark:text-white">{item.label}</div>
+                            <div className="truncate text-xs text-[#607268] dark:text-white/45">{item.detail}</div>
+                          </div>
+                          <div
+                            className={[
+                              "rounded-full border px-2.5 py-1 text-xs font-semibold",
+                              item.ready
+                                ? "border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f] dark:border-white/10 dark:bg-white/10 dark:text-[#86d79f]"
+                                : "border-[#ecd49d] bg-[#fff7df] text-[#9b6508] dark:border-[#5b451a] dark:bg-[#2a2111] dark:text-[#f0b84a]",
+                            ].join(" ")}
+                          >
+                            {item.value}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  </div>
+                </div>
+              </section>
+            </div>
           ) : null}
 
           {activeSection === "orders" ? (
@@ -740,6 +1217,7 @@ export default function DashboardPage() {
               }))}
               initialItems={data.storeOrders}
               initialPagination={data.storeOrderPagination}
+              initialQuery={initialListQuery}
               initialSummary={data.storeOrderSummary}
               memberOptions={data.memberOptions.map((member) => ({
                 avatarUrl: member.avatarUrl,
@@ -776,6 +1254,7 @@ export default function DashboardPage() {
             <PackageManagementPanel
               initialItems={data.userPackages}
               initialPagination={data.userPackagePagination}
+              initialQuery={initialListQuery}
               initialSummary={data.userPackageSummary}
               memberOptions={data.memberOptions.map((member) => ({
                 avatarUrl: member.avatarUrl,
@@ -865,6 +1344,14 @@ export default function DashboardPage() {
               initialSummary={data.kuaidiPrinterSummary}
               store={activeStore}
             />
+          ) : null}
+
+          {activeSection === "delivery-ranges" ? (
+            <DeliveryRangePanel initialSettings={data.systemSettings} store={activeStore} />
+          ) : null}
+
+          {activeSection === "online-sessions" ? (
+            <OnlineSessionManagementPanel />
           ) : null}
 
           {activeSection === "operation-logs" ? (

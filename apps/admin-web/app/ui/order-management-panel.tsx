@@ -9,7 +9,10 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { adminFilterResetHref } from "@/app/lib/admin-navigation";
 import {
   createAdminModalDragState,
   getBoundedAdminModalOffset,
@@ -33,7 +36,7 @@ import {
   type OrderFormState,
   type OrderModalMode,
 } from "./order-modal-state";
-import { AdminAlertDialog } from "./admin-confirm-dialog";
+import { AdminAlertDialog, AdminConfirmDialog } from "./admin-confirm-dialog";
 import { AdminDatePicker } from "./admin-date-time-picker";
 import { formatDateTimeSecond } from "./date-format";
 import {
@@ -46,7 +49,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AdminMemberAvatar } from "./admin-member-avatar";
-import { RequiredLabel } from "./required-mark";
+import { AdminSelect } from "./admin-select";
+import { AdminFormField } from "./admin-form-field";
 
 type StoreOption = {
   id: string;
@@ -97,6 +101,39 @@ type OrderStatus =
   | "SIGNED"
   | "VOIDED";
 
+type OrderFormErrors = {
+  createItems?: string;
+  createUserId?: string;
+  shipments?: Array<Partial<Record<"logisticsNo" | "packageName", string>>>;
+  voidReason?: string;
+};
+
+type CancelOrderFormErrors = Partial<Record<"reason", string>>;
+
+type ShipmentTrack = {
+  events?: Array<{
+    content: string;
+    eventTime: string | null;
+    location?: string | null;
+    status?: string | null;
+  }>;
+  kuaidicom?: string | null;
+  lastSyncAt?: string | null;
+  lastTraceTime?: string | null;
+  logisticsNo?: string | null;
+  mapArrivalTime?: string | null;
+  mapMessage?: string | null;
+  mapRemainTime?: string | null;
+  mapStatus?: string | null;
+  mapSyncedAt?: string | null;
+  mapTotalTime?: string | null;
+  mapTrailUrl?: string | null;
+  stateCode?: string | null;
+  stateText?: string | null;
+  subscribeMessage?: string | null;
+  subscribeStatus?: string | null;
+};
+
 export type OrderPanelItem = {
   addressSnapshot: Record<string, unknown> | null;
   benefitItems: Array<{
@@ -126,9 +163,11 @@ export type OrderPanelItem = {
     logisticsNo: string | null;
     packageName: string;
     packageType: string;
+    kuaidicom?: string | null;
     shippedAt?: string | null;
     signedAt?: string | null;
     status?: string | null;
+    track?: ShipmentTrack | null;
   }>;
   signedAt: string | null;
   status: OrderStatus;
@@ -158,6 +197,7 @@ type OrderManagementPanelProps = {
   dishOptions: OrderDishOption[];
   initialItems: OrderPanelItem[];
   initialPagination: AdminPaginationMeta;
+  initialQuery?: string;
   initialSummary: OrderSummary;
   memberOptions: OrderMemberOption[];
   orderTasks?: OrderCutoffTask[];
@@ -303,6 +343,66 @@ function addressText(snapshot: Record<string, unknown> | null | undefined) {
     .join(" ") || "未记录地址";
 }
 
+function isSpecificAddressDetail(detail: string) {
+  const normalized = detail.replace(/\s+/g, "");
+  if (normalized.length < 6) {
+    return false;
+  }
+
+  return /[0-9一二三四五六七八九十栋幢单元室号弄巷路街道村组座楼园区]/.test(normalized);
+}
+
+function electronicWaybillAddressIssue(order: OrderPanelItem) {
+  const snapshot = order.addressSnapshot;
+  if (!snapshot || typeof snapshot !== "object") {
+    return "缺少收货地址";
+  }
+
+  const receiverName = textFromSnapshot(snapshot, "receiverName")?.trim();
+  const receiverPhone = textFromSnapshot(snapshot, "receiverPhone")?.trim();
+  const province = textFromSnapshot(snapshot, "province")?.trim();
+  const city = textFromSnapshot(snapshot, "city")?.trim();
+  const district = textFromSnapshot(snapshot, "district")?.trim();
+  const detail = textFromSnapshot(snapshot, "detail")?.trim();
+
+  if (!receiverName) {
+    return "缺少收货人";
+  }
+  if (!receiverPhone) {
+    return "缺少收货手机号";
+  }
+  if (!province || !city || !district) {
+    return "省、市、区需要填写完整";
+  }
+  if (!detail) {
+    return "缺少详细地址";
+  }
+  if (!isSpecificAddressDetail(detail)) {
+    return "详细地址过短，请补充街道、小区、楼栋或门牌号";
+  }
+
+  return null;
+}
+
+function findElectronicWaybillAddressIssue(
+  orderIds: string[],
+  orders: OrderPanelItem[],
+) {
+  for (const orderId of orderIds) {
+    const order = orders.find((item) => item.id === orderId);
+    if (!order) {
+      continue;
+    }
+
+    const issue = electronicWaybillAddressIssue(order);
+    if (issue) {
+      return `订单 ${order.orderNo} 的配送地址不完整：${issue}。请先编辑会员地址或让用户补充后再生成电子面单。`;
+    }
+  }
+
+  return null;
+}
+
 function formatJin(value: number) {
   const rounded = Number(value.toFixed(1));
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
@@ -334,6 +434,30 @@ function logisticsText(order: Pick<OrderPanelItem, "logisticsNo" | "shipments">)
   }
 
   return order.logisticsNo ?? "未发货";
+}
+
+function shipmentTrackSummary(track?: ShipmentTrack | null) {
+  if (!track) {
+    return "暂无轨迹";
+  }
+  const latest = track.events?.[0]?.content;
+  return latest || track.stateText || track.subscribeMessage || "暂无轨迹";
+}
+
+function shipmentTrackTime(track?: ShipmentTrack | null) {
+  return track?.events?.[0]?.eventTime ?? track?.lastTraceTime ?? track?.lastSyncAt ?? null;
+}
+
+function shipmentMapSummary(track?: ShipmentTrack | null) {
+  if (!track?.mapTrailUrl) {
+    return track?.mapMessage || "暂无地图轨迹";
+  }
+  return [
+    track.mapRemainTime ? `剩余 ${track.mapRemainTime}` : null,
+    track.mapArrivalTime ? `预计 ${track.mapArrivalTime}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ") || "查看物流地图";
 }
 
 function hasGeneratedLogistics(order: Pick<OrderPanelItem, "logisticsNo" | "shipments">) {
@@ -485,6 +609,35 @@ function normalizedFormShipments(shipments: OrderFormState["shipments"]) {
   }));
 }
 
+function validateOrderShipments(shipments: OrderFormState["shipments"]) {
+  const shipmentErrors = shipments.map((shipment) => {
+    const errors: Partial<Record<"logisticsNo" | "packageName", string>> = {};
+    if (!shipment.packageName.trim()) {
+      errors.packageName = "请输入包裹名称";
+    }
+    if (!shipment.logisticsNo.trim()) {
+      errors.logisticsNo = "请输入运单号";
+    }
+    return errors;
+  });
+
+  return shipmentErrors.some((errors) => Object.values(errors).some(Boolean))
+    ? shipmentErrors
+    : undefined;
+}
+
+function hasOrderFormErrors(
+  errors: OrderFormErrors | CancelOrderFormErrors,
+) {
+  return Object.values(errors).some((value) => {
+    if (Array.isArray(value)) {
+      return value.some((item) => Object.values(item).some(Boolean));
+    }
+
+    return Boolean(value);
+  });
+}
+
 function nextExtraShipmentName(shipments: OrderFormState["shipments"]) {
   const existingNames = new Set(
     shipments.map((shipment) => shipment.packageName.trim()),
@@ -505,17 +658,19 @@ export function OrderManagementPanel({
   dishOptions,
   initialItems,
   initialPagination,
+  initialQuery = "",
   initialSummary,
   memberOptions,
   orderTasks = [],
   store,
 }: OrderManagementPanelProps) {
+  const router = useRouter();
   const [items, setItems] = useState(() =>
     initialItems.map((item) => normalizeOrderListItem(item, store)),
   );
   const [pagination, setPagination] = useState(initialPagination);
   const [summary, setSummary] = useState(initialSummary);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | OrderStatus>("ALL");
@@ -528,15 +683,22 @@ export function OrderManagementPanel({
   const [initialForm, setInitialForm] = useState<OrderFormState>(
     buildOrderFormState(null, memberOptions),
   );
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(true);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [saving, setSaving] = useState(false);
   const [cloudPrinting, setCloudPrinting] = useState(false);
+  const [trackingShipmentId, setTrackingShipmentId] = useState<string | null>(null);
   const [printerOptions, setPrinterOptions] = useState<KuaidiPrinterOption[]>([]);
   const [pendingPrintOrderIds, setPendingPrintOrderIds] = useState<string[]>([]);
+  const [printConfirmOrderIds, setPrintConfirmOrderIds] = useState<string[]>([]);
   const [printerSelectorOpen, setPrinterSelectorOpen] = useState(false);
+  const [cancelCandidate, setCancelCandidate] = useState<OrderPanelItem | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<OrderFormErrors>({});
+  const [cancelFormErrors, setCancelFormErrors] =
+    useState<CancelOrderFormErrors>({});
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const detailRequestRef = useRef(0);
@@ -556,10 +718,12 @@ export function OrderManagementPanel({
     setModal({ item, mode });
     setForm(nextForm);
     setInitialForm(nextForm);
-    setFullscreen(false);
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setLoadingDetail(false);
     setError(null);
+    setFormErrors({});
+    setCancelFormErrors({});
 
     if (item) {
       void hydrateOrderDetail(item);
@@ -592,6 +756,7 @@ export function OrderManagementPanel({
     detailRequestRef.current += 1;
     setModal(null);
     setError(null);
+    setFormErrors({});
     setLoadingDetail(false);
   }
 
@@ -669,10 +834,22 @@ export function OrderManagementPanel({
     );
   }
 
+  function requestCancelOrder(order: OrderPanelItem) {
+    if (!canWrite || order.status !== "PENDING_SHIPMENT") {
+      return;
+    }
+
+    setCancelCandidate(order);
+    setCancelReason("");
+    setError(null);
+    setCancelFormErrors({});
+  }
+
   async function loadOrders(
     nextStatusFilter = statusFilter,
     nextPage = pagination.page,
     nextFilters?: Partial<OrderListFilters>,
+    pageSize = pagination.pageSize,
   ) {
     if (!store) {
       return;
@@ -680,7 +857,7 @@ export function OrderManagementPanel({
 
     const params = new URLSearchParams({ storeId: store.id });
     params.set("page", String(nextPage));
-    params.set("pageSize", String(pagination.pageSize));
+    params.set("pageSize", String(pageSize));
     const effectiveQuery = nextFilters?.query ?? query;
     const effectiveDateFrom = nextFilters?.dateFrom ?? dateFrom;
     const effectiveDateTo = nextFilters?.dateTo ?? dateTo;
@@ -723,7 +900,7 @@ export function OrderManagementPanel({
       const nextList = normalizeAdminListPayload(
         result.data,
         initialSummary,
-        pagination.pageSize,
+        pageSize,
       );
       const normalizedItems = nextList.items.map((item) =>
         normalizeOrderListItem(item, store),
@@ -745,6 +922,25 @@ export function OrderManagementPanel({
     }
   }
 
+  useEffect(() => {
+    const nextQuery = initialQuery.trim();
+    if (!nextQuery) {
+      return;
+    }
+
+    setQuery(nextQuery);
+    setDateFrom("");
+    setDateTo("");
+    setStatusFilter("ALL");
+    void loadOrders("ALL", 1, {
+      dateFrom: "",
+      dateTo: "",
+      query: nextQuery,
+      statusFilter: "ALL",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuery]);
+
   function applyStatusFilter(nextStatusFilter: "ALL" | OrderStatus) {
     setStatusFilter(nextStatusFilter);
     void loadOrders(nextStatusFilter, 1);
@@ -755,6 +951,9 @@ export function OrderManagementPanel({
     setDateFrom("");
     setDateTo("");
     setStatusFilter("ALL");
+    router.replace(
+      adminFilterResetHref(new URLSearchParams(window.location.search), "orders"),
+    );
     void loadOrders("ALL", 1, {
       dateFrom: "",
       dateTo: "",
@@ -790,6 +989,34 @@ export function OrderManagementPanel({
     return selectedOrderIds;
   }
 
+  function requestElectronicWaybillConfirmation(orderIds = currentPrintOrderIds()) {
+    if (!canWrite || !store) {
+      return;
+    }
+
+    const ids = [...new Set(orderIds)].filter(Boolean);
+    if (!ids.length) {
+      setError("请先勾选需要生成电子面单的待配送订单");
+      return;
+    }
+
+    const addressIssue = findElectronicWaybillAddressIssue(ids, items);
+    if (addressIssue) {
+      setError(addressIssue);
+      return;
+    }
+
+    setError(null);
+    setSuccessMessage(null);
+    setPrintConfirmOrderIds(ids);
+  }
+
+  function confirmElectronicWaybillPrint() {
+    const ids = printConfirmOrderIds;
+    setPrintConfirmOrderIds([]);
+    void cloudPrintOrders(ids);
+  }
+
   async function cloudPrintOrders(orderIds = currentPrintOrderIds()) {
     if (!canWrite || !store) {
       return;
@@ -798,6 +1025,12 @@ export function OrderManagementPanel({
     const ids = [...new Set(orderIds)].filter(Boolean);
     if (!ids.length) {
       setError("请先勾选需要生成电子面单的待配送订单");
+      return;
+    }
+
+    const addressIssue = findElectronicWaybillAddressIssue(ids, items);
+    if (addressIssue) {
+      setError(addressIssue);
       return;
     }
 
@@ -844,6 +1077,12 @@ export function OrderManagementPanel({
 
   async function submitCloudPrintOrders(orderIds: string[], printerId: string | null) {
     if (!canWrite || !store) {
+      return;
+    }
+
+    const addressIssue = findElectronicWaybillAddressIssue(orderIds, items);
+    if (addressIssue) {
+      setError(addressIssue);
       return;
     }
 
@@ -897,6 +1136,60 @@ export function OrderManagementPanel({
       );
     } finally {
       setCloudPrinting(false);
+    }
+  }
+
+  async function refreshShipmentTrack(orderId: string, shipmentId: string | undefined) {
+    if (!shipmentId || !store) {
+      return;
+    }
+    setTrackingShipmentId(shipmentId);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ storeId: store.id });
+      const response = await fetch(
+        `/api/admin/orders/${orderId}/shipments/${shipmentId}/track/refresh?${params.toString()}`,
+        { method: "POST" },
+      );
+      const result = (await response.json()) as {
+        data?: OrderPanelItem["shipments"][number];
+        error?: { message: string };
+        success: boolean;
+      };
+      if (!response.ok || !result.success || !result.data) {
+        throw new Error(result.error?.message ?? "刷新轨迹失败");
+      }
+      const updatedShipment = result.data;
+      setItems((value) =>
+        value.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                shipments: order.shipments.map((shipment) =>
+                  shipment.id === shipmentId ? updatedShipment : shipment,
+                ),
+              }
+            : order,
+        ),
+      );
+      setModal((value) =>
+        value?.item?.id === orderId
+          ? {
+              ...value,
+              item: {
+                ...value.item,
+                shipments: value.item.shipments.map((shipment) =>
+                  shipment.id === shipmentId ? updatedShipment : shipment,
+                ),
+              },
+            }
+          : value,
+      );
+      setSuccessMessage("物流轨迹已刷新");
+    } catch (trackError) {
+      setError(trackError instanceof Error ? trackError.message : "刷新轨迹失败");
+    } finally {
+      setTrackingShipmentId(null);
     }
   }
 
@@ -967,16 +1260,10 @@ export function OrderManagementPanel({
   );
   const createPackage = selectedCreateMember?.latestActivePackage ?? null;
   const createAddress = selectedCreateMember?.defaultAddress ?? null;
-  const createDisabled =
-    saving ||
-    !store ||
-    !selectedCreateMember ||
-    !createPackage ||
-    !createAddress ||
-    createOrderItems.length === 0 ||
-    createTotalWeightJin > (createPackage?.weightLimitJin ?? 0);
+  const createDisabled = saving || !store;
 
   function changeCreateDish(dish: OrderDishOption, delta: number) {
+    setFormErrors((current) => ({ ...current, createItems: undefined }));
     setForm((value) => {
       const current = Number(value.createItems[dish.id] || 0);
       const next = Math.max(current + delta, 0);
@@ -996,6 +1283,7 @@ export function OrderManagementPanel({
   }
 
   function addShipmentRow() {
+    setFormErrors((current) => ({ ...current, shipments: undefined }));
     setForm((value) => ({
       ...value,
       shipments: [
@@ -1010,6 +1298,7 @@ export function OrderManagementPanel({
   }
 
   function removeShipmentRow(index: number) {
+    setFormErrors((current) => ({ ...current, shipments: undefined }));
     setForm((value) => {
       const nextShipments = value.shipments.filter(
         (_, itemIndex) => itemIndex !== index,
@@ -1068,15 +1357,18 @@ export function OrderManagementPanel({
       return;
     }
 
-    setSaving(true);
-    setError(null);
-
     const shipments = normalizedFormShipments(form.shipments);
-    if (shipments.some((shipment) => !shipment.logisticsNo)) {
-      setError("请输入每个包裹的运单号");
-      setSaving(false);
+    const shipmentErrors = validateOrderShipments(form.shipments);
+    if (shipmentErrors) {
+      setFormErrors((current) => ({
+        ...current,
+        shipments: shipmentErrors,
+      }));
       return;
     }
+
+    setSaving(true);
+    setError(null);
 
     try {
       const response = await fetch(`/api/admin/orders/${modal.item.id}/ship`, {
@@ -1129,9 +1421,15 @@ export function OrderManagementPanel({
       return;
     }
 
-    if (hasLogisticsChange && shipments.some((shipment) => !shipment.logisticsNo)) {
-      setError("请输入每个包裹的运单号");
-      return;
+    if (hasLogisticsChange) {
+      const shipmentErrors = validateOrderShipments(form.shipments);
+      if (shipmentErrors) {
+        setFormErrors((current) => ({
+          ...current,
+          shipments: shipmentErrors,
+        }));
+        return;
+      }
     }
 
     if (hasLogisticsChange && modal.item.status !== "PENDING_SHIPMENT") {
@@ -1139,6 +1437,7 @@ export function OrderManagementPanel({
       return;
     }
 
+    setFormErrors({});
     setSaving(true);
     setError(null);
 
@@ -1244,6 +1543,56 @@ export function OrderManagementPanel({
     }
   }
 
+  async function confirmCancelOrder() {
+    if (!canWrite || !cancelCandidate || !store) {
+      return;
+    }
+
+    const reason = cancelReason.trim();
+    if (!reason) {
+      setCancelFormErrors({ reason: "请输入取消原因" });
+      return;
+    }
+
+    setCancelFormErrors({});
+    setSaving(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/admin/orders/${cancelCandidate.id}/cancel`, {
+        body: JSON.stringify({
+          reason,
+          storeId: store.id,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        data?: { order: Partial<OrderPanelItem> };
+        error?: { message: string };
+        success: boolean;
+      };
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error?.message ?? "取消订单失败");
+      }
+
+      if (modal?.item?.id === cancelCandidate.id) {
+        patchCurrentOrder(result.data?.order ?? {});
+        setModal(null);
+      }
+      setCancelCandidate(null);
+      setCancelReason("");
+      await loadOrders();
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : "取消订单失败",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function voidCurrentOrder() {
     if (!canWrite || !modal?.item || !store) {
       return;
@@ -1251,10 +1600,14 @@ export function OrderManagementPanel({
 
     const reason = form.voidReason.trim();
     if (!reason) {
-      setError("请输入作废原因");
+      setFormErrors((current) => ({
+        ...current,
+        voidReason: "请输入作废原因",
+      }));
       return;
     }
 
+    setFormErrors((current) => ({ ...current, voidReason: undefined }));
     setSaving(true);
     setError(null);
 
@@ -1288,18 +1641,21 @@ export function OrderManagementPanel({
   }
 
   async function createOrder() {
-    if (!canWrite || !store || !selectedCreateMember || !createPackage || !createAddress) {
-      setError("请选择具备可用套餐和默认地址的会员");
-      return;
+    const validationErrors: OrderFormErrors = {};
+    if (!selectedCreateMember || !createPackage || !createAddress) {
+      validationErrors.createUserId = "请选择具备可用套餐和默认地址的会员";
     }
-
     if (createOrderItems.length === 0) {
-      setError("请选择菜品");
-      return;
+      validationErrors.createItems = "请选择菜品";
+    } else if (createPackage && createTotalWeightJin > createPackage.weightLimitJin) {
+      validationErrors.createItems = "已超过套餐本次可预订重量";
     }
 
-    if (createTotalWeightJin > createPackage.weightLimitJin) {
-      setError("已超过套餐本次可预订重量");
+    setFormErrors(validationErrors);
+    if (!canWrite || !store || hasOrderFormErrors(validationErrors)) {
+      return;
+    }
+    if (!selectedCreateMember || !createPackage || !createAddress) {
       return;
     }
 
@@ -1360,51 +1716,8 @@ export function OrderManagementPanel({
   const allPrintableSelected =
     printableOrderIdsInView.length > 0 &&
     printableOrderIdsInView.every((orderId) => selectedOrderIds.includes(orderId));
-  const cutoffDisplay = buildCutoffDisplay(orderTasks, now);
-  const cutoffBadgeClass =
-    cutoffDisplay.tone === "danger"
-      ? "bg-red-50 text-red-700"
-      : cutoffDisplay.tone === "muted"
-        ? "bg-[#eef4ef] text-[#66756d]"
-        : "bg-[#fff1d3] text-[#8a5a00]";
   return (
     <section className="space-y-6">
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          ["今日待发货", summary.pendingShipment, "border-l-[#1f8f4f]"],
-          ["今日订单", summary.total, "border-l-[#2f5fb3]"],
-          ["已发货", summary.shipped, "border-l-[#d29b2d]"],
-          ["已签收", summary.signed, "border-l-[#64748b]"],
-        ].map(([label, value, accent]) => (
-          <div
-            className={`rounded-xl border border-[#dbe6dc] border-l-4 ${accent} bg-white px-4 py-4 shadow-sm`}
-            key={label}
-          >
-            <div className="text-sm font-medium text-[#66756d]">{label}</div>
-            <div className="mt-2 text-3xl font-semibold text-[#102017]">
-              {value}
-            </div>
-          </div>
-        ))}
-        <div className="rounded-xl border border-[#dbe6dc] bg-white px-4 py-4 shadow-sm">
-          <div className="text-sm font-medium text-[#66756d]">今日截单</div>
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <div className="text-3xl font-semibold text-[#102017]">
-              {cutoffDisplay.cutoffText}
-            </div>
-            <div
-              className={`rounded-full px-3 py-1 text-center text-sm font-semibold leading-5 ${cutoffBadgeClass}`}
-            >
-              {cutoffDisplay.detailLines.map((line) => (
-                <span className="block" key={line}>
-                  {line}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div className="flex flex-nowrap items-center gap-3 overflow-x-auto rounded-xl border border-[#dbe6dc] bg-white px-6 py-4 shadow-sm">
         <div className="flex min-w-[190px] flex-1 items-center gap-2 rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-3">
           <Search size={16} className="shrink-0 text-[#66756d]" />
@@ -1472,7 +1785,7 @@ export function OrderManagementPanel({
           <button
             className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-[#cfe3d3] bg-[#eff8f1] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:bg-[#edf0ec] disabled:text-[#91a497]"
             disabled={!store || cloudPrinting || selectedPrintableCount === 0}
-            onClick={() => void cloudPrintOrders()}
+            onClick={() => requestElectronicWaybillConfirmation()}
             title={
               !store
                 ? "当前账号未分配数据范围"
@@ -1641,7 +1954,9 @@ export function OrderManagementPanel({
                             <button
                               className="text-sm font-semibold text-[#1f8f4f] hover:underline disabled:text-[#9bb6a5] disabled:no-underline"
                               disabled={cloudPrinting || !orderCanPrint}
-                              onClick={() => void cloudPrintOrders([order.id])}
+                              onClick={() =>
+                                requestElectronicWaybillConfirmation([order.id])
+                              }
                               title={
                                 orderCanPrint
                                   ? "生成电子面单"
@@ -1652,6 +1967,19 @@ export function OrderManagementPanel({
                               type="button"
                             >
                               {hasGeneratedLogistics(order) ? "已生成" : "电子面单"}
+                            </button>
+                            <button
+                              className="text-sm font-semibold text-red-600 hover:underline disabled:text-[#c9a6a6] disabled:no-underline"
+                              disabled={cloudPrinting || order.status !== "PENDING_SHIPMENT"}
+                              onClick={() => requestCancelOrder(order)}
+                              title={
+                                order.status === "PENDING_SHIPMENT"
+                                  ? "取消订单"
+                                  : "仅待配送订单可取消"
+                              }
+                              type="button"
+                            >
+                              取消订单
                             </button>
                           </>
                         ) : null}
@@ -1672,6 +2000,9 @@ export function OrderManagementPanel({
         <AdminPagination
           disabled={loadingList}
           onPageChange={(nextPage) => void loadOrders(statusFilter, nextPage)}
+          onPageSizeChange={(nextPageSize) =>
+            void loadOrders(statusFilter, 1, undefined, nextPageSize)
+          }
           pagination={pagination}
         />
         </div>
@@ -1735,194 +2066,340 @@ export function OrderManagementPanel({
               </div>
             </div>
 
-            <div
-              aria-busy={loadingDetail}
-              className={[
-                "flex-1 gap-6 overflow-auto p-6",
-                modal.item ? "block" : "grid lg:grid-cols-[1fr_280px]",
-              ].join(" ")}
-            >
+            <div aria-busy={loadingDetail} className="flex-1 overflow-auto p-5">
               {modal.item ? (
-                <div className="space-y-8">
-                    <section>
-                      <h3 className="text-base font-semibold">基础信息</h3>
-                      <div className="mt-6 space-y-4 text-sm leading-6 text-[#405248]">
-                        <div className="flex items-center gap-3">
-                          <AdminMemberAvatar
-                            avatarUrl={modal.item.user?.avatarUrl}
-                            name={modal.item.user?.nickname}
-                            phone={modal.item.user?.phone}
-                          />
-                          <div className="min-w-0">
-                            <div className="font-semibold text-[#102017]">
-                              {modal.item.user?.nickname ?? "未命名会员"}
-                            </div>
-                            <div className="text-[#66756d]">
-                              {displayPhone(modal.item.user?.phone)}
+                  <div className="space-y-3">
+                      <section className="rounded-xl border border-[#dbe6dc] p-3">
+                        <h3 className="text-base font-semibold">基础信息</h3>
+                        <div className="mt-3 grid gap-2 text-sm leading-5 text-[#405248] md:grid-cols-2 xl:grid-cols-4">
+                          <div className="min-w-0 rounded-lg bg-[#f8fbf7] px-3 py-2">
+                            <div className="mb-2 text-xs font-medium text-[#66756d]">会员</div>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <AdminMemberAvatar
+                                avatarUrl={modal.item.user?.avatarUrl}
+                                name={modal.item.user?.nickname}
+                                phone={modal.item.user?.phone}
+                                size="sm"
+                              />
+                              <div className="min-w-0">
+                                <div className="truncate font-semibold text-[#102017]">
+                                  {modal.item.user?.nickname ?? "未命名会员"}
+                                </div>
+                                <div className="truncate text-[#66756d]">
+                                  {displayPhone(modal.item.user?.phone)}
+                                </div>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <div>配送地址：{addressText(modal.item.addressSnapshot)}</div>
-                        <div>
-                          套餐：{modal.item.userPackage?.nameSnapshot ?? "无套餐"} ·{" "}
-                          {STATUS_LABELS[modal.item.status] ?? modal.item.status}
-                        </div>
-                      </div>
-	                    </section>
-
-	                    <section>
-	                      <h3 className="text-base font-semibold">菜品明细</h3>
-                      <div className="mt-4 rounded-xl border border-[#dbe6dc] px-6 py-5">
-                        <div className="flex flex-wrap gap-4">
-                          {(modal.item.items ?? []).length === 0 ? (
-                            <div className="text-sm text-[#66756d]">无菜品记录</div>
-                          ) : null}
-                          {(modal.item.items ?? []).map((item) => (
+                          <div className="min-w-0 rounded-lg bg-[#f8fbf7] px-3 py-2">
+                            <div className="text-xs font-medium text-[#66756d]">配送地址</div>
                             <div
-                              className="flex min-w-[118px] items-center justify-center gap-4 rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-4 py-3 text-sm"
-                              key={item.id}
+                              className="mt-1 truncate font-semibold text-[#102017]"
+                              title={addressText(modal.item.addressSnapshot)}
                             >
-                              <span className="font-semibold">
+                              {addressText(modal.item.addressSnapshot)}
+                            </div>
+                          </div>
+                          <div className="min-w-0 rounded-lg bg-[#f8fbf7] px-3 py-2">
+                            <div className="text-xs font-medium text-[#66756d]">套餐</div>
+                            <div className="mt-1 truncate font-semibold text-[#102017]">
+                              {modal.item.userPackage?.nameSnapshot ?? "无套餐"}
+                            </div>
+                          </div>
+                          <div className="min-w-0 rounded-lg bg-[#f8fbf7] px-3 py-2">
+                            <div className="text-xs font-medium text-[#66756d]">状态</div>
+                            <div className="mt-1 truncate font-semibold text-[#102017]">
+                              {STATUS_LABELS[modal.item.status] ?? modal.item.status}
+                            </div>
+                          </div>
+                          {modal.item.cancelReason ? (
+                            <div className="rounded-lg bg-red-50 px-3 py-2 md:col-span-2 xl:col-span-4">
+                              <div className="text-[#66756d]">取消原因</div>
+                              <div className="mt-1 font-medium">
+                              {modal.item.cancelReason}
+                            {modal.item.canceledAt
+                              ? ` · ${formatDateTimeSecond(modal.item.canceledAt)}`
+                              : ""}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                      </section>
+
+                        <section className="rounded-xl border border-[#dbe6dc] p-3">
+                          <h3 className="text-base font-semibold">菜品明细</h3>
+                        <div className="mt-2">
+                          <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
+                            {(modal.item.items ?? []).length === 0 ? (
+                              <div className="text-sm text-[#66756d]">无菜品记录</div>
+                          ) : null}
+                            {(modal.item.items ?? []).map((item) => (
+                              <div
+                                className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-2.5 py-1.5 text-sm"
+                                key={item.id}
+                              >
+                              <span className="truncate font-semibold" title={item.dishNameSnapshot}>
                                 {item.dishNameSnapshot}
                               </span>
-                              <span className="text-[#405248]">
+                              <span className="shrink-0 text-[#405248]">
                                 {formatJin(item.weightJin)}斤
                               </span>
                             </div>
                           ))}
-	                        </div>
-	                        <div className="mt-5 border-t border-[#edf2ed] pt-4 text-sm text-[#405248]">
-	                          备注：{modal.item.userVisibleRemark || "无备注"}
-	                        </div>
-	                      </div>
-	                      {(modal.item.benefitItems ?? []).length > 0 ? (
-	                        <div className="mt-3 rounded-xl border border-[#dbe6dc] bg-[#fffdf5] px-6 py-4">
-	                          <div className="text-sm font-semibold">附加权益</div>
-	                          <div className="mt-3 flex flex-wrap gap-3">
-	                            {(modal.item.benefitItems ?? []).map((benefit) => (
-	                              <div
-	                                className="rounded-lg border border-[#f1e1b8] bg-white px-4 py-2 text-sm"
-	                                key={benefit.id}
-	                              >
-	                                <span className="font-semibold">
-	                                  {benefit.nameSnapshot}
-	                                </span>
-	                                <span className="ml-3 text-[#6d4b0f]">
-	                                  {formatQuantity(benefit.quantity)}
-	                                  {benefit.unitSnapshot}
-	                                </span>
-	                              </div>
-	                            ))}
-	                          </div>
-	                        </div>
-	                      ) : null}
-	                    </section>
+                          </div>
+                              <div className="mt-2 border-t border-[#edf2ed] pt-2 text-sm text-[#405248]">
+                              备注：{modal.item.userVisibleRemark || "无备注"}
+                            </div>
+                          </div>
+                          {(modal.item.benefitItems ?? []).length > 0 ? (
+                              <div className="mt-2 rounded-lg border border-[#f1e1b8] bg-[#fffdf5] p-2.5">
+                              <div className="text-sm font-semibold">附加权益</div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {(modal.item.benefitItems ?? []).map((benefit) => (
+                                  <div
+                                    className="rounded-lg border border-[#f1e1b8] bg-white px-3 py-1.5 text-sm"
+                                    key={benefit.id}
+                                  >
+                                  <span className="font-semibold">
+                                    {benefit.nameSnapshot}
+                                  </span>
+                                  <span className="ml-3 text-[#6d4b0f]">
+                                    {formatQuantity(benefit.quantity)}
+                                    {benefit.unitSnapshot}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </section>
 
-                    <section>
-                      <div className="flex items-center justify-between gap-3">
-                        <h3 className="text-base font-semibold">配送处理</h3>
+                    <section className="rounded-xl border border-[#dbe6dc] p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <h3 className="text-base font-semibold">配送处理</h3>
                         {modalCanEditShipment ? (
-                          <button
-                            className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#cfe3d3] bg-white px-3 text-sm font-semibold text-[#1f8f4f] hover:bg-[#f4fbf5]"
+                          <Button
+                            className="border-[#cfe3d3] text-[#1f8f4f]"
                             disabled={loadingDetail || saving}
                             onClick={addShipmentRow}
+                            size="sm"
                             type="button"
+                            variant="outline"
                           >
-                            <Plus className="h-4 w-4" />
+                            <Plus data-icon="inline-start" />
                             新增包裹
-                          </button>
-                        ) : null}
-                      </div>
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        {form.shipments.map((shipment, index) => (
-                          <div
-                            className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-3 text-sm"
-                            key={`${shipment.packageType}-${index}`}
-                          >
-                            <div className="mb-3 flex items-start gap-2">
-                              <label className="min-w-0 flex-1 font-medium">
-                                <span className="mb-2 block text-[#405248]">
-                                  {modalCanEditShipment ? (
-                                    <RequiredLabel>包裹名称</RequiredLabel>
-                                  ) : (
-                                    "包裹名称"
-                                  )}
-                                </span>
-                                <input
-                                  className="h-10 w-full rounded-lg border border-[#dbe6dc] bg-white px-3 text-sm outline-none focus:border-[#1f8f4f]"
-                                  disabled={
-                                    loadingDetail ||
-                                    !modalCanEditShipment
-                                  }
-                                  onChange={(event) =>
-                                    setForm((value) => ({
-                                      ...value,
-                                      shipments: value.shipments.map(
-                                        (item, itemIndex) =>
-                                          itemIndex === index
-                                            ? {
-                                                ...item,
-                                                packageName: event.target.value,
-                                              }
-                                            : item,
-                                      ),
-                                    }))
-                                  }
-                                  placeholder="例如：蔬菜包裹、鸡蛋包裹"
-                                  value={shipment.packageName}
-                                />
-                              </label>
-                              {form.shipments.length > 1 &&
-                              modalCanEditShipment ? (
-                                <button
-                                  aria-label={`删除${shipment.packageName || "包裹"}`}
-                                  className="mt-7 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-100 bg-white text-red-500 hover:bg-red-50"
-                                  disabled={loadingDetail || saving}
-                                  onClick={() => removeShipmentRow(index)}
-                                  type="button"
+                          </Button>
+                          ) : null}
+                        </div>
+                        {modalIsReadOnly ? (
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                            {form.shipments.map((shipment, index) => {
+                              const sourceShipment = modal.item?.shipments[index];
+                              const track = sourceShipment?.track;
+                              const latestTime = shipmentTrackTime(track);
+                              const currentOrderId = modal.item?.id;
+                              return (
+                                <div
+                                  className="rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-3 py-2 text-sm"
+                                  key={`${shipment.packageType}-${index}`}
                                 >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              ) : null}
-                            </div>
-                            <label className="block font-medium">
-                              <span className="mb-2 block text-[#405248]">
-                                {modalCanEditShipment ? (
-                                  <RequiredLabel>运单号</RequiredLabel>
-                                ) : (
-                                  "运单号"
-                                )}
-                              </span>
-                              <input
-                                className="h-11 w-full rounded-lg border border-[#dbe6dc] bg-white px-4 text-sm outline-none focus:border-[#1f8f4f]"
-                                disabled={
-                                  !modalCanEditShipment
-                                }
-                                onChange={(event) =>
-                                  setForm((value) => ({
-                                    ...value,
-                                    logisticsNo:
-                                      index === 0
-                                        ? event.target.value
-                                        : value.logisticsNo,
-                                    shipments: value.shipments.map(
-                                      (item, itemIndex) =>
-                                        itemIndex === index
-                                          ? {
-                                              ...item,
-                                              logisticsNo: event.target.value,
-                                            }
-                                          : item,
-                                    ),
-                                  }))
-                                }
-                                placeholder="录入运单号"
-                                value={shipment.logisticsNo}
-                              />
-                            </label>
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="truncate font-semibold text-[#102017]">
+                                        {shipment.packageName || `包裹 ${index + 1}`}
+                                      </div>
+                                      <div
+                                        className="mt-1 truncate text-[#405248]"
+                                        title={shipment.logisticsNo || "未发货"}
+                                      >
+                                        {shipment.logisticsNo || "未发货"}
+                                      </div>
+                                    </div>
+                                    {currentOrderId && sourceShipment?.id && shipment.logisticsNo ? (
+                                      <Button
+                                        className="h-7 shrink-0 border-[#cfe3d3] px-2 text-xs text-[#1f8f4f]"
+                                        disabled={trackingShipmentId === sourceShipment.id}
+                                        onClick={() =>
+                                          void refreshShipmentTrack(currentOrderId, sourceShipment.id)
+                                        }
+                                        size="sm"
+                                        type="button"
+                                        variant="outline"
+                                      >
+                                        {trackingShipmentId === sourceShipment.id ? "刷新中" : "刷新轨迹"}
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-2 rounded-md border border-[#dbe6dc] bg-white px-2 py-1.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-xs font-semibold text-[#1f8f4f]">
+                                        {track?.stateText || track?.subscribeStatus || "轨迹"}
+                                      </span>
+                                      {latestTime ? (
+                                        <span className="text-[11px] text-[#66756d]">
+                                          {formatDateTimeSecond(latestTime)}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <div
+                                      className="mt-1 truncate text-xs text-[#405248]"
+                                      title={shipmentTrackSummary(track)}
+                                    >
+                                      {shipmentTrackSummary(track)}
+                                    </div>
+                                    {(track?.events ?? []).slice(0, 3).length > 1 ? (
+                                      <div className="mt-1 space-y-1 border-t border-[#edf2ed] pt-1">
+                                        {(track?.events ?? []).slice(1, 3).map((event, eventIndex) => (
+                                          <div
+                                            className="truncate text-[11px] text-[#66756d]"
+                                            key={`${event.eventTime ?? eventIndex}-${eventIndex}`}
+                                            title={event.content}
+                                          >
+                                            {event.content}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                    {track?.mapTrailUrl ? (
+                                      <div className="mt-2 flex items-center justify-between gap-2 border-t border-[#edf2ed] pt-1.5">
+                                        <span
+                                          className="min-w-0 truncate text-[11px] text-[#66756d]"
+                                          title={shipmentMapSummary(track)}
+                                        >
+                                          {shipmentMapSummary(track)}
+                                        </span>
+                                        <a
+                                          className="shrink-0 rounded-md border border-[#cfe3d3] px-2 py-1 text-[11px] font-semibold text-[#1f8f4f] hover:bg-[#eef8f0]"
+                                          href={track.mapTrailUrl}
+                                          rel="noreferrer"
+                                          target="_blank"
+                                        >
+                                          物流地图
+                                        </a>
+                                      </div>
+                                    ) : track?.mapMessage ? (
+                                      <div
+                                        className="mt-2 truncate border-t border-[#edf2ed] pt-1.5 text-[11px] text-[#8a6d2a]"
+                                        title={track.mapMessage}
+                                      >
+                                        {track.mapMessage}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        ))}
-                      </div>
+                        ) : (
+                          <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                            {form.shipments.map((shipment, index) => (
+                              <div
+                                className="rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] p-2.5 text-sm"
+                                key={`${shipment.packageType}-${index}`}
+                              >
+                                <div className="mb-2 flex items-start gap-2">
+                                  <AdminFormField
+                                    className="min-w-0 flex-1 font-medium"
+                                    error={formErrors.shipments?.[index]?.packageName}
+                                    label="包裹名称"
+                                    required
+                                  >
+                                    {(invalid) => (
+                                    <input
+                                      aria-invalid={invalid}
+                                      className="h-9 w-full rounded-lg border border-[#dbe6dc] bg-white px-3 text-sm outline-none focus:border-[#1f8f4f]"
+                                      disabled={loadingDetail || !modalCanEditShipment}
+                                      onChange={(event) => {
+                                        setFormErrors((current) => ({
+                                          ...current,
+                                          shipments: current.shipments?.map(
+                                            (item, itemIndex) =>
+                                              itemIndex === index
+                                                ? { ...item, packageName: undefined }
+                                                : item,
+                                          ),
+                                        }));
+                                        setForm((value) => ({
+                                          ...value,
+                                          shipments: value.shipments.map(
+                                            (item, itemIndex) =>
+                                              itemIndex === index
+                                                ? {
+                                                    ...item,
+                                                    packageName: event.target.value,
+                                                  }
+                                              : item,
+                                          ),
+                                        }));
+                                      }}
+                                      placeholder="例如：蔬菜包裹"
+                                      value={shipment.packageName}
+                                    />
+                                    )}
+                                  </AdminFormField>
+                                  {form.shipments.length > 1 &&
+                                  modalCanEditShipment ? (
+                                    <Button
+                                      aria-label={`删除${shipment.packageName || "包裹"}`}
+                                      className="mt-6 border-red-100 text-red-600 hover:bg-red-50"
+                                      disabled={loadingDetail || saving}
+                                      onClick={() => removeShipmentRow(index)}
+                                      size="sm"
+                                      type="button"
+                                      variant="outline"
+                                    >
+                                      <Trash2 data-icon="inline-start" />
+                                      删除
+                                    </Button>
+                                  ) : null}
+                                </div>
+                                <AdminFormField
+                                  className="block font-medium"
+                                  error={formErrors.shipments?.[index]?.logisticsNo}
+                                  label="运单号"
+                                  required
+                                >
+                                  {(invalid) => (
+                                  <input
+                                    aria-invalid={invalid}
+                                    className="h-9 w-full rounded-lg border border-[#dbe6dc] bg-white px-3 text-sm outline-none focus:border-[#1f8f4f]"
+                                    disabled={!modalCanEditShipment}
+                                    onChange={(event) => {
+                                      setFormErrors((current) => ({
+                                        ...current,
+                                        shipments: current.shipments?.map(
+                                          (item, itemIndex) =>
+                                            itemIndex === index
+                                              ? { ...item, logisticsNo: undefined }
+                                              : item,
+                                        ),
+                                      }));
+                                      setForm((value) => ({
+                                        ...value,
+                                        logisticsNo:
+                                          index === 0
+                                            ? event.target.value
+                                            : value.logisticsNo,
+                                        shipments: value.shipments.map(
+                                          (item, itemIndex) =>
+                                            itemIndex === index
+                                              ? {
+                                                  ...item,
+                                                  logisticsNo: event.target.value,
+                                                }
+                                            : item,
+                                        ),
+                                      }));
+                                    }}
+                                    placeholder="录入运单号"
+                                    value={shipment.logisticsNo}
+                                  />
+                                  )}
+                                </AdminFormField>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       {modal.mode === "edit" ? (
                         <label className="mt-5 flex max-w-xl flex-col gap-2 text-sm font-medium">
                           内部备注
@@ -1950,33 +2427,43 @@ export function OrderManagementPanel({
                   </div>
               ) : (
                 <>
-                  <div className="flex flex-col gap-5">
+                    <div className="flex flex-col gap-4">
                     <section className="rounded-xl border border-[#dbe6dc] p-4">
                       <h3 className="font-semibold">会员与套餐</h3>
-                      <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
-                        <RequiredLabel>会员</RequiredLabel>
-                        <select
-                          className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
-                          onChange={(event) =>
-                            setForm((value) => ({
-                              ...value,
+                      <AdminFormField
+                        className="mt-4 text-sm font-medium"
+                        error={formErrors.createUserId}
+                        label="会员"
+                        required
+                      >
+                        {(invalid) => (
+                        <AdminSelect
+                          ariaInvalid={invalid}
+                          contentLabel="会员"
+                          onChange={(memberId) => {
+                            setFormErrors((current) => ({
+                              ...current,
+                              createItems: undefined,
+                              createUserId: undefined,
+                            }));
+                            setForm((current) => ({
+                              ...current,
                               createItems: {},
-                              createUserId: event.target.value,
-                            }))
-                          }
+                              createUserId: memberId,
+                            }));
+                          }}
+                          options={memberOptions.map((member) => ({
+                            label: `${member.nickname ?? "未命名会员"} · ${displayPhone(member.phone)}`,
+                            value: member.id,
+                          }))}
+                          triggerClassName="h-11 w-full border-[#dbe6dc] bg-white"
                           value={form.createUserId}
-                        >
-                          {memberOptions.map((member) => (
-                            <option key={member.id} value={member.id}>
-                              {member.nickname ?? "未命名会员"} ·{" "}
-                              {displayPhone(member.phone)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
+                        />
+                        )}
+                      </AdminFormField>
+                        <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
                         <div className="rounded-xl bg-[#f8fbf7] p-3">
-	                          <div className="text-[#66756d]">可用套餐</div>
+                            <div className="text-[#66756d]">可用套餐</div>
                           <div className="mt-1 font-semibold">
                             {createPackage
                               ? `${createPackage.remainingTimes}/${createPackage.totalTimes} 次 · ${createPackage.weightLimitJin}斤`
@@ -1995,66 +2482,73 @@ export function OrderManagementPanel({
                     </section>
 
                     <section className="rounded-xl border border-[#dbe6dc] p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <h3 className="font-semibold">
-                          <RequiredLabel>选择菜品</RequiredLabel>
-                        </h3>
-                        <div className="text-sm text-[#66756d]">
-                          已选 {createTotalWeightJin.toFixed(1)} /{" "}
-                          {createPackage?.weightLimitJin ?? 0}斤
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-col gap-2">
-                        {dishOptions
-                          .filter((dish) => dish.status === "ON_SALE")
-                          .map((dish) => {
-                            const weight = Number(form.createItems[dish.id] || 0);
-                            return (
-                              <div
-                                className="flex items-center justify-between gap-3 rounded-lg bg-[#f8fbf7] px-3 py-2 text-sm"
-                                key={dish.id}
-                              >
-                                <div className="min-w-0">
-                                  <div className="truncate font-semibold">
-                                    {dish.name}
-                                  </div>
-                                  <div className="text-xs text-[#66756d]">
-                                    库存 {dish.stockJin}斤 · 步进 {dish.stepJin}斤
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    className="grid h-8 w-8 place-items-center rounded-full bg-[#eef5eb] font-semibold text-[#1f8f4f]"
-                                    onClick={() => changeCreateDish(dish, -dish.stepJin)}
-                                    type="button"
+                      <AdminFormField
+                        error={formErrors.createItems}
+                        label="选择菜品"
+                        required
+                      >
+                        {() => (
+                        <>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm text-[#66756d]">
+                              已选 {createTotalWeightJin.toFixed(1)} /{" "}
+                              {createPackage?.weightLimitJin ?? 0}斤
+                            </div>
+                          </div>
+                          <div className="mt-3 flex flex-col gap-2">
+                            {dishOptions
+                              .filter((dish) => dish.status === "ON_SALE")
+                              .map((dish) => {
+                                const weight = Number(form.createItems[dish.id] || 0);
+                                return (
+                                  <div
+                                    className="flex items-center justify-between gap-3 rounded-lg bg-[#f8fbf7] px-3 py-2 text-sm"
+                                    key={dish.id}
                                   >
-                                    -
-                                  </button>
-                                  <span className="w-10 text-center font-semibold">
-                                    {weight}
-                                  </span>
-                                  <button
-                                    className="grid h-8 w-8 place-items-center rounded-full bg-[#1f8f4f] font-semibold text-white"
-                                    onClick={() => changeCreateDish(dish, dish.stepJin)}
-                                    type="button"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                      </div>
+                                    <div className="min-w-0">
+                                      <div className="truncate font-semibold">
+                                        {dish.name}
+	                                      </div>
+	                                      <div className="text-xs text-[#66756d]">
+	                                        步进 {dish.stepJin}斤
+	                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        className="grid h-8 w-8 place-items-center rounded-full bg-[#eef5eb] font-semibold text-[#1f8f4f]"
+                                        onClick={() => changeCreateDish(dish, -dish.stepJin)}
+                                        type="button"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="w-10 text-center font-semibold">
+                                        {weight}
+                                      </span>
+                                      <button
+                                        className="grid h-8 w-8 place-items-center rounded-full bg-[#1f8f4f] font-semibold text-white"
+                                        onClick={() => changeCreateDish(dish, dish.stepJin)}
+                                        type="button"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        </>
+                        )}
+                      </AdminFormField>
                     </section>
                   </div>
 
-                  <aside className="flex flex-col gap-4">
-                    <div className="rounded-xl border border-[#cfe3d3] bg-[#f8fff8] p-4">
-                      <h3 className="font-semibold">备注</h3>
-                      <label className="mt-3 flex flex-col gap-2 text-sm font-medium">
-                        会员可见备注
-                        <textarea
-                          className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
+                    <section className="mt-4 rounded-xl border border-[#cfe3d3] bg-[#f8fff8] p-4">
+                        <h3 className="font-semibold">备注</h3>
+                        <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                        <label className="flex flex-col gap-2 font-medium">
+                          会员可见备注
+                          <textarea
+                            className="min-h-20 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
                           onChange={(event) =>
                             setForm((value) => ({
                               ...value,
@@ -2062,24 +2556,24 @@ export function OrderManagementPanel({
                             }))
                           }
                           placeholder="如：不要香菜，配送前电话确认"
-                          value={form.userVisibleRemark}
-                        />
-                      </label>
-                      <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
-                        内部备注
-                        <textarea
-                          className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
+                            value={form.userVisibleRemark}
+                          />
+                        </label>
+                        <label className="flex flex-col gap-2 font-medium">
+                          内部备注
+                          <textarea
+                            className="min-h-20 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
                           onChange={(event) =>
                             setForm((value) => ({
                               ...value,
                               internalRemark: event.target.value,
                             }))
                           }
-                          value={form.internalRemark}
-                        />
-                      </label>
-                    </div>
-                  </aside>
+                            value={form.internalRemark}
+                          />
+                        </label>
+                        </div>
+                    </section>
                 </>
               )}
 
@@ -2094,6 +2588,16 @@ export function OrderManagementPanel({
                   type="button"
                 >
                   {saving ? "保存中" : "保存"}
+                </button>
+              ) : null}
+              {canWrite && modal.item?.status === "PENDING_SHIPMENT" ? (
+                <button
+                  className="h-10 rounded-xl border border-red-100 bg-red-50 px-5 font-semibold text-red-600 disabled:opacity-60"
+                  disabled={saving || loadingDetail || !store}
+                  onClick={() => modal.item && requestCancelOrder(modal.item)}
+                  type="button"
+                >
+                  取消订单
                 </button>
               ) : null}
               <button
@@ -2175,6 +2679,71 @@ export function OrderManagementPanel({
             </div>
           </div>
         </div>
+      ) : null}
+      {printConfirmOrderIds.length > 0 ? (
+        <AdminConfirmDialog
+          busy={cloudPrinting}
+          confirmLabel="生成电子面单"
+          message={
+            <div>
+              <div>
+                将为 {printConfirmOrderIds.length} 个待配送订单生成电子面单。
+              </div>
+              <div className="mt-2">
+                生成后会写入物流单号，已生成运单的订单不会重复处理。
+              </div>
+            </div>
+          }
+          onCancel={() => setPrintConfirmOrderIds([])}
+          onConfirm={confirmElectronicWaybillPrint}
+          title="确认生成电子面单"
+        />
+      ) : null}
+      {cancelCandidate ? (
+        <AdminConfirmDialog
+          busy={saving}
+          cancelLabel="再想想"
+          confirmDisabled={saving || !cancelReason.trim()}
+          confirmLabel="确认取消"
+          message={
+            <div className="space-y-4">
+              <div>
+	                订单会保留在后台，并标记为已取消，同时恢复套餐次数和附加权益。
+              </div>
+              <AdminFormField
+                error={cancelFormErrors.reason}
+                label="取消原因"
+                required
+              >
+                {(invalid) => (
+                <textarea
+                  aria-invalid={invalid}
+                  className="mt-2 min-h-24 w-full resize-y rounded-xl border border-[#dbe6dc] bg-white p-3 text-sm outline-none focus:border-[#1f8f4f]"
+                  disabled={saving}
+                  onChange={(event) => {
+                    setCancelReason(event.target.value);
+                    setCancelFormErrors((current) => ({
+                      ...current,
+                      reason: undefined,
+                    }));
+                  }}
+                  placeholder="请输入取消原因"
+                  value={cancelReason}
+                />
+                )}
+              </AdminFormField>
+            </div>
+          }
+          onCancel={() => {
+            if (!saving) {
+              setCancelCandidate(null);
+              setCancelReason("");
+            }
+          }}
+          onConfirm={confirmCancelOrder}
+          title="确认取消订单"
+          variant="danger"
+        />
       ) : null}
       {error ? (
         <AdminAlertDialog message={error} onClose={() => setError(null)} />

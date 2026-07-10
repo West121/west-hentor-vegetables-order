@@ -25,6 +25,7 @@ import type {
   AdminMenuTreeNode,
   AdminNavIcon,
 } from "@/app/lib/admin-navigation";
+import { AdminSelect } from "./admin-select";
 
 const iconMap: Record<AdminNavIcon, ComponentType<LucideProps>> = {
   "badge-check": BadgeCheck,
@@ -121,17 +122,16 @@ export function MenuManagementPanel({ menuTree }: MenuManagementPanelProps) {
         </label>
         <label className="flex w-40 flex-col gap-1 text-xs font-semibold text-[#66756d]">
           层级
-          <select
-            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-            onChange={(event) =>
-              setLevelFilter(event.target.value as "ALL" | "1" | "2")
-            }
+          <AdminSelect
+            contentLabel="层级"
+            onChange={(value) => setLevelFilter(value as "ALL" | "1" | "2")}
+            options={[
+              { label: "全部层级", value: "ALL" },
+              { label: "一级菜单", value: "1" },
+              { label: "二级菜单", value: "2" },
+            ]}
             value={levelFilter}
-          >
-            <option value="ALL">全部层级</option>
-            <option value="1">一级菜单</option>
-            <option value="2">二级菜单</option>
-          </select>
+          />
         </label>
         <button
           className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-5 text-sm font-semibold text-[#66756d] hover:bg-[#f3f7f1]"

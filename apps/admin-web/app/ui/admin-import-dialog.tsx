@@ -59,6 +59,7 @@ export function AdminImportDialog({
     <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
       <div
         aria-modal="true"
+        data-admin-modal-shell
         className="mx-auto flex max-h-[86vh] w-[760px] max-w-full flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl"
         role="dialog"
       >

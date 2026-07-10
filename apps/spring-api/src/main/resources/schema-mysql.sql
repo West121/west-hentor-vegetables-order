@@ -208,6 +208,7 @@ CREATE TABLE IF NOT EXISTS `TaskDish` (
   `taskId` varchar(191) NOT NULL,
   `dishId` varchar(191) NOT NULL,
   `sortOrder` int NOT NULL DEFAULT 0,
+  `totalWeightJin` decimal(10,2) NOT NULL DEFAULT 0,
   PRIMARY KEY (`taskId`, `dishId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -266,6 +267,7 @@ CREATE TABLE IF NOT EXISTS `OrderShipment` (
   `packageType` varchar(64) NOT NULL,
   `packageName` varchar(191) NOT NULL,
   `logisticsNo` varchar(191),
+  `kuaidicom` varchar(64),
   `status` varchar(32) NOT NULL DEFAULT 'PENDING',
   `sortOrder` int NOT NULL DEFAULT 0,
   `shippedAt` datetime,
@@ -274,6 +276,49 @@ CREATE TABLE IF NOT EXISTS `OrderShipment` (
   `createdAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY `OrderShipment_orderId_sortOrder_idx` (`orderId`, `sortOrder`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `OrderShipmentTrack` (
+  `id` varchar(191) PRIMARY KEY,
+  `orderId` varchar(191) NOT NULL,
+  `shipmentId` varchar(191) NOT NULL,
+  `logisticsNo` varchar(191) NOT NULL,
+  `kuaidicom` varchar(64),
+  `stateCode` varchar(32),
+  `stateText` varchar(64),
+  `subscribeStatus` varchar(64) NOT NULL DEFAULT 'PENDING',
+  `subscribeMessage` varchar(500),
+  `lastTraceTime` datetime,
+  `lastSyncAt` datetime,
+  `mapStatus` varchar(64),
+  `mapMessage` varchar(500),
+  `mapTrailUrl` varchar(1000),
+  `mapArrivalTime` varchar(191),
+  `mapTotalTime` varchar(191),
+  `mapRemainTime` varchar(191),
+  `mapSyncedAt` datetime,
+  `mapRawJson` json,
+  `rawJson` json,
+  `createdAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `OrderShipmentTrack_shipmentId_uq` (`shipmentId`),
+  KEY `OrderShipmentTrack_orderId_idx` (`orderId`),
+  KEY `OrderShipmentTrack_logisticsNo_idx` (`logisticsNo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `OrderShipmentTrackEvent` (
+  `id` varchar(191) PRIMARY KEY,
+  `trackId` varchar(191) NOT NULL,
+  `shipmentId` varchar(191) NOT NULL,
+  `eventTime` datetime,
+  `content` varchar(1000) NOT NULL,
+  `location` varchar(191),
+  `status` varchar(64),
+  `sortOrder` int NOT NULL DEFAULT 0,
+  `rawJson` json,
+  `createdAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `OrderShipmentTrackEvent_trackId_sort_idx` (`trackId`, `sortOrder`),
+  KEY `OrderShipmentTrackEvent_shipmentId_idx` (`shipmentId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `Kuaidi100Printer` (
@@ -292,6 +337,7 @@ CREATE TABLE IF NOT EXISTS `Kuaidi100Printer` (
   `payType` varchar(64),
   `siid` varchar(191) NOT NULL,
   `tempId` varchar(191),
+  `senderAddress` varchar(500),
   `senderCompany` varchar(191),
   `requestParams` json,
   `sortOrder` int NOT NULL DEFAULT 0,
@@ -336,6 +382,17 @@ CREATE TABLE IF NOT EXISTS `AdminUser` (
   `lastLoginAt` datetime,
   `createdAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `AdminWechatBinding` (
+  `id` varchar(191) PRIMARY KEY,
+  `adminUserId` varchar(191) NOT NULL UNIQUE,
+  `openid` varchar(191) NOT NULL UNIQUE,
+  `unionid` varchar(191),
+  `lastLoginAt` datetime,
+  `createdAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY `AdminWechatBinding_unionid_idx` (`unionid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `AdminRole` (

@@ -15,7 +15,10 @@ vi.mock("@tarojs/taro", () => ({
 
 import {
   buildWxSessionLoginUrl,
+  getMiniSessionToken,
+  MINI_SESSION_LOGGED_OUT_KEY,
   MINI_SESSION_TOKEN_KEY,
+  rememberMiniSessionLogout,
   refreshMiniSessionToken,
   requestWithMiniSession,
 } from "./auth";
@@ -27,8 +30,8 @@ describe("miniapp auth session helpers", () => {
   });
 
   it("builds the Spring WeChat session refresh URL", () => {
-    expect(buildWxSessionLoginUrl("https://mmprd.hentor.com:8103")).toBe(
-      "https://mmprd.hentor.com:8103/api/v1/auth/wx-session",
+    expect(buildWxSessionLoginUrl("https://mmprd.hentor.com:8203")).toBe(
+      "https://mmprd.hentor.com:8203/api/v1/auth/wx-session",
     );
   });
 
@@ -47,7 +50,7 @@ describe("miniapp auth session helpers", () => {
 
     await expect(
       refreshMiniSessionToken({
-        apiBaseUrl: "https://mmprd.hentor.com:8103",
+        apiBaseUrl: "https://mmprd.hentor.com:8203",
         storeCode: "lotus-garden",
       }),
     ).resolves.toBe("fresh-token");
@@ -58,7 +61,7 @@ describe("miniapp auth session helpers", () => {
         storeCode: "lotus-garden",
       },
       method: "POST",
-      url: "https://mmprd.hentor.com:8103/api/v1/auth/wx-session",
+      url: "https://mmprd.hentor.com:8203/api/v1/auth/wx-session",
     });
     expect(taro.setStorageSync).toHaveBeenCalledWith(
       MINI_SESSION_TOKEN_KEY,
@@ -67,6 +70,41 @@ describe("miniapp auth session helpers", () => {
     expect(taro.setStorageSync).toHaveBeenCalledWith(
       ACTIVE_STORE_CODE_KEY,
       "lotus-garden",
+    );
+    expect(taro.removeStorageSync).toHaveBeenCalledWith(
+      MINI_SESSION_LOGGED_OUT_KEY,
+    );
+  });
+
+  it("remembers explicit logout and blocks silent WeChat session refresh", async () => {
+    taro.getStorageSync.mockImplementation((key: string) => {
+      if (key === MINI_SESSION_LOGGED_OUT_KEY) {
+        return "1";
+      }
+      return "";
+    });
+
+    await expect(
+      getMiniSessionToken({
+        apiBaseUrl: "https://mmprd.hentor.com:8203",
+        storeCode: "lotus-garden",
+      }),
+    ).rejects.toThrow("请先登录");
+
+    expect(taro.login).not.toHaveBeenCalled();
+    expect(taro.request).not.toHaveBeenCalled();
+  });
+
+  it("marks explicit logout without deleting the selected store", () => {
+    rememberMiniSessionLogout();
+
+    expect(taro.removeStorageSync).toHaveBeenCalledWith(MINI_SESSION_TOKEN_KEY);
+    expect(taro.setStorageSync).toHaveBeenCalledWith(
+      MINI_SESSION_LOGGED_OUT_KEY,
+      "1",
+    );
+    expect(taro.removeStorageSync).not.toHaveBeenCalledWith(
+      ACTIVE_STORE_CODE_KEY,
     );
   });
 
@@ -99,7 +137,7 @@ describe("miniapp auth session helpers", () => {
 
     await expect(
       requestWithMiniSession({
-        apiBaseUrl: "https://mmprd.hentor.com:8103",
+        apiBaseUrl: "https://mmprd.hentor.com:8203",
         request: authedRequest,
         storeCode: "lotus-garden",
       }),
@@ -125,7 +163,7 @@ describe("miniapp auth session helpers", () => {
 
     await expect(
       requestWithMiniSession({
-        apiBaseUrl: "https://mmprd.hentor.com:8103",
+        apiBaseUrl: "https://mmprd.hentor.com:8203",
         request: vi.fn(),
         storeCode: "lotus-garden",
       }),

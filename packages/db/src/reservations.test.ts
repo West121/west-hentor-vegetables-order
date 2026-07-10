@@ -1413,7 +1413,7 @@ describe("shipOrder", () => {
       storeId: fixture.store.id,
       userId: fixture.user.id,
       userPackageId: fixture.userPackage.id,
-      userVisibleRemark: "导出备注",
+      userVisibleRemark: "=导出备注",
     });
     const pendingOrder = await submitReservation({
       addressId: fixture.address.id,
@@ -1459,7 +1459,8 @@ describe("shipOrder", () => {
     expect(result.csvText).toContain("菠菜 1斤");
     expect(result.csvText).toContain("测试小区 1 栋 101");
     expect(result.csvText).toContain("SF-EXPORT-001");
-    expect(result.csvText).toContain("导出备注");
+    expect(result.csvText).toContain("'=导出备注");
+    expect(result.csvText).not.toContain(",=导出备注,");
     expect(result.csvText).not.toContain(pendingOrder.orderNo);
   });
 

@@ -1,22 +1,10 @@
 "use client";
 
-import {
-  Maximize2,
-  Minimize2,
-  Pencil,
-  RefreshCw,
-  Save,
-  Settings,
-  X,
-} from "lucide-react";
-import { useRef, useState, type PointerEvent } from "react";
-import {
-  createAdminModalDragState,
-  getBoundedAdminModalOffset,
-  type AdminModalDragState,
-} from "./admin-modal-drag";
+import { ImagePlus, Pencil, RefreshCw, Save, Settings, Trash2, Upload } from "lucide-react";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
 
-import { CHINA_PROVINCE_REGIONS } from "@hentor/shared";
+import { AdminDraggableModal } from "./admin-draggable-modal";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import { hasAdminFormChanges } from "./admin-form-dirty";
 import {
@@ -24,6 +12,8 @@ import {
   canSubmitSystemSettings,
   type SystemSettingsFormState,
 } from "./system-settings-form";
+import { AdminFormField } from "./admin-form-field";
+import { AdminRichTextEditor } from "./admin-rich-text-editor";
 import { RequiredLabel } from "./required-mark";
 
 type StoreOption = {
@@ -53,8 +43,15 @@ type ApiResponse<T> = {
   success: boolean;
 };
 
+type SystemSettingsFormErrors = Partial<Record<"homeDishColumns", string>>;
+
+const LOGIN_IMAGE_ACCEPT = "image/avif,image/jpeg,image/png,image/webp";
+const LOGIN_IMAGE_MAX_SIZE = 3 * 1024 * 1024;
+const LOGIN_IMAGE_UPLOAD_TIP = "支持 JPG、PNG、WebP、AVIF，建议 800×600 以上，单张不超过 3MB。";
+
 function buildForm(settings: SystemSettingsPanelItem | null): SystemSettingsFormState {
   return {
+    adminSystemName: settings?.adminSystemName ?? "HanYang Fresh",
     aboutText: settings?.aboutText ?? "",
     customerServiceTel: settings?.customerServiceTel ?? "",
     deliveryCities: settings?.deliveryCities ?? [],
@@ -64,180 +61,23 @@ function buildForm(settings: SystemSettingsPanelItem | null): SystemSettingsForm
     loginSubtitle: settings?.loginSubtitle ?? "",
     loginTitle: settings?.loginTitle ?? "",
     loginWelcome: settings?.loginWelcome ?? "",
+    privacyPolicyContent: settings?.privacyPolicyContent ?? "",
     privacyPolicyUrl: settings?.privacyPolicyUrl ?? "",
+    userAgreementContent: settings?.userAgreementContent ?? "",
     userAgreementUrl: settings?.userAgreementUrl ?? "",
   };
 }
 
-function linkStatus(value: string) {
+function contentStatus(value: string) {
   return value.trim() ? "已配置" : "未配置";
 }
 
-function rangeStatus(values: string[]) {
-  return values.length > 0 ? values.join("、") : "不限";
-}
-
-function removeValue(values: string[], value: string) {
-  return values.filter((item) => item !== value);
-}
-
-function toggleValue(values: string[], value: string) {
-  return values.includes(value) ? removeValue(values, value) : [...values, value];
-}
-
-function deliveryScopeText(provinces: string[], cities: string[]) {
-  const parts = [
-    ...provinces.map((province) => `${province}全省`),
-    ...cities,
-  ];
-  return parts.length > 0 ? parts.join("、") : "全国不限";
-}
-
-function DeliveryRangePicker({
-  cities,
-  disabled,
-  onChange,
-  provinces,
-}: {
-  cities: string[];
-  disabled?: boolean;
-  onChange: (next: { cities: string[]; provinces: string[] }) => void;
-  provinces: string[];
-}) {
-  const [activeProvince, setActiveProvince] = useState(
-    provinces[0] ?? CHINA_PROVINCE_REGIONS[0]?.province ?? "",
-  );
-  const activeRegion =
-    CHINA_PROVINCE_REGIONS.find((region) => region.province === activeProvince) ??
-    CHINA_PROVINCE_REGIONS[0] ??
-    { cities: [], province: "" };
-
-  function toggleProvince(province: string) {
-    if (disabled) {
-      return;
-    }
-
-    const provinceCities =
-      CHINA_PROVINCE_REGIONS.find((region) => region.province === province)
-        ?.cities ?? [];
-    const selected = provinces.includes(province);
-    onChange({
-      cities: selected
-        ? cities
-        : cities.filter((city) => !provinceCities.includes(city)),
-      provinces: toggleValue(provinces, province),
-    });
+function validateSystemSettingsForm(form: SystemSettingsFormState) {
+  const errors: SystemSettingsFormErrors = {};
+  if (![2, 3, 4].includes(Number(form.homeDishColumns))) {
+    errors.homeDishColumns = "请选择首页菜品每行数量";
   }
-
-  function toggleCity(city: string) {
-    if (disabled || provinces.includes(activeRegion.province)) {
-      return;
-    }
-
-    onChange({
-      cities: toggleValue(cities, city),
-      provinces,
-    });
-  }
-
-  return (
-    <div className="rounded-2xl border border-[#dbe6dc] bg-[#f8fbf7] p-4 lg:col-span-2">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-[#102017]">配送范围</div>
-          <div className="mt-1 text-xs leading-5 text-[#66756d]">
-            选中省份表示该省全部城市可配送；不选省份时，可展开省份单独选择城市。
-          </div>
-        </div>
-        <button
-          className="h-8 rounded-lg border border-[#cfe3d3] bg-white px-3 text-xs font-semibold text-[#1f8f4f] disabled:opacity-50"
-          disabled={disabled || (provinces.length === 0 && cities.length === 0)}
-          onClick={() => onChange({ cities: [], provinces: [] })}
-          type="button"
-        >
-          清空范围
-        </button>
-      </div>
-
-      <div className="mt-4 rounded-xl border border-[#dbe6dc] bg-white p-3 text-sm text-[#405248]">
-        当前范围：{deliveryScopeText(provinces, cities)}
-      </div>
-
-      <div className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr]">
-        <div className="max-h-72 overflow-auto rounded-xl border border-[#dbe6dc] bg-white p-2">
-          {CHINA_PROVINCE_REGIONS.map((region) => {
-            const selected = provinces.includes(region.province);
-            const cityCount = region.cities.filter((city) =>
-              cities.includes(city),
-            ).length;
-            return (
-              <button
-                className={[
-                  "mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm",
-                  activeProvince === region.province
-                    ? "bg-[#e7f4eb] text-[#1f8f4f]"
-                    : "text-[#405248] hover:bg-[#f3f7f1]",
-                ].join(" ")}
-                key={region.province}
-                onClick={() => setActiveProvince(region.province)}
-                type="button"
-              >
-                <span className="font-semibold">{region.province}</span>
-                <span className="text-xs text-[#66756d]">
-                  {selected ? "全省" : cityCount ? `${cityCount}市` : ""}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="rounded-xl border border-[#dbe6dc] bg-white p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="font-semibold text-[#102017]">
-              {activeRegion.province}
-            </div>
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#cfe3d3] px-3 py-2 text-xs font-semibold text-[#1f8f4f]">
-              <input
-                checked={provinces.includes(activeRegion.province)}
-                className="accent-[#1f8f4f]"
-                disabled={disabled}
-                onChange={() => toggleProvince(activeRegion.province)}
-                type="checkbox"
-              />
-              全省配送
-            </label>
-          </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {activeRegion.cities.map((city) => {
-              const provinceSelected = provinces.includes(activeRegion.province);
-              return (
-                <label
-                  className={[
-                    "inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm",
-                    provinceSelected
-                      ? "border-[#e2ece4] bg-[#f6faf7] text-[#9aa89f]"
-                      : cities.includes(city)
-                        ? "border-[#b8d8bf] bg-[#eff8f1] text-[#1f8f4f]"
-                        : "border-[#dbe6dc] text-[#405248]",
-                  ].join(" ")}
-                  key={city}
-                >
-                  <input
-                    checked={provinceSelected || cities.includes(city)}
-                    className="accent-[#1f8f4f]"
-                    disabled={disabled || provinceSelected}
-                    onChange={() => toggleCity(city)}
-                    type="checkbox"
-                  />
-                  <span className="truncate">{city}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return errors;
 }
 
 export function SystemSettingsPanel({
@@ -252,24 +92,18 @@ export function SystemSettingsPanel({
     buildForm(initialSettings),
   );
   const [modalOpen, setModalOpen] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingLoginImage, setUploadingLoginImage] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const dragRef = useRef<AdminModalDragState | null>(null);
-
-  function resetModalPosition() {
-    setFullscreen(false);
-    setOffset({ x: 0, y: 0 });
-  }
+  const [formErrors, setFormErrors] = useState<SystemSettingsFormErrors>({});
 
   function openEditModal() {
     const nextForm = buildForm(settings);
     setForm(nextForm);
     setInitialForm(nextForm);
-    resetModalPosition();
     setMessage(null);
+    setFormErrors({});
     setModalOpen(true);
   }
 
@@ -292,36 +126,6 @@ export function SystemSettingsPanel({
     setModalOpen(false);
   }
 
-  function handleHeaderPointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (fullscreen) {
-      return;
-    }
-
-    const nextDrag = createAdminModalDragState(event, offset);
-    if (!nextDrag) {
-      return;
-    }
-
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = nextDrag;
-  }
-
-  function handleHeaderPointerMove(event: PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-
-    setOffset(getBoundedAdminModalOffset(drag, event.clientX, event.clientY));
-  }
-
-  function handleHeaderPointerUp(event: PointerEvent<HTMLDivElement>) {
-    if (dragRef.current?.pointerId === event.pointerId) {
-      dragRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }
-
   function updateField<Key extends keyof SystemSettingsFormState>(
     key: Key,
     value: SystemSettingsFormState[Key],
@@ -330,6 +134,7 @@ export function SystemSettingsPanel({
       ...current,
       [key]: value,
     }));
+    setFormErrors((current) => ({ ...current, [key]: undefined }));
   }
 
   async function reloadSettings() {
@@ -369,6 +174,12 @@ export function SystemSettingsPanel({
       return;
     }
 
+    const validationErrors = validateSystemSettingsForm(form);
+    setFormErrors(validationErrors);
+    if (Object.values(validationErrors).some(Boolean)) {
+      return;
+    }
+
     setSaving(true);
     setMessage(null);
 
@@ -399,6 +210,46 @@ export function SystemSettingsPanel({
     }
   }
 
+  async function uploadLoginImage(file: File) {
+    if (!LOGIN_IMAGE_ACCEPT.split(",").includes(file.type)) {
+      setMessage("仅支持 JPG、PNG、WebP、AVIF 图片");
+      return;
+    }
+
+    if (file.size > LOGIN_IMAGE_MAX_SIZE) {
+      setMessage("登录页图片不能超过 3MB");
+      return;
+    }
+
+    setUploadingLoginImage(true);
+    setMessage(null);
+
+    const body = new FormData();
+    body.append("file", file);
+
+    try {
+      const response = await fetch("/api/admin/uploads/dish-images", {
+        body,
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        data?: { image: { key: string; url: string } };
+        error?: { message: string };
+        success: boolean;
+      };
+
+      if (!response.ok || !result.success || !result.data?.image) {
+        throw new Error(result.error?.message ?? "登录页图片上传失败");
+      }
+
+      updateField("loginImageUrl", result.data.image.url);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "登录页图片上传失败");
+    } finally {
+      setUploadingLoginImage(false);
+    }
+  }
+
   const submitEnabled = canSubmitSystemSettings({
     saving,
     storeId: store?.id ?? null,
@@ -418,39 +269,41 @@ export function SystemSettingsPanel({
             基础配置
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#66756d]">
-          配置客服电话、小程序展示、协议链接和配送范围。
+            配置客服电话、小程序展示、协议富文本和首页展示规则。
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            className="flex h-10 items-center gap-2 rounded-xl border border-[#dbe6dc] bg-white px-4 text-sm font-semibold text-[#405248] disabled:opacity-50"
+          <Button
+            className="border-[#dbe6dc] text-[#405248] disabled:opacity-50"
             disabled={!store || loading || saving}
             onClick={reloadSettings}
+            size="lg"
             type="button"
+            variant="outline"
           >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            <RefreshCw className={loading ? "animate-spin" : ""} data-icon="inline-start" />
             刷新
-          </button>
-          <button
-            className="flex h-10 items-center gap-2 rounded-xl bg-[#1f8f4f] px-4 text-sm font-semibold text-white disabled:opacity-50"
+          </Button>
+          <Button
+            className="disabled:opacity-50"
             disabled={!store || loading || saving}
             onClick={openEditModal}
+            size="lg"
             type="button"
           >
-            <Pencil size={16} />
+            <Pencil data-icon="inline-start" />
             编辑设置
-          </button>
+          </Button>
         </div>
       </div>
 
       <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
+          ["后台系统名称", currentForm.adminSystemName || "HanYang Fresh"],
           ["客服电话", currentForm.customerServiceTel || "未配置"],
-          ["配送省份", rangeStatus(currentForm.deliveryProvinces)],
-          ["配送城市", rangeStatus(currentForm.deliveryCities)],
           ["首页菜品列数", `每行 ${currentForm.homeDishColumns} 个`],
           ["登录页", currentForm.loginTitle || "默认标题"],
-          ["协议链接", `用户协议${linkStatus(currentForm.userAgreementUrl)} / 隐私${linkStatus(currentForm.privacyPolicyUrl)}`],
+          ["协议内容", `用户协议${contentStatus(currentForm.userAgreementContent)} / 隐私${contentStatus(currentForm.privacyPolicyContent)}`],
         ].map(([label, value]) => (
           <div
             className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4"
@@ -467,7 +320,7 @@ export function SystemSettingsPanel({
       <div className="mt-4 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4">
         <div className="text-xs font-medium text-[#66756d]">关于我们</div>
         <div className="mt-2 line-clamp-3 text-sm leading-6 text-[#405248]">
-          {currentForm.aboutText || "未配置介绍、配送范围和客服说明"}
+          {currentForm.aboutText || "未配置介绍和客服说明"}
         </div>
       </div>
 
@@ -478,65 +331,48 @@ export function SystemSettingsPanel({
       ) : null}
 
       {modalOpen ? (
-        <div className="fixed inset-0 z-50 bg-[#0f2418]/35 p-5">
-          <div
-            aria-modal="true"
-            data-admin-modal-shell
-            data-fullscreen={fullscreen ? "true" : "false"}
-            className={[
-              "mx-auto flex min-h-[520px] flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl",
-              fullscreen
-                ? "h-full w-full"
-                : "h-[64vh] w-[760px] max-w-full resize",
-            ].join(" ")}
-            role="dialog"
-            style={
-              fullscreen
-                ? undefined
-                : { transform: `translate(${offset.x}px, ${offset.y}px)` }
-            }
-          >
-            <div
-              data-admin-modal-drag-handle
-              className="flex cursor-move items-center justify-between border-b border-[#dbe6dc] px-6 py-4"
-              onPointerDown={handleHeaderPointerDown}
-              onPointerMove={handleHeaderPointerMove}
-              onPointerCancel={handleHeaderPointerUp}
-              onPointerUp={handleHeaderPointerUp}
-            >
-              <div className="min-w-0">
-                <div className="truncate text-lg font-semibold">
-                  编辑系统设置
-                </div>
-                <div className="mt-1 truncate text-sm text-[#66756d]">
-                  设置保存后会影响小程序登录、协议、客服和展示规则
-                </div>
-              </div>
-              <div
-                className="flex items-center gap-2"
-                onPointerDown={(event) => event.stopPropagation()}
+        <AdminDraggableModal
+          heightClassName="h-[64vh]"
+          onClose={closeModal}
+          subtitle="设置保存后会影响小程序登录、协议、客服和展示规则"
+          title="编辑系统设置"
+          widthClassName="w-[760px]"
+          footer={
+            <>
+              <button
+                className="rounded-xl border border-[#dbe6dc] px-5 py-2 text-sm font-semibold text-[#405248]"
+                onClick={closeModal}
+                type="button"
               >
-                <button
-                  className="grid h-9 w-9 place-items-center rounded-xl border border-[#cfe3d3] bg-[#eff8f1] text-[#1f8f4f]"
-                  onClick={() => setFullscreen((value) => !value)}
-                  title={fullscreen ? "退出全屏" : "全屏"}
-                  type="button"
-                >
-                  {fullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
-                </button>
-                <button
-                  className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 bg-red-50 text-red-600"
-                  onClick={closeModal}
-                  title="关闭"
-                  type="button"
-                >
-                  <X size={17} />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-auto p-6">
+                取消
+              </button>
+              <button
+                className="flex items-center gap-2 rounded-xl bg-[#1f8f4f] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                disabled={!submitEnabled}
+                onClick={saveSettings}
+                type="button"
+              >
+                <Save size={16} />
+                {saving ? "保存中" : "保存设置"}
+              </button>
+            </>
+          }
+        >
               <div className="grid gap-4 lg:grid-cols-2">
+                <label className="flex flex-col gap-2 text-sm font-medium lg:col-span-2">
+                  后台系统名称
+                  <input
+                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 text-sm outline-none focus:border-[#1f8f4f]"
+                    onChange={(event) =>
+                      updateField("adminSystemName", event.target.value)
+                    }
+                    placeholder="例如 HanYang Fresh"
+                    value={form.adminSystemName}
+                  />
+                  <span className="text-xs font-normal text-[#66756d]">
+                    全平台统一显示，未配置时默认使用 HanYang Fresh。
+                  </span>
+                </label>
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   客服电话
                   <input
@@ -548,18 +384,14 @@ export function SystemSettingsPanel({
                     value={form.customerServiceTel}
                   />
                 </label>
-                <DeliveryRangePicker
-                  cities={form.deliveryCities}
-                  onChange={(next) => {
-                    updateField("deliveryProvinces", next.provinces);
-                    updateField("deliveryCities", next.cities);
-                  }}
-                  provinces={form.deliveryProvinces}
-                />
-                <div className="rounded-2xl border border-[#dbe6dc] bg-[#f8fbf7] p-4">
-                  <div className="text-sm font-semibold text-[#102017]">
-                    <RequiredLabel>首页菜品每行数量</RequiredLabel>
-                  </div>
+                <AdminFormField
+                  className="rounded-2xl border border-[#dbe6dc] bg-[#f8fbf7] p-4"
+                  error={formErrors.homeDishColumns}
+                  label="首页菜品每行数量"
+                  required
+                >
+                  {() => (
+                  <>
                   <div className="mt-1 text-xs leading-5 text-[#66756d]">
                     控制小程序首页菜品宫格展示密度，默认每行 3 个。
                   </div>
@@ -580,7 +412,9 @@ export function SystemSettingsPanel({
                       </button>
                     ))}
                   </div>
-                </div>
+                  </>
+                  )}
+                </AdminFormField>
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   登录页主标题
                   <input
@@ -614,71 +448,79 @@ export function SystemSettingsPanel({
                     value={form.loginWelcome}
                   />
                 </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  登录页图片链接
-                  <input
-                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 text-sm outline-none focus:border-[#1f8f4f]"
-                    onChange={(event) =>
-                      updateField("loginImageUrl", event.target.value)
-                    }
-                    placeholder="https://... 或 /uploads/..."
-                    value={form.loginImageUrl}
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  用户协议链接
-                  <input
-                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 text-sm outline-none focus:border-[#1f8f4f]"
-                    onChange={(event) =>
-                      updateField("userAgreementUrl", event.target.value)
-                    }
-                    placeholder="https://..."
-                    value={form.userAgreementUrl}
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  隐私政策链接
-                  <input
-                    className="h-11 rounded-xl border border-[#dbe6dc] px-3 text-sm outline-none focus:border-[#1f8f4f]"
-                    onChange={(event) =>
-                      updateField("privacyPolicyUrl", event.target.value)
-                    }
-                    placeholder="https://..."
-                    value={form.privacyPolicyUrl}
-                  />
-                </label>
+                <div className="lg:col-span-2">
+                  <div className="mb-2 text-sm font-medium">登录页图片</div>
+                  <div className="grid gap-3 rounded-2xl border border-[#dbe6dc] bg-[#f8fbf7] p-3 sm:grid-cols-[180px_1fr]">
+                    <div className="overflow-hidden rounded-xl border border-[#dbe6dc] bg-white">
+                      {form.loginImageUrl ? (
+                        <img
+                          alt="登录页图片"
+                          className="h-28 w-full object-cover"
+                          src={form.loginImageUrl}
+                        />
+                      ) : (
+                        <div className="grid h-28 place-items-center text-[#1f8f4f]">
+                          <ImagePlus size={30} />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-col justify-center gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-[#cfe3d3] bg-white px-4 text-sm font-semibold text-[#1f8f4f] hover:border-[#1f8f4f]">
+                          <Upload size={15} />
+                          {uploadingLoginImage ? "上传中" : "上传图片"}
+                          <input
+                            accept={LOGIN_IMAGE_ACCEPT}
+                            className="hidden"
+                            disabled={uploadingLoginImage}
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (file) {
+                                void uploadLoginImage(file);
+                              }
+                              event.currentTarget.value = "";
+                            }}
+                            type="file"
+                          />
+                        </label>
+                        {form.loginImageUrl ? (
+                          <button
+                            className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#f2d5c8] bg-white px-4 text-sm font-semibold text-[#b85a2b]"
+                            onClick={() => updateField("loginImageUrl", "")}
+                            type="button"
+                          >
+                            <Trash2 size={15} />
+                            移除
+                          </button>
+                        ) : null}
+                      </div>
+                      <p className="text-xs leading-5 text-[#718178]">
+                        {LOGIN_IMAGE_UPLOAD_TIP}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <AdminRichTextEditor
+                  label="用户协议富文本"
+                  onChange={(value) => updateField("userAgreementContent", value)}
+                  value={form.userAgreementContent}
+                />
+                <AdminRichTextEditor
+                  label="隐私政策富文本"
+                  onChange={(value) => updateField("privacyPolicyContent", value)}
+                  value={form.privacyPolicyContent}
+                />
                 <label className="flex flex-col gap-2 text-sm font-medium lg:col-span-2">
                   关于我们
                   <textarea
                     className="min-h-28 resize-y rounded-xl border border-[#dbe6dc] p-3 text-sm outline-none focus:border-[#1f8f4f]"
                     onChange={(event) => updateField("aboutText", event.target.value)}
-                    placeholder="服务介绍、配送范围、客服说明"
+                    placeholder="服务介绍、客服说明"
                     value={form.aboutText}
                   />
                 </label>
               </div>
-            </div>
-
-            <div className="flex justify-end gap-3 border-t border-[#dbe6dc] px-6 py-4">
-              <button
-                className="rounded-xl border border-[#dbe6dc] px-5 py-2 text-sm font-semibold text-[#405248]"
-                onClick={closeModal}
-                type="button"
-              >
-                取消
-              </button>
-              <button
-                className="flex items-center gap-2 rounded-xl bg-[#1f8f4f] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                disabled={!submitEnabled}
-                onClick={saveSettings}
-                type="button"
-              >
-                <Save size={16} />
-                {saving ? "保存中" : "保存设置"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </AdminDraggableModal>
       ) : null}
     </section>
   );

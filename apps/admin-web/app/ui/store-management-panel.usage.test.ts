@@ -32,7 +32,8 @@ describe("store management detail modal usage", () => {
     expect(source).toContain('mode: "detail-franchisee"');
     expect(source).toContain("openDetailStore");
     expect(source).toContain("openDetailFranchisee");
-    expect(source).toContain('title="查看详情"');
+    expect(source).toContain('data-icon="inline-start"');
+    expect(source).toContain("查看");
     expect(source).toContain('modal.mode !== "detail-store"');
     expect(source).toContain('modal.mode !== "detail-franchisee"');
     expect(source).toContain('readOnly={isDetailModal}');

@@ -9,5 +9,7 @@ public record MiniOrderShipmentDto(
   String packageType,
   LocalDateTime shippedAt,
   LocalDateTime signedAt,
-  String status
+  String status,
+  String kuaidicom,
+  OrderShipmentTrackDto track
 ) {}

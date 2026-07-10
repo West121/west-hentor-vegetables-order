@@ -111,7 +111,7 @@ public class StoreManagementService {
       Page.of(normalizedPage, normalizedPageSize),
       wrapper
     );
-    StoreManagementSummaryDto summary = storeSummary(query, status, type, session);
+    StoreManagementSummaryDto summary = storeSummary(session);
     return new StoreManagementListResponse(
       result.getRecords().stream().map(this::toStoreItem).toList(),
       new PaginationDto(normalizedPage, normalizedPageSize, result.getTotal(), totalPages(result.getTotal(), normalizedPageSize)),
@@ -306,13 +306,8 @@ public class StoreManagementService {
     return wrapper;
   }
 
-  private StoreManagementSummaryDto storeSummary(
-    String query,
-    String status,
-    String type,
-    AdminSessionDto session
-  ) {
-    LambdaQueryWrapper<StoreEntity> base = buildStoreWrapper(query, status, type);
+  private StoreManagementSummaryDto storeSummary(AdminSessionDto session) {
+    LambdaQueryWrapper<StoreEntity> base = new LambdaQueryWrapper<>();
     if (!"ALL".equals(session.storeScope())) {
       List<String> storeIds = session.stores().stream().map(store -> store.id()).toList();
       if (storeIds.isEmpty()) {
@@ -329,7 +324,7 @@ public class StoreManagementService {
   }
 
   private FranchiseeSummaryDto franchiseeSummary(String query, String status) {
-    List<FranchiseeEntity> franchisees = franchiseeMapper.selectList(buildFranchiseeWrapper(query, status));
+    List<FranchiseeEntity> franchisees = franchiseeMapper.selectList(new LambdaQueryWrapper<>());
     long active = franchisees.stream().filter(franchisee -> "ACTIVE".equals(franchisee.getStatus())).count();
     long expired = franchisees.stream().filter(franchisee -> "EXPIRED".equals(franchisee.getStatus())).count();
     long suspended = franchisees.stream().filter(franchisee -> "SUSPENDED".equals(franchisee.getStatus())).count();

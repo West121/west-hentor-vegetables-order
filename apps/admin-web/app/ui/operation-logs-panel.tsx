@@ -1,7 +1,8 @@
 "use client";
 
-import { RefreshCcw } from "lucide-react";
+import { Eye, RefreshCcw, X } from "lucide-react";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 
 import {
   AdminPagination,
@@ -9,6 +10,7 @@ import {
   type AdminPaginationMeta,
 } from "./admin-pagination";
 import { AdminDatePicker } from "./admin-date-time-picker";
+import { AdminSelect } from "./admin-select";
 import { formatDateTimeSecond } from "./date-format";
 
 export type OperationLogPanelItem = {
@@ -122,12 +124,12 @@ function actorSecondary(log: OperationLogPanelItem) {
 }
 
 function formatDuration(durationMs: number | null) {
-  return typeof durationMs === "number" ? `${durationMs} ms` : "未记录";
+  return typeof durationMs === "number" ? `${durationMs} ms` : "未采集";
 }
 
 function formatStatus(statusCode: number | null) {
   if (!statusCode) {
-    return "未记录";
+    return "已记录";
   }
 
   return `${statusCode} ${statusCode >= 200 && statusCode < 300 ? "成功" : "异常"}`;
@@ -135,7 +137,7 @@ function formatStatus(statusCode: number | null) {
 
 function formatJsonPreview(value: unknown | null) {
   if (value === null || value === undefined) {
-    return "未记录";
+    return "未采集";
   }
 
   if (typeof value === "string") {
@@ -143,6 +145,20 @@ function formatJsonPreview(value: unknown | null) {
   }
 
   return JSON.stringify(value, null, 2);
+}
+
+function compactText(value: string | null | undefined, fallback = "未采集") {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : fallback;
+}
+
+function requestLine(log: OperationLogPanelItem) {
+  if (!log.requestMethod?.trim() && !log.requestPath?.trim()) {
+    return "业务操作记录";
+  }
+  const method = compactText(log.requestMethod, "HTTP");
+  const path = compactText(log.requestPath, "路径未采集");
+  return `${method} ${path}`;
 }
 
 function JsonPreview({
@@ -176,6 +192,13 @@ export function OperationLogsPanel({
   const [statusCodeFilter, setStatusCodeFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [selectedLog, setSelectedLog] = useState<OperationLogPanelItem | null>(
+    null,
+  );
+
+  function openLogDetail(log: OperationLogPanelItem) {
+    setSelectedLog(log);
+  }
 
   async function reloadLogs(
     page = pagination.page,
@@ -187,6 +210,7 @@ export function OperationLogsPanel({
       resourceFilter,
       statusCodeFilter,
     },
+    pageSize = pagination.pageSize,
   ) {
     const params = new URLSearchParams();
     if (logStoreId) {
@@ -213,7 +237,7 @@ export function OperationLogsPanel({
       params.set("dateTo", filters.dateTo);
     }
     params.set("page", String(page));
-    params.set("pageSize", String(pagination.pageSize));
+    params.set("pageSize", String(pageSize));
     setLoading(true);
     try {
       const response = await fetch(`/api/admin/operation-logs?${params.toString()}`);
@@ -229,7 +253,7 @@ export function OperationLogsPanel({
         const nextList = normalizeAdminListPayload(
           result.data,
           { total: 0 },
-          pagination.pageSize,
+          pageSize,
         );
         setLogs(nextList.items);
         setPagination(nextList.pagination);
@@ -294,33 +318,33 @@ export function OperationLogsPanel({
         </label>
         <label className="flex flex-col gap-1 text-xs font-semibold text-[#66756d]">
           操作类型
-          <select
-            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-            onChange={(event) => setActionFilter(event.target.value)}
+          <AdminSelect
+            contentLabel="操作类型"
+            onChange={setActionFilter}
+            options={[
+              { label: "全部操作", value: "ALL" },
+              ...Object.entries(ACTION_LABELS).map(([value, label]) => ({
+                label,
+                value,
+              })),
+            ]}
             value={actionFilter}
-          >
-            <option value="ALL">全部操作</option>
-            {Object.entries(ACTION_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label className="flex flex-col gap-1 text-xs font-semibold text-[#66756d]">
           资源
-          <select
-            className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-            onChange={(event) => setResourceFilter(event.target.value)}
+          <AdminSelect
+            contentLabel="资源"
+            onChange={setResourceFilter}
+            options={[
+              { label: "全部资源", value: "ALL" },
+              ...Object.entries(RESOURCE_LABELS).map(([value, label]) => ({
+                label,
+                value,
+              })),
+            ]}
             value={resourceFilter}
-          >
-            <option value="ALL">全部资源</option>
-            {Object.entries(RESOURCE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label className="flex flex-col gap-1 text-xs font-semibold text-[#66756d]">
           状态码
@@ -365,76 +389,108 @@ export function OperationLogsPanel({
       </div>
 
       <div className="mt-5 overflow-x-auto rounded-xl border border-[#dbe6dc]">
-        <table className="min-w-[1180px] w-full border-collapse text-left text-sm">
+        <table className="min-w-[1080px] w-full border-collapse text-left text-sm">
           <thead className="bg-[#f5f8f3] text-[#66756d]">
             <tr>
+              <th className="px-4 py-3 font-medium">时间</th>
               <th className="px-4 py-3 font-medium">操作</th>
-              <th className="px-4 py-3 font-medium">请求参数</th>
-              <th className="px-4 py-3 font-medium">返回参数</th>
+              <th className="px-4 py-3 font-medium">资源</th>
+              <th className="px-4 py-3 font-medium">请求</th>
               <th className="px-4 py-3 font-medium">状态 / 耗时</th>
               <th className="px-4 py-3 font-medium">操作人</th>
-              <th className="px-4 py-3 font-medium">时间</th>
+              <th className="px-4 py-3 text-right font-medium">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#edf2ed]">
             {logs.map((log) => (
               <tr key={log.id}>
+                <td className="px-4 py-4 text-[#66756d]">
+                  <span
+                    className="block w-40 truncate"
+                    title={formatDateTimeSecond(log.createdAt, "未记录")}
+                  >
+                    {formatDateTimeSecond(log.createdAt, "未记录")}
+                  </span>
+                </td>
                 <td className="px-4 py-4">
-                  <div className="font-semibold">
+                  <div
+                    className="max-w-48 truncate font-semibold"
+                    title={ACTION_LABELS[log.action] ?? log.action}
+                  >
                     {ACTION_LABELS[log.action] ?? log.action}
                   </div>
-                  <div className="mt-1 max-w-72 truncate text-xs text-[#66756d]">
+                  <div
+                    className="mt-1 max-w-48 truncate text-xs text-[#66756d]"
+                    title={log.action}
+                  >
                     {log.action}
                   </div>
-                  <div className="mt-2 text-xs leading-5 text-[#66756d]">
-                    <div>资源：{log.resource}</div>
-                    <div>ID：{log.resourceId ?? "无资源 ID"}</div>
-                    <div>数据范围：{log.store ? "当前业务" : "全局"}</div>
+                </td>
+                <td className="px-4 py-4 text-[#66756d]">
+                  <div
+                    className="max-w-48 truncate font-medium text-[#15261d]"
+                    title={RESOURCE_LABELS[log.resource] ?? log.resource}
+                  >
+                    {RESOURCE_LABELS[log.resource] ?? log.resource}
+                  </div>
+                  <div
+                    className="mt-1 max-w-48 truncate text-xs"
+                    title={compactText(log.resourceId, "无资源 ID")}
+                  >
+                    {compactText(log.resourceId, "无资源 ID")}
                   </div>
                 </td>
-                <td className="px-4 py-4 align-top text-[#66756d]">
-                  <div className="mb-2 rounded-lg border border-[#dbe6dc] px-2 py-1 text-xs font-semibold text-[#15261d]">
-                    {log.requestMethod ?? "METHOD"} {log.requestPath ?? "未记录路径"}
+                <td className="px-4 py-4 text-[#66756d]">
+                  <div
+                    className="max-w-64 truncate rounded-lg border border-[#dbe6dc] px-2 py-1 text-xs font-semibold text-[#15261d]"
+                    title={requestLine(log)}
+                  >
+                    {requestLine(log)}
                   </div>
-                  <JsonPreview label="请求参数" value={log.requestParams} />
-                  <div className="mt-2 text-xs leading-5 text-[#66756d]">
-                    <div>IP：{log.ip ?? "未记录"}</div>
-                    <div className="max-w-80 truncate">
-                      UA：{log.userAgent ?? "未记录"}
-                    </div>
+                  <div
+                    className="mt-1 max-w-64 truncate text-xs"
+                    title={`IP：${compactText(log.ip)} / UA：${compactText(log.userAgent)}`}
+                  >
+                    IP：{compactText(log.ip)} / UA：{compactText(log.userAgent)}
                   </div>
                 </td>
-                <td className="px-4 py-4 align-top">
-                  <JsonPreview
-                    label="返回参数"
-                    value={log.responseData ?? log.afterValue}
-                  />
-                  {log.beforeValue ? (
-                    <div className="mt-3">
-                      <JsonPreview label="变更前" value={log.beforeValue} />
-                    </div>
-                  ) : null}
-                </td>
-                <td className="px-4 py-4 align-top text-[#66756d]">
+                <td className="px-4 py-4 text-[#66756d]">
                   <div className="font-semibold text-[#15261d]">
                     {formatStatus(log.statusCode)}
                   </div>
                   <div className="mt-1 text-xs">{formatDuration(log.durationMs)}</div>
                 </td>
-                <td className="px-4 py-4 align-top">
-                  <div className="font-medium">{actorPrimary(log)}</div>
-                  <div className="mt-1 text-xs text-[#66756d]">
+                <td className="px-4 py-4">
+                  <div
+                    className="max-w-44 truncate font-medium"
+                    title={actorPrimary(log)}
+                  >
+                    {actorPrimary(log)}
+                  </div>
+                  <div
+                    className="mt-1 max-w-44 truncate text-xs text-[#66756d]"
+                    title={actorSecondary(log)}
+                  >
                     {actorSecondary(log)}
                   </div>
                 </td>
-                <td className="px-4 py-4 align-top text-[#66756d]">
-                  {formatDateTimeSecond(log.createdAt, "未记录")}
+                <td className="px-4 py-4 text-right">
+                  <Button
+                    className="border-[#dbe6dc] text-[#1f8f4f]"
+                    onClick={() => openLogDetail(log)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <Eye data-icon="inline-start" />
+                    详情
+                  </Button>
                 </td>
               </tr>
             ))}
             {logs.length === 0 ? (
               <tr>
-	                <td className="px-4 py-10 text-center text-[#66756d]" colSpan={6}>
+                <td className="px-4 py-10 text-center text-[#66756d]" colSpan={7}>
                   暂无操作日志
                 </td>
               </tr>
@@ -444,9 +500,115 @@ export function OperationLogsPanel({
         <AdminPagination
           disabled={loading}
           onPageChange={(nextPage) => void reloadLogs(nextPage)}
+          onPageSizeChange={(nextPageSize) =>
+            void reloadLogs(
+              1,
+              {
+                actionFilter,
+                dateFrom,
+                dateTo,
+                query,
+                resourceFilter,
+                statusCodeFilter,
+              },
+              nextPageSize,
+            )
+          }
           pagination={pagination}
         />
       </div>
+      {selectedLog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f2418]/35 p-5">
+          <div
+            aria-modal="true"
+            data-admin-modal-shell
+            className="flex w-[960px] max-w-full flex-col overflow-hidden rounded-2xl border border-[#dbe6dc] bg-white shadow-2xl"
+            role="dialog"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-[#edf2ed] px-5 py-4">
+              <div className="min-w-0">
+                <div className="text-lg font-semibold text-[#102017]">
+                  操作日志详情
+                </div>
+                <div className="mt-1 truncate text-sm text-[#66756d]">
+                  {ACTION_LABELS[selectedLog.action] ?? selectedLog.action} ·{" "}
+                  {formatDateTimeSecond(selectedLog.createdAt, "未记录")}
+                </div>
+              </div>
+              <button
+                className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 bg-red-50 text-red-600"
+                onClick={() => setSelectedLog(null)}
+                title="关闭"
+                type="button"
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <div className="flex-1 space-y-4 overflow-auto p-5">
+              <section className="rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-4 text-sm">
+                <h3 className="font-semibold text-[#102017]">基础信息</h3>
+                <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    ["操作", ACTION_LABELS[selectedLog.action] ?? selectedLog.action],
+                    ["资源", RESOURCE_LABELS[selectedLog.resource] ?? selectedLog.resource],
+                    ["资源 ID", compactText(selectedLog.resourceId, "无资源 ID")],
+                    ["操作人", actorPrimary(selectedLog)],
+                    ["账号", actorSecondary(selectedLog)],
+                    ["状态", formatStatus(selectedLog.statusCode)],
+                    ["响应时长", formatDuration(selectedLog.durationMs)],
+                    ["数据范围", selectedLog.store?.name ?? "全局"],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <dt className="text-xs font-semibold text-[#8a9a90]">
+                        {label}
+                      </dt>
+                      <dd className="mt-1 break-all text-[#15261d]">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+              <section className="grid gap-4">
+                <div className="rounded-xl border border-[#dbe6dc] p-4">
+                  <h3 className="font-semibold text-[#102017]">请求信息</h3>
+                  <div className="mt-3 rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-3 py-2 text-sm font-semibold text-[#15261d]">
+                    {requestLine(selectedLog)}
+                  </div>
+                  <div className="mt-3 grid gap-3 text-xs text-[#66756d] md:grid-cols-2">
+                    <div title={compactText(selectedLog.ip)}>
+                      IP：{compactText(selectedLog.ip)}
+                    </div>
+                    <div className="truncate" title={compactText(selectedLog.userAgent)}>
+                      UA：{compactText(selectedLog.userAgent)}
+                    </div>
+                  </div>
+                  <div className="mt-4">
+                    <JsonPreview label="请求参数" value={selectedLog.requestParams} />
+                  </div>
+                </div>
+                <div className="rounded-xl border border-[#dbe6dc] p-4">
+                  <h3 className="font-semibold text-[#102017]">响应信息</h3>
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    <JsonPreview
+                      label="返回参数"
+                      value={selectedLog.responseData ?? selectedLog.afterValue}
+                    />
+                    <JsonPreview label="变更前" value={selectedLog.beforeValue} />
+                  </div>
+                </div>
+              </section>
+            </div>
+            <div className="flex justify-end border-t border-[#edf2ed] px-5 py-4">
+              <button
+                className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white"
+                onClick={() => setSelectedLog(null)}
+                type="button"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

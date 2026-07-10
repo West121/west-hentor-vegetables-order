@@ -54,7 +54,7 @@ describe("admin list filters", () => {
 
     expect(source).toContain('params.set("status"');
     expect(source).toContain('params.set("dishCategory"');
-    expect(source).toContain('params.set("addressKeyword"');
+    expect(source).not.toContain("addressKeyword");
     expect(source).toContain('params.set("dateFrom"');
     expect(source).toContain('params.set("dateTo"');
     expect(source).toContain("resetFilters");

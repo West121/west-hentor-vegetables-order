@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const ADMIN_MODAL_PANEL_FILES = [
+  "delivery-range-panel.tsx",
   "dish-management-panel.tsx",
   "member-management-panel.tsx",
   "order-management-panel.tsx",
@@ -14,12 +15,13 @@ export const ADMIN_MODAL_PANEL_FILES = [
   "task-management-panel.tsx",
 ];
 
+const ADMIN_DRAGGABLE_MODAL_FILE = "admin-draggable-modal.tsx";
+
 const EXPECTED_NAV_GROUPS = [
   "工作台",
   "订单管理",
   "会员管理",
   "套餐管理",
-  "门店管理",
   "任务管理",
   "系统管理",
 ];
@@ -29,13 +31,17 @@ const EXPECTED_NAV_ITEMS = [
   "订单列表",
   "发货统计",
   "会员用户",
-  "用户套餐",
+  "会员套餐",
   "套餐模板",
   "菜品管理",
-  "加盟门店",
-  "加盟商",
   "任务配置",
   "后台用户",
+  "角色管理",
+  "菜单管理",
+  "系统字典",
+  "面单打印",
+  "配送范围",
+  "在线用户",
   "操作日志",
   "系统设置",
 ];
@@ -246,7 +252,10 @@ export function assertAdminNavigationPrototypeSource({
     "getDefaultOpenAdminNavGroups(groups)",
     "shouldRenderAdminNavItems",
     'collapsed ? "w-[72px]" : "w-[220px]"',
-    'collapsed ? "pl-[72px]" : "pl-[220px]"',
+    "const contentPaddingClass",
+    '"pl-[72px]"',
+    '"pl-[220px]"',
+    '"pl-[236px]"',
     "absolute right-0 top-6",
     "translate-x-1/2",
     "PanelLeftOpen",
@@ -355,18 +364,43 @@ export function assertAdminModalPrototypeSource(panelSources) {
     throw new Error(`ADMIN_MODAL_MISMATCH: missing panels ${missingPanels.join(", ")}`);
   }
 
+  const sharedModalSource = panelSources[ADMIN_DRAGGABLE_MODAL_FILE] ?? "";
+  for (const snippet of EXPECTED_MODAL_SNIPPETS) {
+    assertIncludes(sharedModalSource, snippet, "ADMIN_MODAL_MISMATCH shared-modal");
+  }
+  assertIncludes(
+    sharedModalSource,
+    "const [fullscreen, setFullscreen] = useState(true)",
+    "ADMIN_MODAL_MISMATCH shared-modal",
+  );
+  if (
+    !/overflow-hidden[^\n"]*rounded-2xl[^\n"]*bg-white[^\n"]*shadow-2xl/.test(
+      sharedModalSource,
+    )
+  ) {
+    throw new Error("ADMIN_MODAL_MISMATCH shared-modal: missing modal shell surface");
+  }
+
   for (const fileName of ADMIN_MODAL_PANEL_FILES) {
     const source = panelSources[fileName];
-    for (const snippet of EXPECTED_MODAL_SNIPPETS) {
-      assertIncludes(source, snippet, `ADMIN_MODAL_MISMATCH ${fileName}`);
-    }
+    const usesSharedModal = source.includes("AdminDraggableModal");
 
-    if (
-      !/overflow-hidden[^\n"]*rounded-2xl[^\n"]*bg-white[^\n"]*shadow-2xl/.test(
+    if (!usesSharedModal) {
+      for (const snippet of EXPECTED_MODAL_SNIPPETS) {
+        assertIncludes(source, snippet, `ADMIN_MODAL_MISMATCH ${fileName}`);
+      }
+      assertIncludes(
         source,
-      )
-    ) {
-      throw new Error(`ADMIN_MODAL_MISMATCH ${fileName}: missing modal shell surface`);
+        "const [fullscreen, setFullscreen] = useState(true)",
+        `ADMIN_MODAL_MISMATCH ${fileName}`,
+      );
+      if (
+        !/overflow-hidden[^\n"]*rounded-2xl[^\n"]*bg-white[^\n"]*shadow-2xl/.test(
+          source,
+        )
+      ) {
+        throw new Error(`ADMIN_MODAL_MISMATCH ${fileName}: missing modal shell surface`);
+      }
     }
 
     assertNotIncludes(source, ">全屏<", `ADMIN_MODAL_MISMATCH ${fileName}`);
@@ -378,38 +412,42 @@ export function assertAdminModalPrototypeSource(panelSources) {
   };
 }
 
-export function assertAdminStoreConceptSource({ navigationSource, pageSource }) {
+export function assertAdminStoreConceptSource({
+  dashboardSource,
+  navigationSource,
+  pageSource,
+}) {
   const requiredSnippets = [
-    'label: "门店管理"',
-    'label: "加盟门店"',
-    'label: "加盟商"',
-    "listAccessibleStores",
-    "listStores",
-    "listFranchisees",
-    "StoreSwitcher",
-    "managedStores",
-    "franchisees",
+    "storeAccessScope",
+    "stores: session.stores",
+    "storeId",
+    "activeStore",
     "stores.manage",
   ];
   for (const snippet of requiredSnippets) {
-    assertIncludes(`${navigationSource}\n${pageSource}`, snippet, "ADMIN_STORE_MISMATCH");
+    assertIncludes(
+      `${dashboardSource}\n${navigationSource}\n${pageSource}`,
+      snippet,
+      "ADMIN_STORE_MISMATCH",
+    );
   }
 
   return {
-    hasFranchiseeStoreManagement: true,
+    hasStoreScopedManagement: true,
   };
 }
 
 async function readAdminSources(rootDir) {
   const adminRoot = join(rootDir, "apps/admin-web/app");
   const panelEntries = await Promise.all(
-    ADMIN_MODAL_PANEL_FILES.map(async (fileName) => [
+    [ADMIN_DRAGGABLE_MODAL_FILE, ...ADMIN_MODAL_PANEL_FILES].map(async (fileName) => [
       fileName,
       await readFile(join(adminRoot, "ui", fileName), "utf8"),
     ]),
   );
 
   return {
+    dashboardSource: await readFile(join(adminRoot, "dashboard-client.tsx"), "utf8"),
     loginSource: await readFile(join(adminRoot, "login/page.tsx"), "utf8"),
     menuModelSource: await readFile(
       join(adminRoot, "ui/admin-user-menu-model.ts"),

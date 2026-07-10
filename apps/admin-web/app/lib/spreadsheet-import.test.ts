@@ -55,8 +55,32 @@ describe("spreadsheet import helpers", () => {
   it("parses member package import rows with template and usage fields", async () => {
     const file = buildXlsxFile(
       [
-        ["手机号", "套餐名称", "总次数", "已用次数", "单次斤数", "状态", "备注"],
-        ["15295081992", "8斤周套餐", "8", "1", "8斤", "正常", "补录"],
+        [
+          "手机号",
+          "昵称",
+          "省",
+          "市",
+          "区",
+          "详细地址",
+          "套餐名称",
+          "总次数",
+          "已用次数",
+          "状态",
+          "备注",
+        ],
+        [
+          "15295081992",
+          "张三",
+          "江苏省",
+          "南京市",
+          "六合区",
+          "龙池街道冠城大通",
+          "8斤周套餐",
+          "8",
+          "1",
+          "正常",
+          "补录",
+        ],
       ],
       "packages.xlsx",
     );
@@ -65,21 +89,31 @@ describe("spreadsheet import helpers", () => {
 
     expect(rows).toEqual([
       {
+        address: "龙池街道冠城大通",
+        city: "南京市",
+        detail: "龙池街道冠城大通",
+        district: "六合区",
+        nickname: "张三",
         phone: "15295081992",
+        province: "江苏省",
+        receiverName: null,
+        receiverPhone: null,
         remark: "补录",
         rowNumber: 2,
         status: "ACTIVE",
         templateName: "8斤周套餐",
         totalTimes: 8,
         usedTimes: 1,
-        weightLimitJin: 8,
+        weightLimitJin: null,
       },
     ]);
   });
 
   it("supports csv files without a header", async () => {
     const file = new File(
-      ["15295081992,8斤周套餐,8,1,8,ACTIVE,补录"],
+      [
+        "15295081992,张三,江苏省,南京市,六合区,龙池街道冠城大通,8斤周套餐,8,1,ACTIVE,补录",
+      ],
       "packages.csv",
       { type: "text/csv" },
     );
@@ -88,14 +122,20 @@ describe("spreadsheet import helpers", () => {
 
     expect(rows).toMatchObject([
       {
+        address: "龙池街道冠城大通",
+        city: "南京市",
+        detail: "龙池街道冠城大通",
+        district: "六合区",
+        nickname: "张三",
         phone: "15295081992",
+        province: "江苏省",
         remark: "补录",
         rowNumber: 1,
         status: "ACTIVE",
         templateName: "8斤周套餐",
         totalTimes: 8,
         usedTimes: 1,
-        weightLimitJin: 8,
+        weightLimitJin: null,
       },
     ]);
   });

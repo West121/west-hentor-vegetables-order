@@ -23,21 +23,23 @@ export const ADMIN_NAV_GROUPS = [
   ] },
   { label: "会员管理", collapsible: true, items: [
     { icon: "users", label: "会员用户", section: "members" },
-    { icon: "shield", label: "用户套餐", section: "user-packages" },
+    { icon: "shield", label: "会员套餐", section: "user-packages" },
   ] },
   { label: "套餐管理", collapsible: true, items: [
     { icon: "package", label: "套餐模板", section: "package-templates" },
     { icon: "boxes", label: "菜品管理", section: "dishes" },
-  ] },
-  { label: "门店管理", collapsible: true, items: [
-    { icon: "store", label: "加盟门店", section: "stores" },
-    { icon: "building", label: "加盟商", section: "franchisees" },
   ] },
   { label: "任务管理", collapsible: true, items: [
     { icon: "file-clock", label: "任务配置", section: "tasks" },
   ] },
   { label: "系统管理", collapsible: true, items: [
     { icon: "user", label: "后台用户", section: "admin-users" },
+    { icon: "badge-check", label: "角色管理", section: "roles" },
+    { icon: "folder-tree", label: "菜单管理", section: "menus" },
+    { icon: "settings-2", label: "系统字典", section: "dictionaries" },
+    { icon: "printer", label: "面单打印", section: "kuaidi-printers" },
+    { icon: "truck", label: "配送范围", section: "delivery-ranges" },
+    { icon: "users", label: "在线用户", section: "online-sessions" },
     { icon: "file-clock", label: "操作日志", section: "operation-logs" },
     { icon: "settings", label: "系统设置", section: "system-settings" },
   ] },
@@ -51,7 +53,8 @@ getCollapsedAdminNavGroupTarget(group);
 getDefaultOpenAdminNavGroups(groups);
 shouldRenderAdminNavItems();
 collapsed ? "w-[72px]" : "w-[220px]";
-collapsed ? "pl-[72px]" : "pl-[220px]";
+const contentPaddingClass = collapsed ? "pl-[72px]" : "pl-[220px]";
+"pl-[236px]";
 <button className="absolute right-0 top-6 translate-x-1/2"><PanelLeftOpen /><PanelLeftClose /></button>
 <ChevronDown className="transition" />
 <button className="text-[15px]"></button>
@@ -59,13 +62,15 @@ collapsed ? "pl-[72px]" : "pl-[220px]";
 `;
 
 const pageSource = `
-import { listAccessibleStores, listFranchisees, listStores } from "@hentor/db";
 import { AdminUserMenu } from "./ui/admin-user-menu";
-import { StoreSwitcher } from "./ui/store-switcher";
-const managedStores = listStores();
-const franchisees = listFranchisees();
-<StoreSwitcher />
 <AdminUserMenu canOpenOperationLogs scopeLabel="全部门店" roles="总部管理员" />
+`;
+
+const dashboardSource = `
+const selectedStoreId = searchParams.get("storeId");
+const storeId = activeStore?.id ?? "";
+const activeStore = data.activeStore;
+const data = { storeAccessScope: session.storeScope, stores: session.stores };
 `;
 
 const menuSource = `
@@ -92,7 +97,7 @@ const loginSource = `
 `;
 
 const modalPanelSource = `
-const [fullscreen, setFullscreen] = useState(false);
+const [fullscreen, setFullscreen] = useState(true);
 <Maximize2 />
 <Minimize2 />
 aria-modal="true"
@@ -131,9 +136,12 @@ const adminScreenshotPaths = [
 ];
 
 function buildPanelSources(source = modalPanelSource) {
-  return Object.fromEntries(
-    ADMIN_MODAL_PANEL_FILES.map((fileName) => [fileName, source]),
-  );
+  return {
+    "admin-draggable-modal.tsx": modalPanelSource,
+    ...Object.fromEntries(
+      ADMIN_MODAL_PANEL_FILES.map((fileName) => [fileName, source]),
+    ),
+  };
 }
 
 test("admin artifact smoke keeps PC Figma node traceability and baselines", () => {
@@ -203,8 +211,8 @@ test("admin artifact smoke keeps the two-level Figma navigation contract", () =>
     {
       collapsedWidthPx: 72,
       expandedWidthPx: 220,
-      groups: 7,
-      items: 13,
+      groups: 6,
+      items: 17,
     },
   );
 
@@ -263,18 +271,19 @@ test("admin artifact smoke keeps management dialogs draggable and resizable", ()
   );
 });
 
-test("admin artifact smoke keeps the franchise store management concept", () => {
+test("admin artifact smoke keeps store-scoped management", () => {
   assert.deepEqual(
-    assertAdminStoreConceptSource({ navigationSource, pageSource }),
+    assertAdminStoreConceptSource({ dashboardSource, navigationSource, pageSource }),
     {
-      hasFranchiseeStoreManagement: true,
+      hasStoreScopedManagement: true,
     },
   );
 
   assert.throws(
     () =>
       assertAdminStoreConceptSource({
-        navigationSource: navigationSource.replace('label: "加盟商"', ""),
+        dashboardSource: dashboardSource.replaceAll("activeStore", ""),
+        navigationSource,
         pageSource,
       }),
     /ADMIN_STORE_MISMATCH/,

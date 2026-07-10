@@ -32,8 +32,10 @@ import org.springframework.util.StringUtils;
 
 @Service
 public class SystemSettingsService {
+  private static final String DEFAULT_ADMIN_SYSTEM_NAME = "HanYang Fresh";
   private static final int DEFAULT_HOME_DISH_COLUMNS = 3;
   private static final List<String> CONFIG_KEYS = List.of(
+    "admin_system_name",
     "about_text",
     "customer_service_tel",
     "home_dish_columns",
@@ -41,7 +43,9 @@ public class SystemSettingsService {
     "login_subtitle",
     "login_title",
     "login_welcome",
+    "privacy_policy_content",
     "privacy_policy_url",
+    "user_agreement_content",
     "user_agreement_url"
   );
 
@@ -79,6 +83,10 @@ public class SystemSettingsService {
     List<String> deliveryCities = normalizeDeliveryRangeValues(request.deliveryCities());
     List<String> deliveryProvinces = normalizeDeliveryRangeValues(request.deliveryProvinces());
     int homeDishColumns = normalizeHomeDishColumns(request.homeDishColumns());
+    String adminSystemName = normalizeText(request.adminSystemName());
+    if (!StringUtils.hasText(adminSystemName)) {
+      throw new ApiException("ADMIN_SYSTEM_NAME_REQUIRED", "请输入后台系统名称", HttpStatus.BAD_REQUEST);
+    }
     SystemSettingsDto before = readSystemSettings(request.storeId());
 
     StoreEntity storeUpdate = new StoreEntity();
@@ -89,27 +97,35 @@ public class SystemSettingsService {
     storeUpdate.setUpdatedAt(LocalDateTime.now());
     storeMapper.updateSystemSettings(storeUpdate);
 
-    Map<String, String> configValues = Map.of(
-      "about_text", normalizeText(request.aboutText()),
-      "customer_service_tel", customerServiceTel,
-      "home_dish_columns", String.valueOf(homeDishColumns),
-      "login_image_url", normalizeText(request.loginImageUrl()),
-      "login_subtitle", normalizeText(request.loginSubtitle()),
-      "login_title", normalizeText(request.loginTitle()),
-      "login_welcome", normalizeText(request.loginWelcome()),
-      "privacy_policy_url", normalizeText(request.privacyPolicyUrl()),
-      "user_agreement_url", normalizeText(request.userAgreementUrl())
-    );
+    Map<String, String> configValues = new LinkedHashMap<>();
+    configValues.put("admin_system_name", adminSystemName);
+    configValues.put("about_text", normalizeText(request.aboutText()));
+    configValues.put("customer_service_tel", customerServiceTel);
+    configValues.put("home_dish_columns", String.valueOf(homeDishColumns));
+    configValues.put("login_image_url", normalizeText(request.loginImageUrl()));
+    configValues.put("login_subtitle", normalizeText(request.loginSubtitle()));
+    configValues.put("login_title", normalizeText(request.loginTitle()));
+    configValues.put("login_welcome", normalizeText(request.loginWelcome()));
+    configValues.put("privacy_policy_content", normalizeText(request.privacyPolicyContent()));
+    configValues.put("privacy_policy_url", normalizeText(request.privacyPolicyUrl()));
+    configValues.put("user_agreement_content", normalizeText(request.userAgreementContent()));
+    configValues.put("user_agreement_url", normalizeText(request.userAgreementUrl()));
     LocalDateTime now = LocalDateTime.now();
+    List<String> allStoreIds = storeMapper.selectList(null).stream().map(StoreEntity::getId).toList();
     for (Map.Entry<String, String> entry : configValues.entrySet()) {
-      SystemConfigEntity config = new SystemConfigEntity();
-      config.setId(id());
-      config.setStoreId(request.storeId());
-      config.setKey(entry.getKey());
-      config.setValue(toJson(entry.getValue()));
-      config.setCreatedAt(now);
-      config.setUpdatedAt(now);
-      systemConfigMapper.upsertStoreConfig(config);
+      List<String> targetStoreIds = "admin_system_name".equals(entry.getKey())
+        ? allStoreIds
+        : List.of(request.storeId());
+      for (String targetStoreId : targetStoreIds) {
+        SystemConfigEntity config = new SystemConfigEntity();
+        config.setId(id());
+        config.setStoreId(targetStoreId);
+        config.setKey(entry.getKey());
+        config.setValue(toJson(entry.getValue()));
+        config.setCreatedAt(now);
+        config.setUpdatedAt(now);
+        systemConfigMapper.upsertStoreConfig(config);
+      }
     }
 
     SystemSettingsDto after = readSystemSettings(request.storeId());
@@ -137,6 +153,9 @@ public class SystemSettingsService {
       .collect(Collectors.toMap(SystemConfigEntity::getKey, SystemConfigEntity::getValue, (left, right) -> right));
 
     return new SystemSettingsDto(
+      StringUtils.hasText(readJsonText(configByKey.get("admin_system_name")))
+        ? readJsonText(configByKey.get("admin_system_name"))
+        : DEFAULT_ADMIN_SYSTEM_NAME,
       readJsonText(configByKey.get("about_text")),
       store.getCustomerServiceTel() == null ? "" : store.getCustomerServiceTel(),
       readJsonStringArray(store.getDeliveryCities()),
@@ -146,8 +165,10 @@ public class SystemSettingsService {
       readJsonText(configByKey.get("login_subtitle")),
       readJsonText(configByKey.get("login_title")),
       readJsonText(configByKey.get("login_welcome")),
+      readJsonText(configByKey.get("privacy_policy_content")),
       readJsonText(configByKey.get("privacy_policy_url")),
       new SystemSettingsStoreDto(store.getId(), store.getName()),
+      readJsonText(configByKey.get("user_agreement_content")),
       readJsonText(configByKey.get("user_agreement_url"))
     );
   }
@@ -233,6 +254,7 @@ public class SystemSettingsService {
 
   private Map<String, Object> settingsLogValue(SystemSettingsDto settings) {
     Map<String, Object> value = new LinkedHashMap<>();
+    value.put("adminSystemName", settings.adminSystemName());
     value.put("aboutText", settings.aboutText());
     value.put("customerServiceTel", settings.customerServiceTel());
     value.put("deliveryCities", settings.deliveryCities());
@@ -242,7 +264,9 @@ public class SystemSettingsService {
     value.put("loginSubtitle", settings.loginSubtitle());
     value.put("loginTitle", settings.loginTitle());
     value.put("loginWelcome", settings.loginWelcome());
+    value.put("privacyPolicyContent", settings.privacyPolicyContent());
     value.put("privacyPolicyUrl", settings.privacyPolicyUrl());
+    value.put("userAgreementContent", settings.userAgreementContent());
     value.put("userAgreementUrl", settings.userAgreementUrl());
     return value;
   }

@@ -10,12 +10,16 @@ describe("kuaidi printer management panel", () => {
       "utf8",
     );
 
-    expect(source).toContain("快递100打印机");
+    expect(source).toContain("面单打印");
     expect(source).toContain("/api/admin/kuaidi-printers");
     expect(source).toContain("新建打印机");
-    expect(source).toContain("编辑打印机");
+    expect(source).toContain('"编辑"} · ${modal.item.name}');
     expect(source).toContain("删除打印机");
     expect(source).toContain("额外请求参数 JSON");
+    expect(source).toContain("发货地址");
+    expect(source).toContain("senderAddress");
+    expect(source).toContain("发货手机号");
+    expect(source).toContain("senderMobile");
     expect(source).toContain("parseRequestParams");
     expect(source).toContain("设为默认打印机");
   });
@@ -33,7 +37,7 @@ describe("kuaidi printer management panel", () => {
     expect(dashboard).toContain("KuaidiPrinterManagementPanel");
     expect(dashboard).toContain('activeSection === "kuaidi-printers"');
     expect(navigation).toContain('"kuaidi-printers"');
-    expect(navigation).toContain("快递100打印机");
+    expect(navigation).toContain("面单打印");
     expect(navigation).toContain('icon: "printer"');
   });
 });

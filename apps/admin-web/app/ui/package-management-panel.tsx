@@ -14,7 +14,10 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useRef, useState, type PointerEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { adminFilterResetHref } from "@/app/lib/admin-navigation";
 import {
   createAdminModalDragState,
   getBoundedAdminModalOffset,
@@ -53,7 +56,9 @@ import {
   type PackagePanelItem,
 } from "./package-management-model";
 import { AdminMemberAvatar } from "./admin-member-avatar";
-import { formatDateOnly } from "./date-format";
+import { AdminFormField } from "./admin-form-field";
+import { AdminOverflowText } from "./admin-table-tooltip";
+import { formatDateOnly, formatDateTimeMinute } from "./date-format";
 import { RequiredLabel } from "./required-mark";
 
 export type { PackagePanelItem } from "./package-management-model";
@@ -67,6 +72,7 @@ type PackageManagementPanelProps = {
   canWrite?: boolean;
   initialItems: PackagePanelItem[];
   initialPagination: AdminPaginationMeta;
+  initialQuery?: string;
   initialSummary: {
     active: number;
     expired: number;
@@ -107,11 +113,28 @@ type CreateFormState = FormState & {
   userId: string;
 };
 
+type PackageFormErrors = Partial<
+  Record<"reason" | "templateId" | "totalTimes" | "usedTimes" | "userId" | "weightLimitJin", string>
+>;
+
+type PackageListFilters = {
+  query: string;
+  statusFilter: PackagePanelItem["status"] | "ALL";
+};
+
 const STATUS_LABELS: Record<PackagePanelItem["status"], string> = {
   ACTIVE: "可预订",
   EXPIRED: "不可用",
   FROZEN: "已冻结",
   USED_UP: "已用完",
+};
+
+const ORDER_STATUS_LABELS: Record<string, string> = {
+  CANCELED: "已取消",
+  PENDING_SHIPMENT: "待配送",
+  SHIPPED: "已发货",
+  SIGNED: "已签收",
+  VOIDED: "已作废",
 };
 
 function displayPhone(phone: string | null) {
@@ -150,15 +173,87 @@ function formatMemberOption(member: {
   return `${member.nickname ?? "未命名会员"} · ${displayPhone(member.phone)}`;
 }
 
+function shouldRefreshPackageSummary(filters: PackageListFilters) {
+  return filters.statusFilter === "ALL" && !filters.query.trim();
+}
+
+function hasPackageFormErrors(errors: PackageFormErrors) {
+  return Object.values(errors).some(Boolean);
+}
+
+function formatPackageQuantity(value: number) {
+  return Number(value).toLocaleString("zh-CN", {
+    maximumFractionDigits: 2,
+  });
+}
+
+function packageUsageRows(item: PackagePanelItem) {
+  return item.recentOrders ?? [];
+}
+
+function formatPackageOrderContent(
+  order: NonNullable<PackagePanelItem["recentOrders"]>[number],
+) {
+  if (order.items?.length) {
+    return order.items
+      .map(
+        (item) =>
+          `${item.dishNameSnapshot}${formatPackageQuantity(item.weightJin)}斤`,
+      )
+      .join("、");
+  }
+
+  return `合计 ${formatPackageQuantity(order.totalWeightJin)} 斤`;
+}
+
+function validateCreatePackageForm(form: CreateFormState) {
+  const errors: PackageFormErrors = {};
+  if (!form.userId) {
+    errors.userId = "请选择会员";
+  }
+  if (!form.templateId) {
+    errors.templateId = "请选择套餐模板";
+  }
+  if (!form.usedTimes.trim()) {
+    errors.usedTimes = "请输入已用次数";
+  }
+  if (!form.reason.trim()) {
+    errors.reason = "请输入操作原因";
+  }
+  return errors;
+}
+
+function validatePackageActionForm(form: FormState, mode: ModalMode) {
+  const errors: PackageFormErrors = {};
+  if (mode === "adjust") {
+    if (!form.totalTimes.trim()) {
+      errors.totalTimes = "请输入总次数";
+    }
+    if (!form.usedTimes.trim()) {
+      errors.usedTimes = "请输入已用次数";
+    }
+    if (!form.weightLimitJin.trim()) {
+      errors.weightLimitJin = "请输入单次斤数";
+    }
+  }
+  if (!form.reason.trim()) {
+    errors.reason =
+      mode === "delete" ? "请输入删除原因" : mode === "freeze" ? "请输入冻结原因" : "请输入操作原因";
+  }
+  return errors;
+}
+
 export function PackageManagementPanel({
   canWrite = true,
   initialItems,
   initialPagination,
+  initialQuery = "",
   initialSummary,
   memberOptions,
   packageTemplateOptions,
   store,
 }: PackageManagementPanelProps) {
+  const router = useRouter();
   const [items, setItems] = useState(() => normalizePackagePanelItems(initialItems));
   const [pagination, setPagination] = useState(initialPagination);
   const [summary, setSummary] = useState(initialSummary);
@@ -173,13 +268,15 @@ export function PackageManagementPanel({
   const [memberSearch, setMemberSearch] = useState("");
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [templateSearch, setTemplateSearch] = useState("");
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(true);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  const [createFormErrors, setCreateFormErrors] = useState<PackageFormErrors>({});
+  const [formErrors, setFormErrors] = useState<PackageFormErrors>({});
+  const [query, setQuery] = useState(initialQuery);
   const [statusFilter, setStatusFilter] = useState<
     PackagePanelItem["status"] | "ALL"
   >("ALL");
@@ -187,7 +284,8 @@ export function PackageManagementPanel({
 
   async function reloadPackages(
     page = pagination.page,
-    filters = { query, statusFilter },
+    filters: PackageListFilters = { query, statusFilter },
+    pageSize = pagination.pageSize,
   ) {
     if (!store) {
       return;
@@ -195,7 +293,7 @@ export function PackageManagementPanel({
 
     const params = new URLSearchParams({
       page: String(page),
-      pageSize: String(pagination.pageSize),
+      pageSize: String(pageSize),
       storeId: store.id,
     });
     const nextQuery = filters.query.trim();
@@ -228,11 +326,13 @@ export function PackageManagementPanel({
       const nextList = normalizeAdminListPayload(
         result.data,
         initialSummary,
-        pagination.pageSize,
+        pageSize,
       );
       setItems(normalizePackagePanelItems(nextList.items));
       setPagination(nextList.pagination);
-      setSummary(nextList.summary);
+      if (shouldRefreshPackageSummary(filters)) {
+        setSummary(nextList.summary);
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "加载套餐失败");
     } finally {
@@ -240,9 +340,27 @@ export function PackageManagementPanel({
     }
   }
 
+  useEffect(() => {
+    const nextQuery = initialQuery.trim();
+    if (!nextQuery) {
+      return;
+    }
+
+    setQuery(nextQuery);
+    setStatusFilter("ALL");
+    void reloadPackages(1, { query: nextQuery, statusFilter: "ALL" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuery]);
+
   function resetFilters() {
     setQuery("");
     setStatusFilter("ALL");
+    router.replace(
+      adminFilterResetHref(
+        new URLSearchParams(window.location.search),
+        "user-packages",
+      ),
+    );
     void reloadPackages(1, { query: "", statusFilter: "ALL" });
   }
 
@@ -258,6 +376,7 @@ export function PackageManagementPanel({
     setTemplatePickerOpen(false);
     setCreateOpen(true);
     setError(null);
+    setCreateFormErrors({});
   }
 
   function closeCreateModal() {
@@ -269,6 +388,7 @@ export function PackageManagementPanel({
     setMemberPickerOpen(false);
     setTemplatePickerOpen(false);
     setError(null);
+    setCreateFormErrors({});
   }
 
   function updateCreateTemplate(templateId: string) {
@@ -304,7 +424,8 @@ export function PackageManagementPanel({
     setModal({ item, mode });
     setForm(nextForm);
     setInitialForm(nextForm);
-    setFullscreen(false);
+    setFormErrors({});
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setError(null);
     void hydratePackageDetail(item);
@@ -365,6 +486,7 @@ export function PackageManagementPanel({
     setForm(null);
     setInitialForm(null);
     setError(null);
+    setFormErrors({});
   }
 
   function handleHeaderPointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -399,6 +521,12 @@ export function PackageManagementPanel({
 
   async function submitCreateModal() {
     if (!canWrite || !store) {
+      return;
+    }
+
+    const validationErrors = validateCreatePackageForm(createForm);
+    setCreateFormErrors(validationErrors);
+    if (hasPackageFormErrors(validationErrors)) {
       return;
     }
 
@@ -447,6 +575,11 @@ export function PackageManagementPanel({
 
     const isAdjust = modal.mode === "adjust";
     const isDelete = modal.mode === "delete";
+    const validationErrors = validatePackageActionForm(form, modal.mode);
+    setFormErrors(validationErrors);
+    if (hasPackageFormErrors(validationErrors)) {
+      return;
+    }
     const endpoint = isAdjust
       ? `/api/admin/user-packages/${modal.item.id}`
       : isDelete
@@ -594,14 +727,6 @@ export function PackageManagementPanel({
               新增用户套餐
             </button>
           ) : null}
-          <button
-            className="h-[58px] rounded-xl border border-dashed border-[#b8d8bf] bg-[#f8fff8] px-4 text-sm font-semibold text-[#1f8f4f] disabled:cursor-not-allowed disabled:opacity-60"
-            disabled
-            title="微信支付暂未开放，购买套餐入口预留"
-            type="button"
-          >
-            购买套餐预留
-          </button>
         </div>
       </div>
 
@@ -726,52 +851,62 @@ export function PackageManagementPanel({
                   ) : null}
                 </td>
                 <td className="px-4 py-4">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                  <div className="flex flex-wrap justify-end gap-2 whitespace-nowrap">
+                    <Button
+                      className="border-[#dbe6dc] text-[#1f8f4f]"
                       onClick={() => openModal(item, "detail")}
-                      title="查看详情"
+                      size="sm"
                       type="button"
+                      variant="outline"
                     >
-                      <Eye size={16} />
-                    </button>
+                      <Eye data-icon="inline-start" />
+                      查看
+                    </Button>
                     {canWrite ? (
                       <>
-                        <button
-                          className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                        <Button
+                          className="border-[#dbe6dc] text-[#1f8f4f]"
                           onClick={() => openModal(item, "adjust")}
-                          title="调整套餐"
+                          size="sm"
                           type="button"
+                          variant="outline"
                         >
-                          <Pencil size={16} />
-                        </button>
+                          <Pencil data-icon="inline-start" />
+                          调整
+                        </Button>
                         {item.status === "FROZEN" ? (
-                          <button
-                            className="grid h-9 w-9 place-items-center rounded-xl border border-[#dbe6dc] text-[#1f8f4f] hover:bg-[#f3f7f1]"
+                          <Button
+                            className="border-[#dbe6dc] text-[#1f8f4f]"
                             onClick={() => openModal(item, "unfreeze")}
-                            title="解冻套餐"
+                            size="sm"
                             type="button"
+                            variant="outline"
                           >
-                            <RotateCcw size={16} />
-                          </button>
+                            <RotateCcw data-icon="inline-start" />
+                            解冻
+                          </Button>
                         ) : (
-                          <button
-                            className="grid h-9 w-9 place-items-center rounded-xl border border-[#f2d5c8] text-[#b85a2b] hover:bg-[#fff7f2]"
+                          <Button
+                            className="border-[#f2d5c8] text-[#b85a2b] hover:bg-[#fff7f2]"
                             onClick={() => openModal(item, "freeze")}
-                            title="冻结套餐"
+                            size="sm"
                             type="button"
+                            variant="outline"
                           >
-                            <LockKeyhole size={16} />
-                          </button>
+                            <LockKeyhole data-icon="inline-start" />
+                            冻结
+                          </Button>
                         )}
-                        <button
-                          className="grid h-9 w-9 place-items-center rounded-xl border border-red-100 text-red-600 hover:bg-red-50"
+                        <Button
+                          className="border-red-100 text-red-600 hover:bg-red-50"
                           onClick={() => openModal(item, "delete")}
-                          title="删除套餐"
+                          size="sm"
                           type="button"
+                          variant="outline"
                         >
-                          <Trash2 size={16} />
-                        </button>
+                          <Trash2 data-icon="inline-start" />
+                          删除
+                        </Button>
                       </>
                     ) : null}
                   </div>
@@ -790,6 +925,9 @@ export function PackageManagementPanel({
         <AdminPagination
           disabled={loadingList}
           onPageChange={(nextPage) => void reloadPackages(nextPage)}
+          onPageSizeChange={(nextPageSize) =>
+            void reloadPackages(1, { query, statusFilter }, nextPageSize)
+          }
           pagination={pagination}
         />
       </div>
@@ -822,14 +960,19 @@ export function PackageManagementPanel({
 
             <div className="flex-1 overflow-auto p-6">
               <div className="grid gap-4 md:grid-cols-2">
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>会员</RequiredLabel>
+                <AdminFormField
+                  error={createFormErrors.userId}
+                  label="会员"
+                  required
+                >
+                  {(invalid) => (
                   <Popover
                     open={memberPickerOpen}
                     onOpenChange={setMemberPickerOpen}
                   >
                     <PopoverTrigger asChild>
                       <button
+                        aria-invalid={invalid}
                         className="flex h-11 w-full items-center justify-between rounded-xl border border-[#dbe6dc] bg-white px-3 text-left text-base font-normal text-[#102017] outline-none transition focus:border-[#1f8f4f] focus:ring-4 focus:ring-[#1f8f4f]/10"
                         type="button"
                       >
@@ -886,15 +1029,21 @@ export function PackageManagementPanel({
                       </div>
                     </PopoverContent>
                   </Popover>
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>套餐模板</RequiredLabel>
+                  )}
+                </AdminFormField>
+                <AdminFormField
+                  error={createFormErrors.templateId}
+                  label="套餐模板"
+                  required
+                >
+                  {(invalid) => (
                   <Popover
                     open={templatePickerOpen}
                     onOpenChange={setTemplatePickerOpen}
                   >
                     <PopoverTrigger asChild>
                       <button
+                        aria-invalid={invalid}
                         className="flex h-11 w-full items-center justify-between rounded-xl border border-[#dbe6dc] bg-white px-3 text-left text-base font-normal text-[#102017] outline-none transition focus:border-[#1f8f4f] focus:ring-4 focus:ring-[#1f8f4f]/10"
                         type="button"
                       >
@@ -944,9 +1093,10 @@ export function PackageManagementPanel({
                       </div>
                     </PopoverContent>
                   </Popover>
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>总次数</RequiredLabel>
+                  )}
+                </AdminFormField>
+                <AdminFormField label="总次数" required>
+                  {() => (
                   <input
                     aria-readonly="true"
                     className="h-11 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-3 text-[#66756d] outline-none"
@@ -954,10 +1104,16 @@ export function PackageManagementPanel({
                     type="text"
                     value={createForm.totalTimes}
                   />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>已用次数</RequiredLabel>
+                  )}
+                </AdminFormField>
+                <AdminFormField
+                  error={createFormErrors.usedTimes}
+                  label="已用次数"
+                  required
+                >
+                  {(invalid) => (
                   <input
+                    aria-invalid={invalid}
                     className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                     min={0}
                     onChange={(event) =>
@@ -969,9 +1125,10 @@ export function PackageManagementPanel({
                     type="number"
                     value={createForm.usedTimes}
                   />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>单次斤数</RequiredLabel>
+                  )}
+                </AdminFormField>
+                <AdminFormField label="单次斤数" required>
+                  {() => (
                   <input
                     aria-readonly="true"
                     className="h-11 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] px-3 text-[#66756d] outline-none"
@@ -979,12 +1136,19 @@ export function PackageManagementPanel({
                     type="text"
                     value={createForm.weightLimitJin}
                   />
-                </label>
+                  )}
+                </AdminFormField>
               </div>
 
-              <label className="mt-5 flex flex-col gap-2 text-sm font-medium">
-                <RequiredLabel>操作原因</RequiredLabel>
+              <AdminFormField
+                className="mt-5"
+                error={createFormErrors.reason}
+                label="操作原因"
+                required
+              >
+                {(invalid) => (
                 <textarea
+                  aria-invalid={invalid}
                   className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
                   onChange={(event) =>
                     setCreateForm((value) => ({
@@ -995,7 +1159,8 @@ export function PackageManagementPanel({
                   placeholder="例如：线下购买开通、后台补录"
                   value={createForm.reason}
                 />
-              </label>
+                )}
+              </AdminFormField>
 
             </div>
 
@@ -1121,6 +1286,135 @@ export function PackageManagementPanel({
                 </div>
               ) : null}
 
+              {modal.mode === "detail" ? (
+                <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+                  <div className="rounded-xl border border-[#dbe6dc] bg-white p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-semibold">套餐详情</div>
+                      <span className="rounded-full bg-[#e8f6ed] px-3 py-1 text-xs font-semibold text-[#1f8f4f]">
+                        {STATUS_LABELS[modal.item.status]}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm md:grid-cols-4 lg:grid-cols-2">
+                      <div>
+                        <div className="text-xs text-[#66756d]">总次数</div>
+                        <div className="mt-1 font-semibold">{modal.item.totalTimes} 次</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[#66756d]">已用次数</div>
+                        <div className="mt-1 font-semibold">{modal.item.usedTimes} 次</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[#66756d]">剩余次数</div>
+                        <div className="mt-1 font-semibold">{modal.item.remainingTimes} 次</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[#66756d]">单次斤数</div>
+                        <div className="mt-1 font-semibold">{modal.item.weightLimitJin} 斤</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[#66756d]">创建时间</div>
+                        <div className="mt-1 font-semibold">{formatDateTimeMinute(modal.item.createdAt)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[#66756d]">最近使用</div>
+                        <div className="mt-1 font-semibold">{formatDateTimeMinute(modal.item.lastUsedAt)}</div>
+                      </div>
+                    </div>
+                    <div className="mt-4 border-t border-[#edf2ed] pt-3">
+                      <div className="text-xs font-semibold text-[#66756d]">附加权益</div>
+                      {modal.item.benefits?.length ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {modal.item.benefits.map((benefit) => {
+                            const remainingQuantity = Math.max(
+                              Number(benefit.totalQuantity) - Number(benefit.usedQuantity),
+                              0,
+                            );
+                            return (
+                              <div
+                                className="rounded-lg border border-[#f1e1b8] bg-[#fffdf5] px-3 py-2 text-sm"
+                                key={benefit.id}
+                              >
+                                <span className="font-semibold">{benefit.nameSnapshot}</span>
+                                <span className="ml-2 text-[#66756d]">
+                                  {formatPackageQuantity(benefit.usedQuantity)}/
+                                  {formatPackageQuantity(benefit.totalQuantity)}
+                                  {benefit.unitSnapshot}
+                                </span>
+                                <span className="ml-2 text-[#9b6508]">
+                                  剩余 {formatPackageQuantity(remainingQuantity)}
+                                  {benefit.unitSnapshot}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-[#66756d]">无附加权益</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-[#dbe6dc] bg-white p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-semibold">使用明细</div>
+                      <div className="text-xs text-[#66756d]">
+                        共 {packageUsageRows(modal.item).length} 条
+                      </div>
+                    </div>
+                    {packageUsageRows(modal.item).length ? (
+                      <div className="mt-3 divide-y divide-[#edf2ed] overflow-hidden rounded-xl border border-[#edf2ed]">
+                        {packageUsageRows(modal.item).map((order) => {
+                          const orderContent = formatPackageOrderContent(order);
+
+                          return (
+                            <div
+                              className="grid gap-2 px-3 py-2.5 text-sm md:grid-cols-[1.15fr_1.35fr_0.65fr_0.6fr_0.65fr]"
+                              key={order.id}
+                            >
+                              <div className="min-w-0">
+                                <AdminOverflowText className="font-semibold" content={order.orderNo}>
+                                  {order.orderNo}
+                                </AdminOverflowText>
+                                <div className="mt-0.5 text-xs text-[#66756d]">
+                                  {formatDateTimeMinute(order.createdAt)}
+                                </div>
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-xs text-[#66756d]">订单内容</div>
+                                <AdminOverflowText className="font-semibold" content={orderContent}>
+                                  {orderContent}
+                                </AdminOverflowText>
+                              </div>
+                              <div>
+                                <div className="text-xs text-[#66756d]">使用重量</div>
+                                <div className="font-semibold">
+                                  {formatPackageQuantity(order.totalWeightJin)} 斤
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-xs text-[#66756d]">扣减次数</div>
+                                <div className="font-semibold">1 次</div>
+                              </div>
+                              <div>
+                                <div className="text-xs text-[#66756d]">状态</div>
+                                <div className="font-semibold">
+                                  {ORDER_STATUS_LABELS[order.status] ?? order.status}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="mt-3 rounded-xl border border-dashed border-[#cfe3d3] px-4 py-6 text-center text-sm text-[#66756d]">
+                        暂无使用明细
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
               {modal.mode === "delete" ? (
                 <div className="mt-5 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">
                   只允许删除误开通且没有订单记录的套餐。已有订单记录的套餐请使用冻结，保留会员和订单历史。
@@ -1129,9 +1423,14 @@ export function PackageManagementPanel({
 
               {modal.mode === "adjust" ? (
                 <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    <RequiredLabel>总次数</RequiredLabel>
+                  <AdminFormField
+                    error={formErrors.totalTimes}
+                    label="总次数"
+                    required
+                  >
+                    {(invalid) => (
                     <input
+                      aria-invalid={invalid}
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       min={1}
                       onChange={(event) =>
@@ -1142,10 +1441,16 @@ export function PackageManagementPanel({
                       type="number"
                       value={form.totalTimes}
                     />
-                  </label>
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    <RequiredLabel>已用次数</RequiredLabel>
+                    )}
+                  </AdminFormField>
+                  <AdminFormField
+                    error={formErrors.usedTimes}
+                    label="已用次数"
+                    required
+                  >
+                    {(invalid) => (
                     <input
+                      aria-invalid={invalid}
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       min={0}
                       onChange={(event) =>
@@ -1156,10 +1461,16 @@ export function PackageManagementPanel({
                       type="number"
                       value={form.usedTimes}
                     />
-                  </label>
-                  <label className="flex flex-col gap-2 text-sm font-medium">
-                    <RequiredLabel>单次斤数</RequiredLabel>
+                    )}
+                  </AdminFormField>
+                  <AdminFormField
+                    error={formErrors.weightLimitJin}
+                    label="单次斤数"
+                    required
+                  >
+                    {(invalid) => (
                     <input
+                      aria-invalid={invalid}
                       className="h-11 rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
                       min={0.5}
                       onChange={(event) =>
@@ -1173,14 +1484,21 @@ export function PackageManagementPanel({
                       type="number"
                       value={form.weightLimitJin}
                     />
-                  </label>
+                    )}
+                  </AdminFormField>
                 </div>
               ) : null}
 
               {canWrite && modal.mode !== "detail" ? (
-                <label className="mt-5 flex flex-col gap-2 text-sm font-medium">
-                  <RequiredLabel>操作原因</RequiredLabel>
+                <AdminFormField
+                  className="mt-5"
+                  error={formErrors.reason}
+                  label="操作原因"
+                  required
+                >
+                  {(invalid) => (
                   <textarea
+                    aria-invalid={invalid}
                     className="min-h-24 resize-y rounded-xl border border-[#dbe6dc] p-3 outline-none focus:border-[#1f8f4f]"
                     onChange={(event) =>
                       setForm((value) =>
@@ -1198,7 +1516,8 @@ export function PackageManagementPanel({
                     }
                     value={form.reason}
                   />
-                </label>
+                  )}
+                </AdminFormField>
               ) : null}
 
             </div>

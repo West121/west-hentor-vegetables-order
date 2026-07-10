@@ -11,7 +11,7 @@ public record DishRequest(
   @NotBlank String category,
   String status,
   @NotNull @DecimalMin(value = "0.0", inclusive = false) BigDecimal stepJin,
-  @NotNull @DecimalMin("0.0") BigDecimal stockJin,
+  @DecimalMin("0.0") BigDecimal stockJin,
   String imageKey,
   String imageUrl,
   String description,

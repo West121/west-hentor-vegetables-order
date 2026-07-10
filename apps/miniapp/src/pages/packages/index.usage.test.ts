@@ -20,4 +20,17 @@ describe("miniapp packages page multi-package carousel", () => {
     expect(source).toContain("currentPackage?.usageDetails ?? []");
     expect(source).toContain("左右滑动切换");
   });
+
+  it("uses the same configurable brand name as the login/home settings instead of hardcoding Hentor Fresh", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/pages/packages/index.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("buildStoreSettingsUrl");
+    expect(source).toContain('useState("Hentor Fresh")');
+    expect(source).toContain("setBrandName(settingsResponse.data.data.loginTitle)");
+    expect(source).toContain("brandName={brandName}");
+    expect(source).not.toContain('<View className="hero-card__brand">Hentor Fresh</View>');
+  });
 });

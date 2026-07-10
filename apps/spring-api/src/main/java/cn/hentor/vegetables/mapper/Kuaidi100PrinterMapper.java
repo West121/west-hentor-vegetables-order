@@ -12,13 +12,13 @@ public interface Kuaidi100PrinterMapper extends BaseMapper<Kuaidi100PrinterEntit
     INSERT INTO "Kuaidi100Printer" (
       "id", "storeId", "name", "status", "isDefault", "apiKey", "apiSecret",
       "partnerId", "partnerKey", "code", "kuaidicom", "expType", "payType",
-      "siid", "tempId", "senderCompany", "requestParams", "sortOrder",
+      "siid", "tempId", "senderAddress", "senderCompany", "senderMobile", "requestParams", "sortOrder",
       "remark", "createdAt", "updatedAt"
     )
     VALUES (
       #{id}, #{storeId}, #{name}, #{status}, #{defaultPrinter}, #{apiKey}, #{apiSecret},
       #{partnerId}, #{partnerKey}, #{code}, #{kuaidicom}, #{expType}, #{payType},
-      #{siid}, #{tempId}, #{senderCompany}, #{requestParams}, #{sortOrder},
+      #{siid}, #{tempId}, #{senderAddress}, #{senderCompany}, #{senderMobile}, #{requestParams}, #{sortOrder},
       #{remark}, #{createdAt}, #{updatedAt}
     )
     """)
@@ -39,7 +39,9 @@ public interface Kuaidi100PrinterMapper extends BaseMapper<Kuaidi100PrinterEntit
         "payType" = #{payType},
         "siid" = #{siid},
         "tempId" = #{tempId},
+        "senderAddress" = #{senderAddress},
         "senderCompany" = #{senderCompany},
+        "senderMobile" = #{senderMobile},
         "requestParams" = #{requestParams},
         "sortOrder" = #{sortOrder},
         "remark" = #{remark},

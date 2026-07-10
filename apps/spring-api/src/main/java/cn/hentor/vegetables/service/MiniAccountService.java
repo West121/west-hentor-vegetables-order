@@ -55,10 +55,10 @@ public class MiniAccountService {
   @Transactional
   public MiniAccountUpdateResponse updateProfile(MiniSessionContext session, MiniAccountUpdateRequest request) {
     long startedAt = System.currentTimeMillis();
-    String nickname = normalizeOptionalNickname(request.nickname());
     String avatarUrl = normalizeAvatarUrl(request.avatarUrl());
-    if (!StringUtils.hasText(nickname) && !StringUtils.hasText(avatarUrl)) {
-      throw new ApiException("INVALID_PARAMS", "请填写昵称或选择头像", HttpStatus.BAD_REQUEST);
+    String nickname = normalizeNickname(request.nickname());
+    if (!StringUtils.hasText(avatarUrl) && !StringUtils.hasText(nickname)) {
+      throw new ApiException("INVALID_PARAMS", "请选择头像或填写昵称", HttpStatus.BAD_REQUEST);
     }
     StoreEntity store = miniAuthService.findAvailableStore(request.storeCode());
     UserEntity before = userMapper.selectById(session.userId());
@@ -67,11 +67,11 @@ public class MiniAccountService {
     }
 
     LocalDateTime now = LocalDateTime.now(BUSINESS_ZONE);
-    if (StringUtils.hasText(nickname)) {
-      userMapper.updateMiniNickname(before.getId(), nickname, now);
-    }
     if (StringUtils.hasText(avatarUrl)) {
       userMapper.updateMiniAvatarUrl(before.getId(), avatarUrl, now);
+    }
+    if (StringUtils.hasText(nickname)) {
+      userMapper.updateMiniNickname(before.getId(), nickname, now);
     }
     UserEntity after = userMapper.selectById(before.getId());
 
@@ -83,7 +83,7 @@ public class MiniAccountService {
       before.getId(),
       miniProfileLogValue(before),
       miniProfileLogValue(after),
-      miniProfileRequestValue(nickname, avatarUrl, request.storeCode()),
+      miniProfileRequestValue(avatarUrl, nickname, request.storeCode()),
       Map.of("member", miniProfileLogValue(after)),
       "PATCH",
       "/api/spring/v1/account",
@@ -146,17 +146,6 @@ public class MiniAccountService {
     return new MiniAccountCancelResponse(result);
   }
 
-  private String normalizeOptionalNickname(String value) {
-    String nickname = value == null ? "" : value.trim();
-    if (!StringUtils.hasText(nickname)) {
-      return null;
-    }
-    if (nickname.length() > 24) {
-      throw new ApiException("INVALID_PARAMS", "昵称不能为空，最多 24 个字符", HttpStatus.BAD_REQUEST);
-    }
-    return nickname;
-  }
-
   private String normalizeAvatarUrl(String value) {
     String avatarUrl = value == null ? "" : value.trim();
     if (!StringUtils.hasText(avatarUrl)) {
@@ -175,6 +164,17 @@ public class MiniAccountService {
     return avatarUrl;
   }
 
+  private String normalizeNickname(String value) {
+    String nickname = value == null ? "" : value.trim();
+    if (!StringUtils.hasText(nickname)) {
+      return null;
+    }
+    if (nickname.length() > 32) {
+      throw new ApiException("INVALID_PARAMS", "昵称不能超过 32 个字", HttpStatus.BAD_REQUEST);
+    }
+    return nickname;
+  }
+
   private Map<String, Object> miniProfileLogValue(UserEntity user) {
     Map<String, Object> value = new LinkedHashMap<>();
     value.put("avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl());
@@ -184,7 +184,7 @@ public class MiniAccountService {
     return value;
   }
 
-  private Map<String, Object> miniProfileRequestValue(String nickname, String avatarUrl, String storeCode) {
+  private Map<String, Object> miniProfileRequestValue(String avatarUrl, String nickname, String storeCode) {
     Map<String, Object> value = new LinkedHashMap<>();
     if (StringUtils.hasText(avatarUrl)) {
       value.put("avatarUrl", avatarUrl);

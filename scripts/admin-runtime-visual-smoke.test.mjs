@@ -38,6 +38,7 @@ test("admin runtime visual smoke covers the core shell, sections, and modal flow
       "tasks",
       "admin-users",
       "operation-logs",
+      "delivery-ranges",
       "system-settings",
     ],
   );
@@ -51,6 +52,7 @@ test("admin runtime visual smoke covers the core shell, sections, and modal flow
       "dish-modal",
       "task-modal",
       "system-settings-modal",
+      "delivery-range-modal",
     ],
   );
 });

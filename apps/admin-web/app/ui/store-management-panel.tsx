@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useRef, useState, type PointerEvent } from "react";
+import { Button } from "@/components/ui/button";
 import {
   createAdminModalDragState,
   getBoundedAdminModalOffset,
@@ -32,6 +33,7 @@ import {
   AdminDatePicker,
   AdminTimePicker,
 } from "./admin-date-time-picker";
+import { AdminSelect } from "./admin-select";
 import { canCloseAdminModal } from "./admin-modal-close-guard";
 import {
   buildFranchiseeFormState,
@@ -173,7 +175,7 @@ export function StoreManagementPanel({
   );
   const [initialFranchiseeForm, setInitialFranchiseeForm] =
     useState<FranchiseeFormState>(buildFranchiseeFormState());
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(true);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingFranchisees, setLoadingFranchisees] = useState(false);
@@ -199,7 +201,7 @@ export function StoreManagementPanel({
   );
 
   function resetModal() {
-    setFullscreen(false);
+    setFullscreen(true);
     setOffset({ x: 0, y: 0 });
     setError(null);
   }
@@ -403,10 +405,11 @@ export function StoreManagementPanel({
   async function reloadStores(
     page = storePagination.page,
     filters = { storeQuery, storeStatusFilter, storeTypeFilter },
+    pageSize = storePagination.pageSize,
   ) {
     const params = new URLSearchParams({
       page: String(page),
-      pageSize: String(storePagination.pageSize),
+      pageSize: String(pageSize),
     });
     const nextQuery = filters.storeQuery.trim();
     if (nextQuery) {
@@ -439,7 +442,7 @@ export function StoreManagementPanel({
           items: result.data.stores,
         },
         storeSummary,
-        storePagination.pageSize,
+        pageSize,
       );
       setStores(nextList.items);
       setStorePagination(nextList.pagination);
@@ -451,6 +454,7 @@ export function StoreManagementPanel({
   async function reloadFranchisees(
     page = franchiseePagination.page,
     filters = { franchiseeQuery, franchiseeStatusFilter },
+    pageSize = franchiseePagination.pageSize,
   ) {
     if (!canManageAllStores) {
       return;
@@ -458,7 +462,7 @@ export function StoreManagementPanel({
 
     const params = new URLSearchParams({
       page: String(page),
-      pageSize: String(franchiseePagination.pageSize),
+      pageSize: String(pageSize),
     });
     const nextQuery = filters.franchiseeQuery.trim();
     if (nextQuery) {
@@ -485,7 +489,7 @@ export function StoreManagementPanel({
       const nextList = normalizeAdminListPayload(
         result.data,
         franchiseeSummary,
-        franchiseePagination.pageSize,
+        pageSize,
       );
       setFranchisees(nextList.items);
       setFranchiseePagination(nextList.pagination);
@@ -651,37 +655,35 @@ export function StoreManagementPanel({
           </label>
           <label className="flex w-36 flex-col gap-1 text-xs font-semibold text-[#66756d]">
             状态
-            <select
-              className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-              onChange={(event) =>
-                setStoreStatusFilter(event.target.value as StoreStatus | "ALL")
+            <AdminSelect
+              contentLabel="状态"
+              onChange={(value) =>
+                setStoreStatusFilter(value as StoreStatus | "ALL")
               }
+              options={[
+                { label: "全部状态", value: "ALL" },
+                ...Object.entries(STORE_STATUS_LABELS).map(([value, label]) => ({
+                  label,
+                  value,
+                })),
+              ]}
               value={storeStatusFilter}
-            >
-              <option value="ALL">全部状态</option>
-              {Object.entries(STORE_STATUS_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <label className="flex w-36 flex-col gap-1 text-xs font-semibold text-[#66756d]">
             类型
-            <select
-              className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-              onChange={(event) =>
-                setStoreTypeFilter(event.target.value as StoreType | "ALL")
-              }
+            <AdminSelect
+              contentLabel="类型"
+              onChange={(value) => setStoreTypeFilter(value as StoreType | "ALL")}
+              options={[
+                { label: "全部类型", value: "ALL" },
+                ...Object.entries(STORE_TYPE_LABELS).map(([value, label]) => ({
+                  label,
+                  value,
+                })),
+              ]}
               value={storeTypeFilter}
-            >
-              <option value="ALL">全部类型</option>
-              {Object.entries(STORE_TYPE_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <button
             className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
@@ -751,24 +753,28 @@ export function StoreManagementPanel({
                     </span>
                   </td>
                   <td className="px-4 py-4 text-right">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#dbe6dc] text-[#1f8f4f]"
+                    <div className="flex flex-wrap justify-end gap-2 whitespace-nowrap">
+                      <Button
+                        className="border-[#dbe6dc] text-[#1f8f4f]"
                         onClick={() => openDetailStore(item)}
-                        title="查看详情"
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
-                        <Eye size={16} />
-                      </button>
-                      <button
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#dbe6dc] text-[#1f8f4f] disabled:opacity-50"
+                        <Eye data-icon="inline-start" />
+                        查看
+                      </Button>
+                      <Button
+                        className="border-[#dbe6dc] text-[#1f8f4f] disabled:opacity-50"
                         disabled={!canManageAllStores}
                         onClick={() => openEditStore(item)}
-                        title="编辑门店"
+                        size="sm"
                         type="button"
+                        variant="outline"
                       >
-                        <Pencil size={16} />
-                      </button>
+                        <Pencil data-icon="inline-start" />
+                        编辑
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -778,6 +784,13 @@ export function StoreManagementPanel({
           <AdminPagination
             disabled={loadingStores}
             onPageChange={(nextPage) => void reloadStores(nextPage)}
+            onPageSizeChange={(nextPageSize) =>
+              void reloadStores(
+                1,
+                { storeQuery, storeStatusFilter, storeTypeFilter },
+                nextPageSize,
+              )
+            }
             pagination={storePagination}
           />
         </div>
@@ -838,22 +851,22 @@ export function StoreManagementPanel({
           </label>
           <label className="flex w-36 flex-col gap-1 text-xs font-semibold text-[#66756d]">
             状态
-            <select
-              className="h-10 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm font-normal text-[#15261d] outline-none focus:border-[#1f8f4f]"
-              onChange={(event) =>
-                setFranchiseeStatusFilter(
-                  event.target.value as FranchiseeStatus | "ALL",
-                )
+            <AdminSelect
+              contentLabel="状态"
+              onChange={(value) =>
+                setFranchiseeStatusFilter(value as FranchiseeStatus | "ALL")
               }
+              options={[
+                { label: "全部状态", value: "ALL" },
+                ...Object.entries(FRANCHISEE_STATUS_LABELS).map(
+                  ([value, label]) => ({
+                    label,
+                    value,
+                  }),
+                ),
+              ]}
               value={franchiseeStatusFilter}
-            >
-              <option value="ALL">全部状态</option>
-              {Object.entries(FRANCHISEE_STATUS_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <button
             className="h-10 rounded-xl bg-[#1f8f4f] px-5 text-sm font-semibold text-white disabled:opacity-60"
@@ -886,25 +899,29 @@ export function StoreManagementPanel({
                     {item.contactName} · {item.contactPhone}
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-2">
-                  <button
-                    className="grid h-8 w-8 place-items-center rounded-lg border border-[#dbe6dc] text-[#1f8f4f] disabled:opacity-50"
+                <div className="flex shrink-0 flex-wrap gap-2 whitespace-nowrap">
+                  <Button
+                    className="border-[#dbe6dc] text-[#1f8f4f] disabled:opacity-50"
                     disabled={!canManageAllStores}
                     onClick={() => openDetailFranchisee(item)}
-                    title="查看详情"
+                    size="sm"
                     type="button"
+                    variant="outline"
                   >
-                    <Eye size={15} />
-                  </button>
-                  <button
-                    className="grid h-8 w-8 place-items-center rounded-lg border border-[#dbe6dc] text-[#1f8f4f] disabled:opacity-50"
+                    <Eye data-icon="inline-start" />
+                    查看
+                  </Button>
+                  <Button
+                    className="border-[#dbe6dc] text-[#1f8f4f] disabled:opacity-50"
                     disabled={!canManageAllStores}
                     onClick={() => openEditFranchisee(item)}
-                    title="编辑加盟商"
+                    size="sm"
                     type="button"
+                    variant="outline"
                   >
-                    <Pencil size={15} />
-                  </button>
+                    <Pencil data-icon="inline-start" />
+                    编辑
+                  </Button>
                 </div>
               </div>
               <div className="mt-3 flex items-center justify-between text-xs text-[#66756d]">
@@ -927,6 +944,13 @@ export function StoreManagementPanel({
           <AdminPagination
             disabled={loadingFranchisees || !canManageAllStores}
             onPageChange={(nextPage) => void reloadFranchisees(nextPage)}
+            onPageSizeChange={(nextPageSize) =>
+              void reloadFranchisees(
+                1,
+                { franchiseeQuery, franchiseeStatusFilter },
+                nextPageSize,
+              )
+            }
             pagination={franchiseePagination}
           />
         </div>
@@ -1046,52 +1070,53 @@ export function StoreManagementPanel({
                   </label>
                   <label className="space-y-1 text-sm font-medium">
                     <RequiredLabel>门店类型</RequiredLabel>
-                    <select
-                      className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    <AdminSelect
+                      contentLabel="门店类型"
                       disabled={isDetailModal}
-                      onChange={(event) =>
-                        updateStoreForm("type", event.target.value as StoreType)
-                      }
+                      onChange={(value) => updateStoreForm("type", value as StoreType)}
+                      options={[
+                        { label: "加盟", value: "FRANCHISE" },
+                        { label: "直营", value: "DIRECT" },
+                      ]}
+                      triggerClassName="h-11 w-full border-[#dbe6dc] bg-white"
                       value={storeForm.type}
-                    >
-                      <option value="FRANCHISE">加盟</option>
-                      <option value="DIRECT">直营</option>
-                    </select>
+                    />
                   </label>
                   <label className="space-y-1 text-sm font-medium">
                     <span>
                       加盟商
                       {storeForm.type === "FRANCHISE" ? <RequiredMark /> : null}
                     </span>
-                    <select
-                      className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    <AdminSelect
+                      contentLabel="加盟商"
                       disabled={isDetailModal || storeForm.type === "DIRECT"}
-                      onChange={(event) =>
-                        updateStoreForm("franchiseeId", event.target.value)
-                      }
+                      onChange={(value) => updateStoreForm("franchiseeId", value)}
+                      options={[
+                        { label: "请选择加盟商", value: "" },
+                        ...franchiseeOptions.map((item) => ({
+                          label: item.name,
+                          value: item.id,
+                        })),
+                      ]}
+                      triggerClassName="h-11 w-full border-[#dbe6dc] bg-white"
                       value={storeForm.franchiseeId}
-                    >
-                      <option value="">请选择加盟商</option>
-                      {franchiseeOptions.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </label>
                   <label className="space-y-1 text-sm font-medium">
                     <RequiredLabel>状态</RequiredLabel>
-                    <select
-                      className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    <AdminSelect
+                      contentLabel="状态"
                       disabled={isDetailModal}
-                      onChange={(event) =>
-                        updateStoreForm("status", event.target.value as StoreStatus)
+                      onChange={(value) =>
+                        updateStoreForm("status", value as StoreStatus)
                       }
+                      options={[
+                        { label: "营业", value: "ACTIVE" },
+                        { label: "停用", value: "DISABLED" },
+                      ]}
+                      triggerClassName="h-11 w-full border-[#dbe6dc] bg-white"
                       value={storeForm.status}
-                    >
-                      <option value="ACTIVE">营业</option>
-                      <option value="DISABLED">停用</option>
-                    </select>
+                    />
                   </label>
                   <AdminTimePicker
                     buttonClassName="h-11 w-full"
@@ -1235,21 +1260,20 @@ export function StoreManagementPanel({
                   </label>
                   <label className="space-y-1 text-sm font-medium">
                     <RequiredLabel>状态</RequiredLabel>
-                    <select
-                      className="h-11 w-full rounded-xl border border-[#dbe6dc] px-3 outline-none focus:border-[#1f8f4f]"
+                    <AdminSelect
+                      contentLabel="状态"
                       disabled={isDetailModal}
-                      onChange={(event) =>
-                        updateFranchiseeForm(
-                          "status",
-                          event.target.value as FranchiseeStatus,
-                        )
+                      onChange={(value) =>
+                        updateFranchiseeForm("status", value as FranchiseeStatus)
                       }
+                      options={[
+                        { label: "合作中", value: "ACTIVE" },
+                        { label: "暂停", value: "SUSPENDED" },
+                        { label: "已到期", value: "EXPIRED" },
+                      ]}
+                      triggerClassName="h-11 w-full border-[#dbe6dc] bg-white"
                       value={franchiseeForm.status}
-                    >
-                      <option value="ACTIVE">合作中</option>
-                      <option value="SUSPENDED">暂停</option>
-                      <option value="EXPIRED">已到期</option>
-                    </select>
+                    />
                   </label>
                   <AdminDatePicker
                     buttonClassName="h-11 w-full"

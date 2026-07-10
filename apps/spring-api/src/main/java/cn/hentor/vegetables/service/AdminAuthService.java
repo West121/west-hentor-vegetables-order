@@ -2,6 +2,7 @@ package cn.hentor.vegetables.service;
 
 import cn.hentor.vegetables.common.ApiException;
 import cn.hentor.vegetables.dto.AdminLoginRequest;
+import cn.hentor.vegetables.dto.AdminPasswordChangeRequest;
 import cn.hentor.vegetables.dto.AdminRoleDto;
 import cn.hentor.vegetables.dto.AdminSessionDto;
 import cn.hentor.vegetables.dto.StoreDto;
@@ -35,8 +36,8 @@ import org.springframework.util.StringUtils;
 @Service
 public class AdminAuthService {
   public static final String SESSION_COOKIE = "hentor_spring_admin_session";
+  public static final String SESSION_KEY_PREFIX = "hentor:spring:admin-session:";
   private static final Duration SESSION_TTL = Duration.ofDays(7);
-  private static final String SESSION_KEY_PREFIX = "hentor:spring:admin-session:";
 
   private final AdminPermissionMapper adminPermissionMapper;
   private final AdminRoleMapper adminRoleMapper;
@@ -69,18 +70,28 @@ public class AdminAuthService {
   }
 
   public AdminSessionDto login(AdminLoginRequest request) {
-    AdminUserEntity admin = adminUserMapper.selectOne(
-      new LambdaQueryWrapper<AdminUserEntity>().eq(AdminUserEntity::getUsername, request.username())
-    );
+    return createSession(authenticateCredentials(request.username(), request.password()));
+  }
 
+  AdminUserEntity authenticateCredentials(String username, String password) {
+    AdminUserEntity admin = adminUserMapper.selectOne(
+      new LambdaQueryWrapper<AdminUserEntity>().eq(AdminUserEntity::getUsername, username)
+    );
     if (
       admin == null ||
       !"ACTIVE".equals(admin.getStatus()) ||
-      !passwordEncoder.matches(request.password(), admin.getPasswordHash())
+      !passwordEncoder.matches(password, admin.getPasswordHash())
     ) {
       throw new ApiException("LOGIN_FAILED", "账号或密码不正确", HttpStatus.UNAUTHORIZED);
     }
+    return admin;
+  }
 
+  AdminUserEntity findAdmin(String adminUserId) {
+    return adminUserMapper.selectById(adminUserId);
+  }
+
+  AdminSessionDto createSession(AdminUserEntity admin) {
     AdminUserEntity update = new AdminUserEntity();
     update.setId(admin.getId());
     update.setLastLoginAt(LocalDateTime.now());
@@ -115,6 +126,46 @@ public class AdminAuthService {
   public void logout(String token) {
     if (StringUtils.hasText(token)) {
       sessionStore.delete(sessionKey(token));
+    }
+  }
+
+  public void changePassword(AdminSessionDto session, AdminPasswordChangeRequest request) {
+    if (!StringUtils.hasText(request.currentPassword())) {
+      throw new ApiException("INVALID_CURRENT_PASSWORD", "请输入当前密码", HttpStatus.BAD_REQUEST);
+    }
+    if (!StringUtils.hasText(request.newPassword()) || request.newPassword().trim().length() < 8) {
+      throw new ApiException("INVALID_NEW_PASSWORD", "新密码至少需要 8 位", HttpStatus.BAD_REQUEST);
+    }
+    if (request.currentPassword().equals(request.newPassword())) {
+      throw new ApiException("SAME_PASSWORD", "新密码不能和当前密码相同", HttpStatus.BAD_REQUEST);
+    }
+
+    AdminUserEntity admin = adminUserMapper.selectById(session.adminUserId());
+    if (admin == null || !"ACTIVE".equals(admin.getStatus())) {
+      throw new ApiException("UNAUTHORIZED", "账号不可用，请重新登录", HttpStatus.UNAUTHORIZED);
+    }
+    if (!passwordEncoder.matches(request.currentPassword(), admin.getPasswordHash())) {
+      throw new ApiException("CURRENT_PASSWORD_MISMATCH", "当前密码不正确", HttpStatus.BAD_REQUEST);
+    }
+
+    AdminUserEntity update = new AdminUserEntity();
+    update.setId(admin.getId());
+    update.setPasswordHash(passwordEncoder.encode(request.newPassword().trim()));
+    update.setUpdatedAt(LocalDateTime.now());
+    adminUserMapper.updateAdminUserPassword(update);
+    invalidateAdminSessions(admin.getId(), session.token());
+  }
+
+  void invalidateAdminSessions(String adminUserId, String exceptToken) {
+    for (SessionStore.SessionEntry entry : sessionStore.scan(SESSION_KEY_PREFIX)) {
+      if (!adminUserId.equals(entry.value())) {
+        continue;
+      }
+      String token = entry.key().substring(SESSION_KEY_PREFIX.length());
+      if (StringUtils.hasText(exceptToken) && exceptToken.equals(token)) {
+        continue;
+      }
+      sessionStore.delete(entry.key());
     }
   }
 

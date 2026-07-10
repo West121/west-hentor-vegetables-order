@@ -3,8 +3,6 @@ import { hash } from "bcryptjs";
 import { prisma, Prisma } from "../src/index";
 
 async function main() {
-  const passwordHash = await hash("Admin123456", 10);
-
   const franchisee = await prisma.franchisee.upsert({
     where: { id: "seed-franchisee-hentor" },
     update: {},
@@ -20,14 +18,14 @@ async function main() {
   const store = await prisma.store.upsert({
     where: { code: "lotus-garden" },
     update: {
-      name: "莲花小区加盟店",
+      name: "涵养总店",
       status: "ACTIVE",
     },
     create: {
       id: "seed-store-lotus",
       franchiseeId: franchisee.id,
       code: "lotus-garden",
-      name: "莲花小区加盟店",
+      name: "涵养总店",
       type: "FRANCHISE",
       contactName: "张店长",
       contactPhone: "13900000001",
@@ -126,49 +124,53 @@ async function main() {
     });
   }
 
-  const admin = await prisma.adminUser.upsert({
-    where: { username: "admin" },
-    update: {
-      name: "Xu West",
-      passwordHash,
-      status: "ACTIVE",
-    },
-    create: {
-      username: "admin",
-      name: "Xu West",
-      phone: "13800000000",
-      passwordHash,
-      status: "ACTIVE",
-    },
-  });
+  const seedAdminPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (seedAdminPassword) {
+    const passwordHash = await hash(seedAdminPassword, 10);
+    const admin = await prisma.adminUser.upsert({
+      where: { username: "admin" },
+      update: {
+        name: "Xu West",
+        passwordHash,
+        status: "ACTIVE",
+      },
+      create: {
+        username: "admin",
+        name: "Xu West",
+        phone: "13800000000",
+        passwordHash,
+        status: "ACTIVE",
+      },
+    });
 
-  await prisma.adminUserRole.upsert({
-    where: {
-      adminUserId_roleId: {
+    await prisma.adminUserRole.upsert({
+      where: {
+        adminUserId_roleId: {
+          adminUserId: admin.id,
+          roleId: superAdminRole.id,
+        },
+      },
+      update: {},
+      create: {
         adminUserId: admin.id,
         roleId: superAdminRole.id,
       },
-    },
-    update: {},
-    create: {
-      adminUserId: admin.id,
-      roleId: superAdminRole.id,
-    },
-  });
+    });
 
-  await prisma.adminUserStore.upsert({
-    where: {
-      adminUserId_storeId: {
+    await prisma.adminUserStore.upsert({
+      where: {
+        adminUserId_storeId: {
+          adminUserId: admin.id,
+          storeId: store.id,
+        },
+      },
+      update: {},
+      create: {
         adminUserId: admin.id,
         storeId: store.id,
       },
-    },
-    update: {},
-    create: {
-      adminUserId: admin.id,
-      storeId: store.id,
-    },
-  });
+    });
+  }
 
   const user = await prisma.user.upsert({
     where: { openid: "mock-openid-lotus-001" },
@@ -243,27 +245,6 @@ async function main() {
     },
 	  });
 
-	  const eggTemplateBenefit = await prisma.packageTemplateBenefit.upsert({
-	    where: { id: "seed-package-8jin-weekly-egg" },
-	    update: {
-	      kind: "EGG",
-	      name: "鸡蛋",
-	      sortOrder: 1,
-	      totalQuantity: new Prisma.Decimal("1.00"),
-	      unit: "箱",
-	    },
-	    create: {
-	      id: "seed-package-8jin-weekly-egg",
-	      templateId: packageTemplate.id,
-	      kind: "EGG",
-	      name: "鸡蛋",
-	      sortOrder: 1,
-	      totalQuantity: new Prisma.Decimal("1.00"),
-	      unit: "箱",
-	      shipmentGroup: "鸡蛋包裹",
-	    },
-	  });
-
   await prisma.packageTemplate.upsert({
     where: { id: "seed-package-6jin-weekly-osmanthus" },
     update: {
@@ -304,29 +285,7 @@ async function main() {
     },
 	  });
 
-	  await prisma.userPackageBenefit.upsert({
-	    where: { id: "seed-user-package-lotus-001-egg" },
-	    update: {
-	      kind: "EGG",
-	      nameSnapshot: "鸡蛋",
-	      sortOrder: 1,
-	      totalQuantity: new Prisma.Decimal("1.00"),
-	      unitSnapshot: "箱",
-	    },
-	    create: {
-	      id: "seed-user-package-lotus-001-egg",
-	      userPackageId: userPackage.id,
-	      templateBenefitId: eggTemplateBenefit.id,
-	      kind: "EGG",
-	      nameSnapshot: "鸡蛋",
-	      sortOrder: 1,
-	      totalQuantity: new Prisma.Decimal("1.00"),
-	      unitSnapshot: "箱",
-	      shipmentGroup: "鸡蛋包裹",
-	    },
-	  });
-
-  const dishSeed = [
+	  const dishSeed = [
     ["seed-dish-spinach", "菠菜", "LEAFY", "0.50", "82.00"],
     ["seed-dish-tomato", "番茄", "FRUIT", "1.00", "40.00"],
     ["seed-dish-cucumber", "黄瓜", "ACTIVITY", "0.50", "18.00"],
@@ -408,10 +367,10 @@ async function main() {
   });
   await prisma.taskDish.createMany({
     data: [
-      { taskId: weeklyTask.id, dishId: "seed-dish-spinach", sortOrder: 0 },
-      { taskId: weeklyTask.id, dishId: "seed-dish-tomato", sortOrder: 1 },
-      { taskId: weeklyTask.id, dishId: "seed-dish-cucumber", sortOrder: 2 },
-      { taskId: weeklyTask.id, dishId: "seed-dish-lettuce", sortOrder: 3 },
+      { taskId: weeklyTask.id, dishId: "seed-dish-spinach", sortOrder: 0, totalWeightJin: new Prisma.Decimal("82.00") },
+      { taskId: weeklyTask.id, dishId: "seed-dish-tomato", sortOrder: 1, totalWeightJin: new Prisma.Decimal("40.00") },
+      { taskId: weeklyTask.id, dishId: "seed-dish-cucumber", sortOrder: 2, totalWeightJin: new Prisma.Decimal("18.00") },
+      { taskId: weeklyTask.id, dishId: "seed-dish-lettuce", sortOrder: 3, totalWeightJin: new Prisma.Decimal("45.00") },
     ],
   });
 
@@ -446,16 +405,19 @@ async function main() {
         taskId: branchTask.id,
         dishId: "seed-dish-cabbage-osmanthus",
         sortOrder: 0,
+        totalWeightJin: new Prisma.Decimal("56.00"),
       },
       {
         taskId: branchTask.id,
         dishId: "seed-dish-carrot-osmanthus",
         sortOrder: 1,
+        totalWeightJin: new Prisma.Decimal("64.00"),
       },
       {
         taskId: branchTask.id,
         dishId: "seed-dish-mushroom-osmanthus",
         sortOrder: 2,
+        totalWeightJin: new Prisma.Decimal("28.00"),
       },
     ],
   });

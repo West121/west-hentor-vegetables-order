@@ -13,21 +13,24 @@ describe("system management user modal usage", () => {
     expect(source).toContain("Eye");
     expect(source).toContain('mode: "detail"');
     expect(source).toContain("openDetailModal");
-    expect(source).toContain('title="查看详情"');
+    expect(source).toContain('data-icon="inline-start"');
+    expect(source).toContain("查看");
     expect(source).toContain("后台用户详情");
     expect(source).toContain('modal.mode !== "detail"');
     expect(source).toContain('readOnly={modal.mode === "detail"}');
     expect(source).toContain('disabled={modal.mode === "detail"}');
   });
 
-  it("uses styled status and role controls inside the admin user modal", () => {
+  it("uses compact radio and searchable multi-select controls inside the admin user modal", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/system-management-panel.tsx"),
       "utf8",
     );
 
-    expect(source).toContain("grid h-11 grid-cols-2");
-    expect(source).toContain("aria-pressed={checked}");
+    expect(source).toContain("AdminRadioGroup");
+    expect(source).toContain("AdminSearchMultiSelect");
+    expect(source).toContain('name="admin-user-status"');
+    expect(source).toContain('searchPlaceholder="搜索角色名称或编码"');
     expect(source).not.toContain('type="checkbox"');
   });
 
@@ -42,9 +45,23 @@ describe("system management user modal usage", () => {
     expect(source).toContain("数据范围");
     expect(source).toContain("formHasAllDataScope");
     expect(source).toContain("超级管理员默认可访问全部数据");
-    expect(source).toContain("toggleValue(form.storeIds, store.id)");
+    expect(source).toContain('searchPlaceholder="搜索数据范围"');
+    expect(source).toContain('placeholder="请选择数据范围"');
     expect(source).toContain("formatDataScope");
     expect(source).toContain("未分配");
+  });
+
+  it("uses demo-friendly data scope labels while keeping store ids as the submitted value", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/system-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain('const ADMIN_USER_STORE_SCOPE_LABEL = "系统数据"');
+    expect(source).toContain("formatAssignableDataScopeLabel");
+    expect(source).toContain("label: formatAssignableDataScopeLabel(store)");
+    expect(source).toContain("helper: store.name");
+    expect(source).toContain("value: store.id");
   });
 
   it("refreshes role options before creating or editing admin users", () => {
@@ -71,7 +88,8 @@ describe("system management user modal usage", () => {
     expect(source).toContain("初始密码至少需要 8 位");
     expect(source).toContain("新密码至少需要 8 位");
     expect(source).toContain("请选择后台角色");
-    expect(source).toContain("const validationMessage = validateAdminUserForm");
+    expect(source).toContain("setFormErrors(validationErrors)");
+    expect(source).toContain("getFirstFormError");
     expect(source).not.toContain("请求参数不完整");
   });
 
@@ -86,5 +104,18 @@ describe("system management user modal usage", () => {
     expect(source).toContain('title={passwordVisible ? "隐藏密码" : "显示密码"}');
     expect(source).toContain('type={passwordVisible ? "text" : "password"}');
     expect(source).toContain("setPasswordVisible(false)");
+  });
+
+  it("lets super administrators delete non-super-admin backend users", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/system-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("deleteCandidate");
+    expect(source).toContain("canDeleteAdminUser");
+    expect(source).toContain("删除后台用户");
+    expect(source).toContain("DELETE");
+    expect(source).toContain("Trash2");
   });
 });

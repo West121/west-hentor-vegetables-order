@@ -1,4 +1,5 @@
 export type SystemSettingsFormState = {
+  adminSystemName: string;
   aboutText: string;
   customerServiceTel: string;
   deliveryCities: string[];
@@ -8,7 +9,9 @@ export type SystemSettingsFormState = {
   loginSubtitle: string;
   loginTitle: string;
   loginWelcome: string;
+  privacyPolicyContent: string;
   privacyPolicyUrl: string;
+  userAgreementContent: string;
   userAgreementUrl: string;
 };
 
@@ -34,6 +37,7 @@ export function buildSystemSettingsPayload(
   form: SystemSettingsFormState,
 ) {
   return {
+    adminSystemName: form.adminSystemName.trim(),
     aboutText: form.aboutText.trim(),
     customerServiceTel: form.customerServiceTel.trim(),
     deliveryCities: normalizeRangeValues(form.deliveryCities),
@@ -43,8 +47,10 @@ export function buildSystemSettingsPayload(
     loginSubtitle: form.loginSubtitle.trim(),
     loginTitle: form.loginTitle.trim(),
     loginWelcome: form.loginWelcome.trim(),
+    privacyPolicyContent: form.privacyPolicyContent.trim(),
     privacyPolicyUrl: form.privacyPolicyUrl.trim(),
     storeId,
+    userAgreementContent: form.userAgreementContent.trim(),
     userAgreementUrl: form.userAgreementUrl.trim(),
   };
 }

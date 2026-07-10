@@ -184,10 +184,8 @@ public class MiniReservationService {
     Map<String, BigDecimal> oldWeightsByDishId = sumWeightsByDishId(existingItems);
     List<DishEntity> dishes = loadDishes(store.getId(), newDishIds, oldWeightsByDishId.keySet());
     Map<String, DishEntity> dishById = new HashMap<>();
-    Map<String, BigDecimal> currentStockByDishId = new HashMap<>();
     for (DishEntity dish : dishes) {
       dishById.put(dish.getId(), dish);
-      currentStockByDishId.put(dish.getId(), zeroIfNull(dish.getStockJin()));
     }
 
     List<OrderItemEntity> normalizedItems = normalizeItems(request.items(), dishById, oldWeightsByDishId);
@@ -200,6 +198,7 @@ public class MiniReservationService {
     }
 
     Map<String, BigDecimal> newWeightsByDishId = sumWeightsByDishId(normalizedItems);
+    ensureTaskQuota(activeTask, store.getId(), newWeightsByDishId, existingOrder == null ? null : existingOrder.getId(), dishById);
     List<MiniBenefitSelectionRequest> benefitSelections = request.benefitSelections();
     if (StringUtils.hasText(orderId) && benefitSelections == null) {
       benefitSelections = existingBenefits
@@ -228,7 +227,6 @@ public class MiniReservationService {
         totalWeightJin,
         now
       );
-      applyInventoryDelta(currentStockByDishId, oldWeightsByDishId, newWeightsByDishId, now);
       incrementPackageUse(userPackage, now);
     } else {
       List<Map<String, Object>> beforeItems = snapshotItems(existingItems);
@@ -244,7 +242,6 @@ public class MiniReservationService {
         totalWeightJin,
         now
       );
-      applyInventoryDelta(currentStockByDishId, oldWeightsByDishId, newWeightsByDishId, now);
       writeChangeLog(existingOrder.getId(), beforeItems, snapshotItems(normalizedItems), beforeAddress, addressSnapshot, now);
       restoreBenefitUsage(existingBenefits);
     }
@@ -444,12 +441,6 @@ public class MiniReservationService {
         throw reservationError("INVALID_WEIGHT_STEP", "菜品重量不符合起订步进");
       }
 
-      BigDecimal reservedWeight = oldWeightsByDishId.getOrDefault(dish.getId(), BigDecimal.ZERO);
-      BigDecimal availableStock = zeroIfNull(dish.getStockJin()).add(reservedWeight);
-      if (weight.compareTo(availableStock) > 0) {
-        throw reservationError("DISH_STOCK_NOT_ENOUGH", "菜品库存不足");
-      }
-
       OrderItemEntity normalized = new OrderItemEntity();
       normalized.setId(id());
       normalized.setDishId(dish.getId());
@@ -458,6 +449,78 @@ public class MiniReservationService {
       normalized.setWeightJin(weight);
       result.add(normalized);
     }
+    return result;
+  }
+
+  private void ensureTaskQuota(
+    TaskEntity activeTask,
+    String storeId,
+    Map<String, BigDecimal> requestedWeightsByDishId,
+    String excludeOrderId,
+    Map<String, DishEntity> dishById
+  ) {
+    if (requestedWeightsByDishId.isEmpty()) {
+      return;
+    }
+
+    List<String> dishIds = new ArrayList<>(requestedWeightsByDishId.keySet());
+    Map<String, TaskDishEntity> taskDishByDishId = taskDishMapper.selectList(
+        new LambdaQueryWrapper<TaskDishEntity>()
+          .eq(TaskDishEntity::getTaskId, activeTask.getId())
+          .in(TaskDishEntity::getDishId, dishIds)
+      )
+      .stream()
+      .collect(java.util.stream.Collectors.toMap(TaskDishEntity::getDishId, item -> item, (first, ignored) -> first));
+    Map<String, BigDecimal> usedWeightsByDishId = loadTaskUsedWeights(storeId, activeTask, dishIds, excludeOrderId);
+
+    for (Map.Entry<String, BigDecimal> entry : requestedWeightsByDishId.entrySet()) {
+      String dishId = entry.getKey();
+      TaskDishEntity taskDish = taskDishByDishId.get(dishId);
+      if (taskDish == null) {
+        throw reservationError("DISH_NOT_IN_ACTIVE_TASK", "菜品不在今日可预订任务中");
+      }
+      BigDecimal totalWeightJin = zeroIfNull(taskDish.getTotalWeightJin());
+      if (totalWeightJin.compareTo(BigDecimal.ZERO) <= 0) {
+        DishEntity dish = dishById.get(dishId);
+        totalWeightJin = zeroIfNull(dish == null ? null : dish.getStockJin());
+      }
+      BigDecimal remaining = totalWeightJin
+        .subtract(usedWeightsByDishId.getOrDefault(dishId, BigDecimal.ZERO))
+        .max(BigDecimal.ZERO);
+      if (entry.getValue().compareTo(remaining) > 0) {
+        throw reservationError("DISH_SOLD_OUT", "当前菜品已售罄");
+      }
+    }
+  }
+
+  private Map<String, BigDecimal> loadTaskUsedWeights(
+    String storeId,
+    TaskEntity activeTask,
+    List<String> dishIds,
+    String excludeOrderId
+  ) {
+    LambdaQueryWrapper<OrderEntity> orderWrapper = new LambdaQueryWrapper<OrderEntity>()
+      .eq(OrderEntity::getStoreId, storeId)
+      .ge(OrderEntity::getCreatedAt, activeTask.getStartsAt())
+      .lt(OrderEntity::getCreatedAt, activeTask.getEndsAt())
+      .notIn(OrderEntity::getStatus, List.of("CANCELED", "VOIDED"));
+    if (StringUtils.hasText(excludeOrderId)) {
+      orderWrapper.ne(OrderEntity::getId, excludeOrderId);
+    }
+
+    List<OrderEntity> orders = orderMapper.selectList(orderWrapper);
+    if (orders.isEmpty()) {
+      return Map.of();
+    }
+
+    List<String> orderIds = orders.stream().map(OrderEntity::getId).toList();
+    Map<String, BigDecimal> result = new HashMap<>();
+    orderItemMapper.selectList(
+        new LambdaQueryWrapper<OrderItemEntity>()
+          .in(OrderItemEntity::getOrderId, orderIds)
+          .in(OrderItemEntity::getDishId, dishIds)
+      )
+      .forEach(item -> result.merge(item.getDishId(), zeroIfNull(item.getWeightJin()), BigDecimal::add));
     return result;
   }
 
@@ -650,31 +713,6 @@ public class MiniReservationService {
       }
     }
     return shipments;
-  }
-
-  private void applyInventoryDelta(
-    Map<String, BigDecimal> currentStockByDishId,
-    Map<String, BigDecimal> oldWeightsByDishId,
-    Map<String, BigDecimal> newWeightsByDishId,
-    LocalDateTime now
-  ) {
-    Set<String> dishIds = new HashSet<>(oldWeightsByDishId.keySet());
-    dishIds.addAll(newWeightsByDishId.keySet());
-
-    for (String dishId : dishIds) {
-      BigDecimal oldWeight = oldWeightsByDishId.getOrDefault(dishId, BigDecimal.ZERO);
-      BigDecimal newWeight = newWeightsByDishId.getOrDefault(dishId, BigDecimal.ZERO);
-      BigDecimal delta = oldWeight.subtract(newWeight);
-      if (delta.compareTo(BigDecimal.ZERO) == 0) {
-        continue;
-      }
-      BigDecimal nextStock = currentStockByDishId.getOrDefault(dishId, BigDecimal.ZERO).add(delta).max(BigDecimal.ZERO);
-      if (nextStock.compareTo(BigDecimal.ZERO) == 0) {
-        dishMapper.updateStockAndOffSale(dishId, nextStock, now);
-      } else {
-        dishMapper.updateStock(dishId, nextStock, now);
-      }
-    }
   }
 
   private void incrementPackageUse(UserPackageEntity userPackage, LocalDateTime now) {

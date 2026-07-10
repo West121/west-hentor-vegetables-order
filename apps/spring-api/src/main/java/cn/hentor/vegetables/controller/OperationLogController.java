@@ -42,7 +42,7 @@ public class OperationLogController {
     @RequestParam(required = false) String dateTo,
     @RequestParam(required = false) String operatorId,
     @RequestParam(defaultValue = "1") long page,
-    @RequestParam(defaultValue = "20") long pageSize,
+    @RequestParam(defaultValue = "10") long pageSize,
     @RequestParam(required = false) String query,
     @RequestParam(required = false) String resource,
     @RequestParam(required = false) Integer statusCode,

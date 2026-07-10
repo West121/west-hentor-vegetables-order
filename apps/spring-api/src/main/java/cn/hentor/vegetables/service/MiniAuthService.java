@@ -39,7 +39,7 @@ import org.springframework.util.StringUtils;
 public class MiniAuthService {
   private static final int DEFAULT_HOME_DISH_COLUMNS = 3;
   private static final Duration SESSION_TTL = Duration.ofDays(30);
-  private static final String SESSION_KEY_PREFIX = "hentor:spring:mini-session:";
+  public static final String SESSION_KEY_PREFIX = "hentor:spring:mini-session:";
 
   private final AdminOperationLogMapper adminOperationLogMapper;
   private final MemberStoreBindingMapper memberStoreBindingMapper;
@@ -97,7 +97,7 @@ public class MiniAuthService {
 
     return new MiniLoginResponse(
       token,
-      new MiniLoginUserDto(user.getId(), user.getPhone(), user.getNickname(), store.getId()),
+      toLoginUserDto(user, store, false),
       toStoreDto(store)
     );
   }
@@ -107,18 +107,19 @@ public class MiniAuthService {
     WechatLoginSessionDto wechatSession = wechatMiniappService.exchangeLoginCode(request.loginCode().trim());
     WechatPhoneDto phoneInfo = wechatMiniappService.exchangePhoneCode(request.phoneCode().trim());
     StoreEntity store = findAvailableStore(request.storeCode());
-    UserEntity user = upsertWechatPhoneUser(
+    PhoneLoginUserResult loginUser = upsertWechatPhoneUser(
       store.getId(),
       wechatSession.openid(),
       phoneInfo.phone(),
       wechatSession.unionid()
     );
+    UserEntity user = loginUser.user();
     upsertWechatBinding(user, store);
 
     String token = createSessionToken(user.getId(), user.getOpenid(), store.getId());
     MiniLoginResponse response = new MiniLoginResponse(
       token,
-      new MiniLoginUserDto(user.getId(), user.getPhone(), user.getNickname(), store.getId()),
+      toLoginUserDto(user, store, loginUser.selfRegistered()),
       toStoreDto(store)
     );
     writePhoneLoginLog(
@@ -158,7 +159,7 @@ public class MiniAuthService {
     String token = createSessionToken(user.getId(), user.getOpenid(), store.getId());
     MiniLoginResponse response = new MiniLoginResponse(
       token,
-      new MiniLoginUserDto(user.getId(), user.getPhone(), user.getNickname(), store.getId()),
+      toLoginUserDto(user, store, false),
       toStoreDto(store)
     );
     writeSessionRefreshLog(
@@ -191,6 +192,22 @@ public class MiniAuthService {
 
     sessionStore.expire(sessionKey(token), SESSION_TTL);
     return new MiniSessionContext(token, parts[0], parts[1], parts[2]);
+  }
+
+  public MiniSessionContext resolveSessionOrNull(String authorization) {
+    String token = resolveBearerToken(authorization);
+    if (!StringUtils.hasText(token)) {
+      return null;
+    }
+
+    try {
+      return requireSession(authorization);
+    } catch (ApiException exception) {
+      if ("UNAUTHORIZED".equals(exception.getCode())) {
+        return null;
+      }
+      throw exception;
+    }
   }
 
   public StoreEntity findAvailableStore(String storeCode) {
@@ -245,6 +262,21 @@ public class MiniAuthService {
     );
   }
 
+  private MiniLoginUserDto toLoginUserDto(UserEntity user, StoreEntity store, boolean promptProfileCompletion) {
+    return new MiniLoginUserDto(
+      user.getAvatarUrl(),
+      user.getId(),
+      user.getPhone(),
+      user.getNickname(),
+      store.getId(),
+      promptProfileCompletion && isProfileIncomplete(user)
+    );
+  }
+
+  private boolean isProfileIncomplete(UserEntity user) {
+    return !StringUtils.hasText(user.getNickname()) || !StringUtils.hasText(user.getAvatarUrl());
+  }
+
   private int readHomeDishColumns(String storeId) {
     SystemConfigEntity config = systemConfigMapper.selectOne(
       new LambdaQueryWrapper<SystemConfigEntity>()
@@ -269,7 +301,7 @@ public class MiniAuthService {
     }
   }
 
-  private UserEntity upsertWechatPhoneUser(
+  private PhoneLoginUserResult upsertWechatPhoneUser(
     String defaultStoreId,
     String openid,
     String phone,
@@ -287,7 +319,7 @@ public class MiniAuthService {
       existingWechatUser.setUnionid(unionid);
       existingWechatUser.setUpdatedAt(now);
       userMapper.updateWechatUser(existingWechatUser);
-      return userMapper.selectById(existingWechatUser.getId());
+      return new PhoneLoginUserResult(userMapper.selectById(existingWechatUser.getId()), false);
     }
 
     UserEntity importedUser = userMapper.selectOne(
@@ -304,7 +336,7 @@ public class MiniAuthService {
       importedUser.setUnionid(unionid);
       importedUser.setUpdatedAt(now);
       userMapper.updateWechatUser(importedUser);
-      return userMapper.selectById(importedUser.getId());
+      return new PhoneLoginUserResult(userMapper.selectById(importedUser.getId()), false);
     }
 
     UserEntity user = new UserEntity();
@@ -316,8 +348,10 @@ public class MiniAuthService {
     user.setCreatedAt(now);
     user.setUpdatedAt(now);
     userMapper.insertWechatUser(user);
-    return userMapper.selectById(user.getId());
+    return new PhoneLoginUserResult(userMapper.selectById(user.getId()), true);
   }
+
+  private record PhoneLoginUserResult(UserEntity user, boolean selfRegistered) {}
 
   private void upsertWechatBinding(UserEntity user, StoreEntity store) {
     LocalDateTime now = LocalDateTime.now();

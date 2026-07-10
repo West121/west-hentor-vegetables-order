@@ -792,7 +792,7 @@ describe("miniapp home helpers", () => {
         weightLimitJin: 8,
       }),
     ).toEqual({
-      cancelText: "继续选菜",
+      cancelText: "再来一单",
       confirmText: "确认提交",
       content: "套餐本次可选 8斤，当前已选 3.5斤，还没选满。确认提交吗？",
       title: "未选满套餐额度",

@@ -4,6 +4,16 @@ type StoreOption = {
 };
 
 export type PackagePanelItem = {
+  benefits?: Array<{
+    id: string;
+    kind: string;
+    nameSnapshot: string;
+    shipmentGroup: string | null;
+    sortOrder: number;
+    totalQuantity: number;
+    unitSnapshot: string;
+    usedQuantity: number;
+  }>;
   createdAt: string;
   expiresAt: string;
   frozenReason: string | null;
@@ -16,10 +26,18 @@ export type PackagePanelItem = {
     reason: string;
   }>;
   recentOrders?: Array<{
+    createdAt?: string;
     id: string;
+    items?: Array<{
+      dishId: string;
+      dishNameSnapshot: string;
+      id: string;
+      weightJin: number;
+    }>;
     orderNo: string;
     status: string;
     totalWeightJin: number;
+    updatedAt?: string;
   }>;
   remainingTimes: number;
   startsAt: string;
@@ -66,13 +84,27 @@ export function normalizePackagePanelItem(
 
   return {
     createdAt: item.createdAt ?? "",
+    benefits: (item.benefits ?? []).map((benefit) => ({
+      ...benefit,
+      shipmentGroup: benefit.shipmentGroup ?? null,
+      sortOrder: Number(benefit.sortOrder ?? 0),
+      totalQuantity: Number(benefit.totalQuantity ?? 0),
+      usedQuantity: Number(benefit.usedQuantity ?? 0),
+    })),
     expiresAt: item.expiresAt ?? "",
     frozenReason: item.frozenReason ?? null,
     id: item.id ?? "",
     lastUsedAt: item.lastUsedAt ?? null,
     nameSnapshot: item.nameSnapshot ?? item.templateName ?? "用户套餐",
     operationLogs: item.operationLogs ?? [],
-    recentOrders: item.recentOrders ?? [],
+    recentOrders: (item.recentOrders ?? []).map((order) => ({
+      ...order,
+      items: (order.items ?? []).map((orderItem) => ({
+        ...orderItem,
+        weightJin: Number(orderItem.weightJin ?? 0),
+      })),
+      totalWeightJin: Number(order.totalWeightJin ?? 0),
+    })),
     remainingTimes,
     startsAt: item.startsAt ?? item.createdAt ?? "",
     status: (item.status ?? "ACTIVE") as PackagePanelItem["status"],

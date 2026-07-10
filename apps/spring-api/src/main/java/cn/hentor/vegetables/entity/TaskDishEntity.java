@@ -2,6 +2,7 @@ package cn.hentor.vegetables.entity;
 
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import java.math.BigDecimal;
 import lombok.Data;
 
 @Data
@@ -15,4 +16,7 @@ public class TaskDishEntity {
 
   @TableField("\"sortOrder\"")
   private Integer sortOrder;
+
+  @TableField("\"totalWeightJin\"")
+  private BigDecimal totalWeightJin;
 }

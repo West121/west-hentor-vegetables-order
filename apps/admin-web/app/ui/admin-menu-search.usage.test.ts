@@ -17,7 +17,7 @@ describe("admin menu search", () => {
     expect(source).toContain("item.label");
     expect(source).toContain("没有匹配的菜单");
     expect(source).toContain("metaKey || event.ctrlKey");
-    expect(source).toContain('params.set("section", section)');
+    expect(source).toContain("adminSectionHref(searchParams, section)");
     expect(source).toContain("activeIndex");
     expect(source).toContain('event.key === "ArrowDown"');
     expect(source).toContain('event.key === "ArrowUp"');

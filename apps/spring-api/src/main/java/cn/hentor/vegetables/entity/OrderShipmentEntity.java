@@ -24,6 +24,9 @@ public class OrderShipmentEntity {
   @TableField("\"logisticsNo\"")
   private String logisticsNo;
 
+  @TableField("\"kuaidicom\"")
+  private String kuaidicom;
+
   @TableField("\"status\"")
   private String status;
 

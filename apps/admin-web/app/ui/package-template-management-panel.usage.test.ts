@@ -13,7 +13,8 @@ describe("package template management modal usage", () => {
     expect(source).toContain("Eye");
     expect(source).toContain('mode: "detail"');
     expect(source).toContain("openDetailModal");
-    expect(source).toContain('title="查看详情"');
+    expect(source).toContain('data-icon="inline-start"');
+    expect(source).toContain("查看");
     expect(source).toContain("套餐模板详情");
     expect(source).toContain('modal.mode !== "detail"');
     expect(source).toContain('readOnly={modal.mode === "detail"}');
@@ -72,5 +73,15 @@ describe("package template management modal usage", () => {
     expect(source).toContain("AdminImportDialog");
     expect(source).toContain("downloadXlsxTemplate");
     expect(source).toContain("附加权益类型编码由系统自动生成");
+  });
+
+  it("does not show the WeChat payment placeholder action", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/package-template-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).not.toContain("微信支付购买套餐预留");
+    expect(source).not.toContain("CreditCard");
   });
 });

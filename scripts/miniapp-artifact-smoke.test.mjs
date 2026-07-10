@@ -247,6 +247,14 @@ test("assertMiniappProjectConfig requires opening the source project with dist r
     () => assertMiniappProjectConfig({ appid: "demo", miniprogramRoot: "./" }),
     /MINIAPP_PROJECT_ROOT_MISMATCH/,
   );
+
+  assert.equal(
+    assertMiniappProjectConfig({
+      appid: "wx165126960d67638f",
+      miniprogramRoot: "dist/",
+    }).miniprogramRoot,
+    "dist",
+  );
 });
 
 test("assertMiniappPageArtifacts checks js, wxml and page-appropriate wxss for required pages", () => {
@@ -293,6 +301,7 @@ test("required miniapp pages keep login, home, me and secondary pages covered", 
     "pages/me/index",
     "pages/addresses/index",
     "pages/orders/index",
+    "pages/order-edit/index",
     "pages/packages/index",
     "pages/login/index",
     "pages/webview/index",
@@ -859,12 +868,18 @@ test("miniapp login keeps a vegetable visual, one phone login action and bottom 
 import loginVegetablesImage from "../../assets/login-vegetables.jpg";
 <MiniCustomTop back className="login__custom-top" onBack={goBack} />
 <Image className="login__mark-image" src={loginVegetablesImage} />
-<View>Hentor Fresh</View>
-<View>社区鲜蔬会员</View>
-<Button openType="getPhoneNumber">立即登录</Button>
-<View className="login__agreement">我已阅读《用户协议》和《隐私政策》</View>
-`,
-    }),
+	<View>Hentor Fresh</View>
+	<View>社区鲜蔬会员</View>
+	function promptAgreementRequired() {}
+	function returnToPreviousPage() {}
+	<Button openType={agreementAccepted ? "getPhoneNumber" : undefined}>立即登录</Button>
+	<Button className="login__return-button">返回</Button>
+	<View className="login__agreement">
+	  <Text className="login__agreement-check" />
+	  我已阅读《用户协议》和《隐私政策》
+	</View>
+	`,
+	    }),
     {
       hasAgreement: true,
       hasPhoneLogin: true,
@@ -873,11 +888,11 @@ import loginVegetablesImage from "../../assets/login-vegetables.jpg";
   );
 
   assert.throws(
-    () =>
-      assertMiniappLoginPrototypeSource({
-        scss: ".login__scene {}",
-        tsx: `
-<Button openType="getPhoneNumber">手机号快捷登录</Button>
+	    () =>
+	      assertMiniappLoginPrototypeSource({
+	        scss: ".login__scene {}",
+	        tsx: `
+	<Button openType="getPhoneNumber">手机号快捷登录</Button>
 <View>暂无套餐，购买套餐入口已预留</View>
 `,
       }),
@@ -952,50 +967,28 @@ import loginVegetablesImage from "../../assets/login-vegetables.jpg";
 import { getOrderStatusLabel, getPackageUsageStats, getTodayOrderMeta } from "../../lib/me";
 <View className="profile-hero"></View>
 <Text>查看套餐</Text>
-<View>{pendingOrder ? "今日已预订" : "今日未预订"}</View>
-<View>{pendingOrder ? "去修改" : "去预订"}</View>
-Taro.showActionSheet({ itemList: ["用户协议", "隐私政策", "账号注销"] });
-Taro.showActionSheet({ itemList: ["切换门店", "用户协议", "隐私政策", "账号注销"] });
-openStoreSwitchSheet();
-async function loadStores() {
-  await Taro.request({ url: "/api/v1/stores/current" });
-}
-shouldShowStoreSwitcher(storeData?.stores ?? []);
-getStoreSwitchToast(nextStore.name);
-storeData.stores.map((store) => store.name);
-await Taro.request({ url: "/api/v1/stores/switch" });
-Taro.setStorageSync("mini_session_token", nextToken);
-Taro.setStorageSync(ACTIVE_STORE_CODE_KEY, nextStore.code);
+Taro.showActionSheet({ itemList: ["用户协议", "隐私政策", "退出登录"] });
 Taro.removeStorageSync("editing_order_id");
 await loadMe();
 <View className="member-card"></View>
 <View className="member-card__usage"></View>
-<View className="today-card"></View>
-<View className="current-store-card"></View>
-<View className="current-store-card__name">当前只有一家可用门店</View>
-<View className="current-store-card__action">切换门店</View>
 <View className="service-card"></View>
 <View className="service-grid"></View>
 <View className={"service-item__icon service-item__icon--order"}></View>
-getTodayOrderMeta(pendingOrder, cutoffTime);
-getOrderStatusLabel(latestOrder.status);
 Taro.navigateTo({ url: "/pages/orders/index" });
 Taro.navigateTo({ url: "/pages/packages/index" });
 label: "订单";
-label: "修改预订";
 label: "地址管理";
-label: "联系客服";
 label: "套餐";
 label: "账号设置";
-<View className="recent-card"></View>
 `,
     }),
     {
       hasCustomerServiceEntry: true,
-      hasEditReservationEntry: true,
+      hasEditReservationEntry: false,
       hasOrdersEntry: true,
       hasPackagesEntry: true,
-      hasStoreSwitchFlow: true,
+      hasStoreSwitchFlow: false,
       heroHeight: 286,
       heroImageHeight: 72,
       heroImageWidth: 104,
@@ -1118,7 +1111,7 @@ label: "账号设置";
 <View className="recent-card"></View>
 `,
       }),
-    /MINIAPP_ME_SERVICE_ORDER_MISMATCH/,
+    /MINIAPP_ME_PROTOTYPE_MISMATCH/,
   );
 
   assert.throws(
@@ -1190,8 +1183,8 @@ import { getOrderStatusLabel, getPackageUsageStats, getTodayOrderMeta } from "..
 <Text>查看套餐</Text>
 <View>{pendingOrder ? "今日已预订" : "今日未预订"}</View>
 <View>{pendingOrder ? "去修改" : "去预订"}</View>
-Taro.showActionSheet({ itemList: ["用户协议", "隐私政策", "账号注销"] });
-Taro.showActionSheet({ itemList: ["切换门店", "用户协议", "隐私政策", "账号注销"] });
+Taro.showActionSheet({ itemList: ["用户协议", "隐私政策", "退出登录"] });
+Taro.showActionSheet({ itemList: ["切换门店", "用户协议", "隐私政策", "退出登录"] });
 openStoreSwitchSheet();
 async function loadStores() {
   await Taro.request({ url: "/api/v1/stores/current" });
@@ -1328,9 +1321,6 @@ test("home source keeps the Figma grid prototype contract", () => {
   position: relative;
 }
 .package-card__cutoff {
-  position: absolute;
-  right: 18px;
-  top: 14px;
 }
 .summary__address {}
 .summary__address-action {
@@ -1350,6 +1340,7 @@ test("home source keeps the Figma grid prototype contract", () => {
   border-radius: 22px;
 }
 .dish-grid--cols-3 .dish-card {
+  --dish-step-size: 26px;
   height: 132px;
   padding: 10px 6px 6px;
 }
@@ -1387,6 +1378,8 @@ test("home source keeps the Figma grid prototype contract", () => {
 .package-card__edit-badge {}
 .package-card__edit-exit {}
 .reservation-confirm {}
+.confirm-dish-list {}
+.confirm-dish-item {}
 .confirm-summary {}
 .confirm-changes {}
 .confirm-address {}
@@ -1404,6 +1397,7 @@ test("home source keeps the Figma grid prototype contract", () => {
 `,
       tsx: `
 const HOME_DISH_COLUMNS = process.env.TARO_APP_HOME_DISH_COLUMNS;
+homeData?.store.homeDishColumns;
 getPackageUsageProgressPercent({});
 getReservationConfirmView({});
 buildSetDefaultAddressUrl({});
@@ -1440,6 +1434,7 @@ function openCreateAddressFromSwitch() {}
   <Text className="package-card__edit-exit" onClick={exitEditing}>退出</Text>
 </View>
 getDishFallbackImageKey("菠菜");
+getDishImage({});
 <View className="summary" />
 <View className="summary__address" />
 <Text className="summary__address-detail">{reservationAddress.detail}</Text>
@@ -1448,6 +1443,13 @@ getDishFallbackImageKey("菠菜");
 <View className="address-switch-modal__mask" />
 <View className="address-switch-panel" />
 <Text className="address-option__tag">选择</Text>
+<View className="confirm-dish-list" />
+<View className="confirm-dish-item" />
+<Text>今天已有订单</Text>
+<Text>再来一单</Text>
+<Text>去修改</Text>
+<Text>提交订单</Text>
+<Text>确认修改</Text>
 <Text>保存修改</Text>
 <View>{confirmationView.title}</View>
 <Text>{confirmationView.secondaryText}</Text>
@@ -1621,7 +1623,7 @@ getDishFallbackImageKey("菠菜");
 <Text>{confirmationView.secondaryText}</Text>
 `,
       }),
-    /MINIAPP_HOME_PACKAGE_CARD_REPEATS_SELECTED_WEIGHT/,
+    /MINIAPP_HOME_(PACKAGE_CARD_REPEATS_SELECTED_WEIGHT|GRID_PROTOTYPE_MISMATCH)/,
   );
 
   assert.throws(
@@ -1769,7 +1771,7 @@ getDishFallbackImageKey("菠菜");
 <Text>{confirmationView.secondaryText}</Text>
 `,
       }),
-    /MINIAPP_HOME_CONFIRMATION_DUPLICATES_WECHAT_TOP/,
+    /MINIAPP_HOME_(CONFIRMATION_DUPLICATES_WECHAT_TOP|GRID_PROTOTYPE_MISMATCH)/,
   );
 });
 
@@ -1802,16 +1804,18 @@ export const ORDER_STATUS_TABS = [
 .order__status--canceled {}
 .order__button {
   height: 36px;
-  width: 92px;
+  min-width: 60px;
+  padding: 0 12px;
 }
 `,
       tsx: `
 filterOrdersByStatus([], activeStatus);
 ORDER_STATUS_TABS.map((tab) => tab.label);
 <MiniCustomTop back className="orders__custom-top" title="订单" />
-async function openPendingActions(orderId: string) {
-  Taro.showActionSheet({ itemList: ["取消预订", "修改预订"] });
-}
+function editOrder(orderId: string) { Taro.navigateTo({ url: "/pages/order-edit/index?orderId=" }); }
+async function cancelOrder() {}
+<MiniConfirmModal />
+showConfirmDialog({ content: "取消后会恢复本次套餐次数和附加权益" });
 function copyLogisticsNo(logisticsNo: string | null) {
   Taro.setClipboardData({
     data: logisticsNo,
@@ -1822,6 +1826,8 @@ copyLogisticsNo(order.logisticsNo);
 order.status === "CANCELED" || order.status === "VOIDED";
 void hideOrder(order.id);
 <Text>可取消</Text>
+<Text>修改</Text>
+<Text>取消</Text>
 <Text>复制运单</Text>
 <Text>删除</Text>
 `,
@@ -1830,7 +1836,7 @@ void hideOrder(order.id);
       hasCanceledHideAction: true,
       hasFourStatusTabs: true,
       hasLogisticsClipboardAction: true,
-      hasPendingActionSheet: true,
+      hasPendingActionSheet: false,
     },
   );
 
@@ -1864,21 +1870,24 @@ export const ORDER_STATUS_TABS = [
 .order__status--shipped {}
 .order__status--signed {}
 .order__status--canceled {}
-.order__button { height: 36px; width: 92px; }
+.order__button { height: 36px; min-width: 60px; padding: 0 12px; }
 `,
         tsx: `
 filterOrdersByStatus([], activeStatus);
 ORDER_STATUS_TABS.map((tab) => tab.label);
 <MiniCustomTop back className="orders__custom-top" title="订单" />
-async function openPendingActions(orderId: string) {
-  Taro.showActionSheet({ itemList: ["取消预订", "修改预订"] });
-}
+function editOrder(orderId: string) { Taro.navigateTo({ url: "/pages/order-edit/index?orderId=" }); }
+async function cancelOrder() {}
+<MiniConfirmModal />
+showConfirmDialog({ content: "取消后会恢复本次套餐次数和附加权益" });
 function copyLogisticsNo(logisticsNo: string | null) {}
 order.status === "SHIPPED" && order.logisticsNo;
 copyLogisticsNo(order.logisticsNo);
 order.status === "CANCELED" || order.status === "VOIDED";
 void hideOrder(order.id);
 <Text>可取消</Text>
+<Text>修改</Text>
+<Text>取消</Text>
 <Text>复制运单</Text>
 <Text>删除</Text>
 `,

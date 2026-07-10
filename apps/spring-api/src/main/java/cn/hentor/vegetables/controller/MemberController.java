@@ -22,6 +22,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -57,7 +58,7 @@ public class MemberController {
     @RequestParam(required = false) String status,
     @RequestParam(required = false) String query,
     @RequestParam(defaultValue = "1") long page,
-    @RequestParam(defaultValue = "20") long pageSize,
+    @RequestParam(defaultValue = "10") long pageSize,
     @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
     @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
     @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
@@ -118,6 +119,20 @@ public class MemberController {
     @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
   ) {
     return update(userId, request, authorization, tokenHeader, tokenCookie);
+  }
+
+  @DeleteMapping("/{userId}")
+  public ApiResponse<MemberUpdateResponse> delete(
+    @PathVariable String userId,
+    @RequestParam String storeId,
+    @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+    @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
+    @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie
+  ) {
+    AdminSessionDto session = requireSession(authorization, tokenHeader, tokenCookie);
+    requirePermission(session, "members.write");
+    requireStoreAccess(session, storeId);
+    return ApiResponse.ok(memberService.deleteMember(storeId, userId, session));
   }
 
   @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

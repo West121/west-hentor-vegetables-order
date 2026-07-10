@@ -20,15 +20,16 @@ describe("admin required field markers", () => {
     const adminUsers = readUiSource("system-management-panel.tsx");
     const roles = readUiSource("role-management-panel.tsx");
 
-    expect(adminUsers).toContain("<RequiredLabel>登录账号</RequiredLabel>");
-    expect(adminUsers).toContain("<RequiredLabel>姓名</RequiredLabel>");
-    expect(adminUsers).toContain("<RequiredLabel>初始密码</RequiredLabel>");
-    expect(adminUsers).toContain("<RequiredLabel>状态</RequiredLabel>");
-    expect(adminUsers).toContain("<RequiredLabel>");
-    expect(adminUsers).toContain("角色{loadingRoles ? ");
-    expect(roles).toContain("<RequiredLabel>角色名称</RequiredLabel>");
-    expect(roles).toContain("<RequiredLabel>角色编码</RequiredLabel>");
-    expect(roles).toContain("<RequiredLabel>角色权限</RequiredLabel>");
+    expect(adminUsers).toContain('label="登录账号"');
+    expect(adminUsers).toContain('label="姓名"');
+    expect(adminUsers).toContain('label="初始密码"');
+    expect(adminUsers).toContain('label="状态"');
+    expect(adminUsers).toContain('label={loadingRoles ? "角色（刷新中）" : "角色"}');
+    expect(roles).toContain('label="角色名称"');
+    expect(roles).toContain('label="角色编码"');
+    expect(roles).toContain('label="角色权限"');
+    expect(roles).toContain("validateRoleForm");
+    expect(roles).toContain("请选择至少一个角色权限");
   });
 
   it("marks business edit modal fields that block saving as required", () => {
@@ -38,18 +39,19 @@ describe("admin required field markers", () => {
     const dish = readUiSource("dish-management-panel.tsx");
     const task = readUiSource("task-management-panel.tsx");
 
-    expect(member).toContain("<RequiredLabel>收货人</RequiredLabel>");
-    expect(member).toContain("<RequiredLabel>联系电话</RequiredLabel>");
-    expect(member).toContain("<RequiredLabel>详细地址</RequiredLabel>");
+    expect(member).toContain('label="收货人"');
+    expect(member).toContain('label="联系电话"');
+    expect(member).toContain('label="详细地址"');
     expect(member).toContain("required={form.status === \"DISABLED\"}");
-    expect(packageTemplate).toContain("<RequiredLabel>套餐名称</RequiredLabel>");
-    expect(packageTemplate).toContain("<RequiredLabel>权益名称</RequiredLabel>");
-    expect(packageUser).toContain("<RequiredLabel>会员</RequiredLabel>");
-    expect(packageUser).toContain("<RequiredLabel>操作原因</RequiredLabel>");
-    expect(dish).toContain("<RequiredLabel>菜品名称</RequiredLabel>");
-    expect(dish).toContain("<RequiredLabel>调整斤数</RequiredLabel>");
-    expect(task).toContain("<RequiredLabel>任务名称</RequiredLabel>");
-    expect(task).toContain("<RequiredLabel>关联菜品</RequiredLabel>");
-    expect(task).toContain("required");
+    expect(packageTemplate).toContain('label="套餐名称"');
+    expect(packageTemplate).toContain('label="权益名称"');
+    expect(packageUser).toContain('label="会员"');
+    expect(packageUser).toContain('label="操作原因"');
+    expect(dish).toContain('label="菜品名称"');
+    expect(dish).toContain('label="起订步进"');
+    expect(task).toContain('label="任务名称"');
+    expect(task).toContain('label="关联菜品"');
+    expect(task).toContain("validateTaskForm");
+    expect(task).toContain("请选择至少一个关联菜品");
   });
 });

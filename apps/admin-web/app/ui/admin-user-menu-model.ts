@@ -1,5 +1,6 @@
 export type AdminUserMenuItemKey =
   | "profile"
+  | "password"
   | "role-switch"
   | "layout-settings"
   | "operation-logs"
@@ -23,6 +24,12 @@ export function buildAdminUserMenuItems({
       helper: "查看当前账号资料",
       key: "profile",
       label: "个人资料",
+    },
+    {
+      disabled: false,
+      helper: "修改当前登录密码",
+      key: "password",
+      label: "修改密码",
     },
     {
       disabled: false,

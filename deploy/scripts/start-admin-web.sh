@@ -9,6 +9,12 @@ LOG_FILE="$APP_DIR/logs/admin-web.log"
 
 mkdir -p "$APP_DIR/logs"
 
+if [ ! -d "$WEB_DIR/.next/static" ]; then
+  echo "Admin web static assets are missing: $WEB_DIR/.next/static" >&2
+  echo "Copy .next/static alongside the standalone Next.js output before starting." >&2
+  exit 1
+fi
+
 if [ -f "$ENV_FILE" ]; then
   set -a
   # shellcheck disable=SC1090

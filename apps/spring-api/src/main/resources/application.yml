@@ -13,7 +13,7 @@ spring:
       connection-init-sql: ${SPRING_DATASOURCE_INIT_SQL:SET SESSION sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES')}
   sql:
     init:
-      mode: ${SPRING_SQL_INIT_MODE:always}
+      mode: ${SPRING_SQL_INIT_MODE:never}
       schema-locations: ${SPRING_SQL_SCHEMA_LOCATIONS:classpath:schema-mysql.sql}
       data-locations: ${SPRING_SQL_DATA_LOCATIONS:classpath:data-mysql.sql}
       continue-on-error: ${SPRING_SQL_INIT_CONTINUE_ON_ERROR:false}
@@ -53,10 +53,26 @@ wechat:
     api-base-url: ${WECHAT_API_BASE_URL:https://api.weixin.qq.com}
     app-id: ${WECHAT_APP_ID:}
     app-secret: ${WECHAT_APP_SECRET:}
+  open:
+    app-id: ${WECHAT_OPEN_APP_ID:}
+    app-secret: ${WECHAT_OPEN_APP_SECRET:}
+    redirect-uri: ${WECHAT_OPEN_REDIRECT_URI:}
+    authorization-url: ${WECHAT_OPEN_AUTHORIZATION_URL:https://open.weixin.qq.com/connect/qrconnect}
+    api-base-url: ${WECHAT_OPEN_API_BASE_URL:https://api.weixin.qq.com}
+    mock-enabled: ${WECHAT_OPEN_MOCK_ENABLED:false}
+    mock-openid: ${WECHAT_OPEN_MOCK_OPENID:mock-admin-wechat}
+    mock-unionid: ${WECHAT_OPEN_MOCK_UNIONID:mock-admin-wechat-unionid}
+
+hentor:
+  miniapp:
+    dev-login:
+      enabled: ${HENTOR_MINIAPP_DEV_LOGIN_ENABLED:false}
+      secret: ${HENTOR_MINIAPP_DEV_LOGIN_SECRET:}
 
 kuaidi100:
   key: ${KUAIDI100_KEY:}
   secret: ${KUAIDI100_SECRET:}
+  customer: ${KUAIDI100_CUSTOMER:${KUAIDI100_SECRET:}}
   partner-id: ${KUAIDI100_PARTNER_ID:}
   partner-key: ${KUAIDI100_PARTNER_KEY:}
   code: ${KUAIDI100_CODE:}
@@ -80,7 +96,13 @@ kuaidi100:
   need-desensitization: ${KUAIDI100_NEED_DESENSITIZATION:false}
   callback-url: ${KUAIDI100_CALLBACK_URL:}
   poll-callback-url: ${KUAIDI100_POLL_CALLBACK_URL:}
+  track-callback-url: ${KUAIDI100_TRACK_CALLBACK_URL:${KUAIDI100_POLL_CALLBACK_URL:}}
+  track-map-config-key: ${KUAIDI100_TRACK_MAP_CONFIG_KEY:}
+  track-map-url: ${KUAIDI100_TRACK_MAP_URL:https://poll.kuaidi100.com/poll/maptrack.do}
+  track-query-url: ${KUAIDI100_TRACK_QUERY_URL:https://poll.kuaidi100.com/poll/query.do}
+  track-subscribe-url: ${KUAIDI100_TRACK_SUBSCRIBE_URL:https://poll.kuaidi100.com/poll}
   callback-salt: ${KUAIDI100_CALLBACK_SALT:}
+  sender-address: ${KUAIDI100_SENDER_ADDRESS:}
   sender-company: ${KUAIDI100_SENDER_COMPANY:}
 
 management:

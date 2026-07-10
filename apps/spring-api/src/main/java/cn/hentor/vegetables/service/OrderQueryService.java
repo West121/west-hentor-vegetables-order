@@ -97,6 +97,7 @@ public class OrderQueryService {
   private final OrderItemMapper orderItemMapper;
   private final OrderMapper orderMapper;
   private final OrderShipmentMapper orderShipmentMapper;
+  private final OrderShipmentTrackingService orderShipmentTrackingService;
   private final StoreMapper storeMapper;
   private final UserMapper userMapper;
   private final UserPackageBenefitMapper userPackageBenefitMapper;
@@ -114,6 +115,7 @@ public class OrderQueryService {
     OrderItemMapper orderItemMapper,
     OrderMapper orderMapper,
     OrderShipmentMapper orderShipmentMapper,
+    OrderShipmentTrackingService orderShipmentTrackingService,
     StoreMapper storeMapper,
     UserMapper userMapper,
     UserPackageBenefitMapper userPackageBenefitMapper,
@@ -130,6 +132,7 @@ public class OrderQueryService {
     this.orderItemMapper = orderItemMapper;
     this.orderMapper = orderMapper;
     this.orderShipmentMapper = orderShipmentMapper;
+    this.orderShipmentTrackingService = orderShipmentTrackingService;
     this.storeMapper = storeMapper;
     this.userMapper = userMapper;
     this.userPackageBenefitMapper = userPackageBenefitMapper;
@@ -200,13 +203,112 @@ public class OrderQueryService {
 
     long totalPages =
       result.getSize() == 0 ? 0 : (long) Math.ceil((double) result.getTotal() / result.getSize());
+    hydrateOrderListItems(result.getRecords());
     return new PageResult<>(
       result.getRecords(),
       result.getCurrent(),
       result.getSize(),
       result.getTotal(),
-      totalPages
+      totalPages,
+      orderSummary(storeId)
     );
+  }
+
+  private Map<String, Long> orderSummary(String storeId) {
+    long pendingShipment = countOrdersByStatus(storeId, "PENDING_SHIPMENT");
+    long shipped = countOrdersByStatus(storeId, "SHIPPED");
+    long signed = countOrdersByStatus(storeId, "SIGNED");
+    long canceled = countOrdersByStatus(storeId, "CANCELED") + countOrdersByStatus(storeId, "CANCELLED");
+    return Map.of(
+      "canceled", canceled,
+      "pendingShipment", pendingShipment,
+      "shipped", shipped,
+      "signed", signed,
+      "total", countOrdersByStatus(storeId, null)
+    );
+  }
+
+  private long countOrdersByStatus(String storeId, String status) {
+    LambdaQueryWrapper<OrderEntity> wrapper = new LambdaQueryWrapper<OrderEntity>()
+      .eq(OrderEntity::getStoreId, storeId)
+      .isNull(OrderEntity::getDeletedByUserAt);
+    if (StringUtils.hasText(status)) {
+      wrapper.eq(OrderEntity::getStatus, status);
+    }
+    Long count = orderMapper.selectCount(wrapper);
+    return count == null ? 0 : count;
+  }
+
+  private void hydrateOrderListItems(List<OrderListItem> records) {
+    if (records == null || records.isEmpty()) {
+      return;
+    }
+    List<String> orderIds = records
+      .stream()
+      .map(OrderListItem::getId)
+      .filter(StringUtils::hasText)
+      .distinct()
+      .toList();
+    if (orderIds.isEmpty()) {
+      return;
+    }
+
+    Map<String, Map<String, String>> addressSnapshotsByOrderId = new LinkedHashMap<>();
+    orderMapper
+      .selectList(
+        new LambdaQueryWrapper<OrderEntity>()
+          .select(OrderEntity::getId, OrderEntity::getAddressSnapshot)
+          .in(OrderEntity::getId, orderIds)
+      )
+      .forEach(order ->
+        addressSnapshotsByOrderId.put(order.getId(), parseAddress(order.getAddressSnapshot()))
+      );
+
+    Map<String, List<AdminOrderItemDto>> itemsByOrderId = new LinkedHashMap<>();
+    orderItemMapper
+      .selectList(
+        new LambdaQueryWrapper<OrderItemEntity>()
+          .in(OrderItemEntity::getOrderId, orderIds)
+          .orderByAsc(OrderItemEntity::getId)
+      )
+      .forEach(item ->
+        itemsByOrderId.computeIfAbsent(item.getOrderId(), key -> new ArrayList<>()).add(toItemDto(item))
+      );
+
+    Map<String, List<AdminOrderBenefitItemDto>> benefitsByOrderId = new LinkedHashMap<>();
+    orderBenefitItemMapper
+      .selectList(
+        new LambdaQueryWrapper<OrderBenefitItemEntity>()
+          .in(OrderBenefitItemEntity::getOrderId, orderIds)
+          .orderByAsc(OrderBenefitItemEntity::getId)
+      )
+      .forEach(benefit ->
+        benefitsByOrderId
+          .computeIfAbsent(benefit.getOrderId(), key -> new ArrayList<>())
+          .add(toBenefitDto(benefit))
+      );
+
+    Map<String, List<AdminOrderShipmentDto>> shipmentsByOrderId = new LinkedHashMap<>();
+    orderShipmentMapper
+      .selectList(
+        new LambdaQueryWrapper<OrderShipmentEntity>()
+          .in(OrderShipmentEntity::getOrderId, orderIds)
+          .orderByAsc(OrderShipmentEntity::getSortOrder)
+          .orderByAsc(OrderShipmentEntity::getId)
+      )
+      .forEach(shipment ->
+        shipmentsByOrderId
+          .computeIfAbsent(shipment.getOrderId(), key -> new ArrayList<>())
+          .add(toShipmentDto(shipment))
+      );
+
+    for (OrderListItem record : records) {
+      String orderId = record.getId();
+      record.setAddressSnapshot(addressSnapshotsByOrderId.getOrDefault(orderId, Map.of()));
+      record.setItems(itemsByOrderId.getOrDefault(orderId, List.of()));
+      record.setBenefitItems(benefitsByOrderId.getOrDefault(orderId, List.of()));
+      record.setShipments(shipmentsByOrderId.getOrDefault(orderId, List.of()));
+    }
   }
 
   public AdminOrderDetailResponse getOrder(String storeId, String orderId) {
@@ -428,6 +530,68 @@ public class OrderQueryService {
   }
 
   @Transactional
+  public AdminOrderStatusResponse cancelOrder(
+    String orderId,
+    AdminOrderStatusActionRequest request,
+    AdminSessionDto session
+  ) {
+    String reason = normalizeNullableText(request.reason());
+    if (!StringUtils.hasText(reason)) {
+      throw new ApiException("CANCEL_REASON_REQUIRED", "请输入取消原因", HttpStatus.BAD_REQUEST);
+    }
+
+    AdminUserEntity operator = requireActiveOperator(session.adminUserId());
+    OrderView order = loadOrderView(orderId, request.storeId());
+    if (!"PENDING_SHIPMENT".equals(order.order().getStatus())) {
+      throw new ApiException("ORDER_NOT_CANCELABLE", "当前订单不可取消", HttpStatus.CONFLICT);
+    }
+
+    LocalDateTime now = LocalDateTime.now();
+    if (order.userPackage().getUsedTimes() != null && order.userPackage().getUsedTimes() > 0) {
+      userPackageMapper.decrementUsedTimes(order.userPackage().getId(), now);
+    }
+    for (OrderBenefitItemEntity benefit : order.benefits()) {
+      if (StringUtils.hasText(benefit.getUserPackageBenefitId())) {
+        userPackageBenefitMapper.decrementUsedQuantity(
+          benefit.getUserPackageBenefitId(),
+          zeroIfNull(benefit.getQuantity()),
+          now
+        );
+      }
+    }
+
+    OrderEntity update = new OrderEntity();
+    update.setId(order.order().getId());
+    update.setCancelReason(reason);
+    update.setCanceledAt(now);
+    update.setUpdatedAt(now);
+    orderMapper.markCanceled(update);
+
+    Map<String, Object> before = new LinkedHashMap<>();
+    before.put("status", order.order().getStatus());
+    before.put("usedTimes", order.userPackage().getUsedTimes());
+    Map<String, Object> after = new LinkedHashMap<>();
+    after.put("canceledAt", now);
+    after.put("cancelReason", reason);
+    after.put("restoredBenefits", benefitLogValue(order.benefits()));
+    after.put("restoredItems", itemLogValue(order.items()));
+    after.put("status", "CANCELED");
+    writeOperationLog(
+      operator.getId(),
+      request.storeId(),
+      "order",
+      order.order().getId(),
+      "ORDER_CANCELED",
+      before,
+      after
+    );
+
+    return new AdminOrderStatusResponse(
+      new AdminOrderStatusResultDto(now, reason, order.order().getId(), null, "CANCELED")
+    );
+  }
+
+  @Transactional
   public AdminOrderStatusResponse voidOrder(
     String orderId,
     AdminOrderStatusActionRequest request,
@@ -445,9 +609,6 @@ public class OrderQueryService {
     }
 
     LocalDateTime now = LocalDateTime.now();
-    for (OrderItemEntity item : order.items()) {
-      dishMapper.incrementStock(item.getDishId(), zeroIfNull(item.getWeightJin()), now);
-    }
     if (order.userPackage().getUsedTimes() != null && order.userPackage().getUsedTimes() > 0) {
       userPackageMapper.decrementUsedTimes(order.userPackage().getId(), now);
     }
@@ -517,6 +678,7 @@ public class OrderQueryService {
       entity.setPackageName(shipment.packageName());
       entity.setPackageType(shipment.packageType());
       entity.setLogisticsNo(shipment.logisticsNo());
+      entity.setKuaidicom(defaultKuaidicom(request.storeId()));
       entity.setShippedAt(shippedAt);
       entity.setStatus("SHIPPED");
       entity.setSortOrder(shipment.sortOrder());
@@ -554,6 +716,14 @@ public class OrderQueryService {
         shipmentLogValue(inserted),
         "status",
         "SHIPPED"
+      )
+    );
+
+    inserted.forEach(shipment ->
+      orderShipmentTrackingService.subscribeQuietly(
+        order.order(),
+        shipment,
+        parseAddress(order.order().getAddressSnapshot()).get("receiverPhone")
       )
     );
 
@@ -673,7 +843,8 @@ public class OrderQueryService {
     List<OrderView> orders = loadOrderViews(request.storeId(), request.orderIds(), true);
     List<Kuaidi100PrintTaskDto> tasks = buildKuaidi100PrintTasks(
       orders,
-      Boolean.TRUE.equals(request.includePrinted())
+      Boolean.TRUE.equals(request.includePrinted()),
+      printConfig
     );
     if (tasks.isEmpty()) {
       throw new ApiException("PRINT_TASKS_EMPTY", "所选订单没有待打印包裹", HttpStatus.BAD_REQUEST);
@@ -698,7 +869,12 @@ public class OrderQueryService {
 
     List<Kuaidi100PrintUpdatedDto> updated = successes.isEmpty()
       ? List.of()
-      : recordKuaidi100PrintResults(request.storeId(), session.adminUserId(), successes);
+      : recordKuaidi100PrintResults(
+        request.storeId(),
+        session.adminUserId(),
+        successes,
+        printConfig.kuaidicom()
+      );
 
     return new Kuaidi100CloudPrintResponse(
       failures.size(),
@@ -710,7 +886,8 @@ public class OrderQueryService {
 
   private List<Kuaidi100PrintTaskDto> buildKuaidi100PrintTasks(
     List<OrderView> orders,
-    boolean includePrinted
+    boolean includePrinted,
+    Kuaidi100PrintConfig printConfig
   ) {
     List<Kuaidi100PrintTaskDto> tasks = new ArrayList<>();
     for (OrderView order : orders) {
@@ -720,7 +897,7 @@ public class OrderQueryService {
       String receiverAddress = shipmentAddressText(receiver);
       String senderName = firstText(order.store().getContactName(), order.store().getName());
       String senderMobile = order.store().getContactPhone();
-      String senderAddress = List
+      String storeSenderAddress = List
         .of(
           nullToBlank(order.store().getProvince()),
           nullToBlank(order.store().getCity()),
@@ -730,6 +907,7 @@ public class OrderQueryService {
         .stream()
         .filter(StringUtils::hasText)
         .reduce("", String::concat);
+      String senderAddress = firstText(printConfig.senderAddress(), storeSenderAddress);
 
       if (!StringUtils.hasText(receiverName) || !StringUtils.hasText(receiverMobile) || !StringUtils.hasText(receiverAddress)) {
         throw new ApiException(
@@ -785,7 +963,8 @@ public class OrderQueryService {
   private List<Kuaidi100PrintUpdatedDto> recordKuaidi100PrintResults(
     String storeId,
     String operatorId,
-    List<Kuaidi100PrintResultDto> results
+    List<Kuaidi100PrintResultDto> results,
+    String kuaidicom
   ) {
     LocalDateTime now = LocalDateTime.now();
     List<Kuaidi100PrintUpdatedDto> updated = new ArrayList<>();
@@ -802,12 +981,14 @@ public class OrderQueryService {
       }
 
       shipment.setLogisticsNo(result.kuaidinum());
+      shipment.setKuaidicom(firstText(kuaidicom, defaultKuaidicom(storeId)));
       shipment.setRemark(StringUtils.hasText(result.taskId()) ? "快递100任务：" + result.taskId() : shipment.getRemark());
       shipment.setShippedAt(now);
       shipment.setUpdatedAt(now);
       orderShipmentMapper.markPrinted(shipment);
 
       orderIds.add(order.getId());
+      orderShipmentTrackingService.subscribeQuietly(order, shipment, receiverPhone(order));
       updated.add(
         new Kuaidi100PrintUpdatedDto(
           result.kuaidinum(),
@@ -1149,6 +1330,19 @@ public class OrderQueryService {
       .orElse(nullToBlank(snapshot.get("detail")));
   }
 
+  private String receiverPhone(OrderEntity order) {
+    return parseAddress(order.getAddressSnapshot()).get("receiverPhone");
+  }
+
+  private String defaultKuaidicom(String storeId) {
+    try {
+      Kuaidi100PrintConfig config = kuaidi100PrinterService.resolvePrintConfig(storeId, null);
+      return StringUtils.hasText(config.kuaidicom()) ? config.kuaidicom() : null;
+    } catch (RuntimeException exception) {
+      return null;
+    }
+  }
+
   private String logisticsText(OrderView order) {
     String shipmentNos = order.shipments()
       .stream()
@@ -1256,8 +1450,23 @@ public class OrderQueryService {
       shipment.getPackageName(),
       shipment.getPackageType(),
       shipment.getShippedAt(),
-      shipment.getStatus()
+      shipment.getStatus(),
+      shipment.getKuaidicom(),
+      orderShipmentTrackingService.getTrackDto(shipment.getId())
     );
+  }
+
+  public AdminOrderShipmentDto refreshShipmentTrack(
+    String storeId,
+    String orderId,
+    String shipmentId
+  ) {
+    orderShipmentTrackingService.refresh(storeId, orderId, shipmentId);
+    OrderShipmentEntity shipment = orderShipmentMapper.selectById(shipmentId);
+    if (shipment == null) {
+      throw new ApiException("SHIPMENT_NOT_FOUND", "包裹不存在", HttpStatus.NOT_FOUND);
+    }
+    return toShipmentDto(shipment);
   }
 
   private AdminOrderDetailDto toDetailDto(OrderView view) {

@@ -204,15 +204,21 @@ public class Kuaidi100Service {
       task.receiverAddress()
     ));
     param.put("remark", nullToBlank(task.remark()));
+    String senderAddress = StringUtils.hasText(config.senderAddress())
+      ? config.senderAddress()
+      : task.senderAddress();
+    String senderMobile = StringUtils.hasText(config.senderMobile())
+      ? config.senderMobile()
+      : task.senderMobile();
     param.put("sendMan", Map.of(
       "company",
       nullToBlank(config.senderCompany()),
       "mobile",
-      task.senderMobile(),
+      nullToBlank(senderMobile),
       "name",
       task.senderName(),
       "printAddr",
-      task.senderAddress()
+      senderAddress
     ));
     param.put("siid", nullToBlank(config.siid()));
     param.put("tempId", nullToBlank(config.tempId()));
@@ -247,7 +253,9 @@ public class Kuaidi100Service {
       "环境变量默认打印机",
       Map.of(),
       properties.getSecret(),
+      properties.getSenderAddress(),
       properties.getSenderCompany(),
+      properties.getSenderMobile(),
       properties.getSiid(),
       properties.getTempId()
     );

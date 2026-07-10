@@ -31,10 +31,10 @@ import {
   buildStoreSettingsUrl,
   getActiveStoreCode,
 } from "../../lib/stores";
+import { useMiniappShare } from "../../lib/share";
 import "./index.scss";
 
-const API_BASE_URL =
-  process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
+import { API_BASE_URL } from "../../lib/api-base-url";
 const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 
 type ApiResponse<T> = {
@@ -88,6 +88,8 @@ function buildForm(item?: AddressItem | null): FormState {
 }
 
 export default function AddressesPage() {
+  useMiniappShare(DEFAULT_STORE_CODE);
+
   const [items, setItems] = useState<AddressItem[]>([]);
   const [editing, setEditing] = useState<AddressItem | null>(null);
   const [form, setForm] = useState<FormState>(buildForm());
@@ -228,7 +230,7 @@ export default function AddressesPage() {
   }
 
   function closeForm() {
-    if (items.length === 0 || actionPendingRef.current) {
+    if (actionPendingRef.current) {
       return;
     }
 
@@ -523,11 +525,9 @@ export default function AddressesPage() {
                   保存后用于首页预订和配送确认
                 </View>
               </View>
-              {items.length > 0 ? (
-                <Text className="form-panel__close" onClick={closeForm}>
-                  关闭
-                </Text>
-              ) : null}
+              <Text className="form-panel__close" onClick={closeForm}>
+                关闭
+              </Text>
             </View>
 
             <View className="field">

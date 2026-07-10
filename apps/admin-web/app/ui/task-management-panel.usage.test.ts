@@ -13,7 +13,8 @@ describe("task management modal usage", () => {
     expect(source).toContain("Eye");
     expect(source).toContain('mode: "detail"');
     expect(source).toContain("openDetailModal");
-    expect(source).toContain('title="查看详情"');
+    expect(source).toContain('data-icon="inline-start"');
+    expect(source).toContain("查看");
     expect(source).toContain("任务详情");
     expect(source).toContain('modal.mode !== "detail"');
   });
@@ -41,5 +42,22 @@ describe("task management modal usage", () => {
     expect(source).toContain("categoryOptions?: DishCategoryOption[]");
     expect(source).toContain("categoryLabelByCode");
     expect(source).not.toContain("CATEGORY_LABELS");
+  });
+
+  it("validates required task fields inline before calling the backend", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/task-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("validateTaskForm");
+    expect(source).toContain("AdminFormField");
+    expect(source).toContain("请输入任务名称");
+    expect(source).toContain("请选择开始时间");
+    expect(source).toContain("请选择至少一个关联菜品");
+    expect(source).toContain("请为已选菜品填写总重量");
+    expect(source).toContain("totalWeightJin");
+    expect(source).toContain("hasTaskFormErrors(validationErrors)");
+    expect(source).toContain("aria-invalid={invalid}");
   });
 });

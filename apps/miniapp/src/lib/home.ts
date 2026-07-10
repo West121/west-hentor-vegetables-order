@@ -3,7 +3,10 @@ export type HomeDishLike = {
   id: string;
   imageUrl?: string | null;
   name: string;
+  remainingWeightJin?: number;
   stockJin?: number;
+  totalWeightJin?: number;
+  usedWeightJin?: number;
 };
 
 export type SelectedDishItem = {
@@ -633,6 +636,15 @@ export function getReservationGate({
     };
   }
 
+  if (memberInfo === null) {
+    return {
+      canReserve: false,
+      emptyMessage: "登录后查看套餐并提交订单",
+      packageMeta: null,
+      submitDisabled: true,
+    };
+  }
+
   if (!packageInfo) {
     return {
       canReserve: false,
@@ -780,7 +792,7 @@ export function getUnderPackageLimitConfirm({
   const action = mode === "edit" ? "修改" : "提交";
 
   return {
-    cancelText: "继续选菜",
+    cancelText: "再来一单",
     confirmText: `确认${action}`,
     content: `套餐本次可选 ${formatJin(weightLimitJin)}斤，当前已选 ${formatJin(
       totalWeightJin,

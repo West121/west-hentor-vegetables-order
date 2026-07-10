@@ -15,11 +15,15 @@ import {
   getPackageUsageWeightLabel,
 } from "../../lib/packages";
 import { MiniCustomTop } from "../../components/mini-custom-top";
-import { ACTIVE_STORE_CODE_KEY, getActiveStoreCode } from "../../lib/stores";
+import {
+  ACTIVE_STORE_CODE_KEY,
+  buildStoreSettingsUrl,
+  getActiveStoreCode,
+} from "../../lib/stores";
+import { useMiniappShare } from "../../lib/share";
 import "./index.scss";
 
-const API_BASE_URL =
-  process.env.TARO_APP_API_BASE_URL || "https://mmprd.hentor.com:8103";
+import { API_BASE_URL } from "../../lib/api-base-url";
 const DEFAULT_STORE_CODE = process.env.TARO_APP_STORE_CODE ?? "lotus-garden";
 
 type ApiResponse<T> = {
@@ -74,16 +78,22 @@ type PackagesData = {
   };
 };
 
+type PublicSettings = {
+  loginTitle: string;
+};
+
 function PackageHeroCard({
+  brandName,
   packageInfo,
 }: {
+  brandName: string;
   packageInfo: PackageItem | null;
 }) {
   const hero = getPackageHeroView(packageInfo);
 
   return (
     <View className="hero-card">
-      <View className="hero-card__brand">Hentor Fresh</View>
+      <View className="hero-card__brand">{brandName}</View>
       <View className="hero-card__title">{hero.title}</View>
       <View className="hero-card__subtitle">{hero.subtitle}</View>
       <View className="hero-card__status-row">
@@ -100,9 +110,12 @@ function PackageHeroCard({
 }
 
 export default function PackagesPage() {
+  useMiniappShare(DEFAULT_STORE_CODE);
+
   const [data, setData] = useState<PackagesData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPackageIndex, setSelectedPackageIndex] = useState(0);
+  const [brandName, setBrandName] = useState("Hentor Fresh");
 
   async function loadPackages() {
     setLoading(true);
@@ -113,19 +126,28 @@ export default function PackagesPage() {
         DEFAULT_STORE_CODE,
       );
 
-      const response = await requestWithMiniSession<PackagesData>({
-        apiBaseUrl: API_BASE_URL,
-        storeCode,
-        request: (token) =>
-          Taro.request<ApiResponse<PackagesData>>({
-            header: { authorization: `Bearer ${token}` },
-            method: "GET",
-            url: buildPackagesUrl({
-              apiBaseUrl: API_BASE_URL,
-              storeCode,
+      const [response, settingsResponse] = await Promise.all([
+        requestWithMiniSession<PackagesData>({
+          apiBaseUrl: API_BASE_URL,
+          storeCode,
+          request: (token) =>
+            Taro.request<ApiResponse<PackagesData>>({
+              header: { authorization: `Bearer ${token}` },
+              method: "GET",
+              url: buildPackagesUrl({
+                apiBaseUrl: API_BASE_URL,
+                storeCode,
+              }),
             }),
+        }),
+        Taro.request<ApiResponse<PublicSettings>>({
+          method: "GET",
+          url: buildStoreSettingsUrl({
+            apiBaseUrl: API_BASE_URL,
+            storeCode,
           }),
-      });
+        }).catch(() => null),
+      ]);
       const payload = response.data;
 
       if (!payload.success || !payload.data) {
@@ -133,6 +155,9 @@ export default function PackagesPage() {
       }
 
       setData(payload.data);
+      if (settingsResponse?.data.success && settingsResponse.data.data?.loginTitle) {
+        setBrandName(settingsResponse.data.data.loginTitle);
+      }
       setSelectedPackageIndex(0);
     } catch (error) {
       Taro.showToast({
@@ -211,7 +236,10 @@ export default function PackagesPage() {
                           : "package-swiper__item"
                       }
                     >
-                      <PackageHeroCard packageInfo={packageItem} />
+                      <PackageHeroCard
+                        brandName={brandName}
+                        packageInfo={packageItem}
+                      />
                     </View>
                   </SwiperItem>
                 ))}
@@ -232,7 +260,7 @@ export default function PackagesPage() {
               ) : null}
             </View>
           ) : (
-            <PackageHeroCard packageInfo={null} />
+            <PackageHeroCard brandName={brandName} packageInfo={null} />
           )}
 
           <View className="section-title">套餐权益</View>

@@ -83,7 +83,7 @@ describe("order management panel", () => {
     expect(source).toContain("function removeShipmentRow(index: number)");
     expect(deliveryBlock).toContain("新增包裹");
     expect(deliveryBlock).toContain("包裹名称");
-    expect(deliveryBlock).toContain("例如：蔬菜包裹、鸡蛋包裹");
+    expect(deliveryBlock).toContain("例如：蔬菜包裹");
     expect(deliveryBlock).toContain("录入运单号");
     expect(deliveryBlock).toContain("packageName: event.target.value");
     expect(deliveryBlock).toContain("logisticsNo: event.target.value");
@@ -100,24 +100,96 @@ describe("order management panel", () => {
     expect(source).toContain("avatarUrl={modal.item.user?.avatarUrl}");
   });
 
-  it("calculates today's cutoff card from task data instead of fixed copy", () => {
+  it("does not keep fixed cutoff copy on the order management page", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/order-management-panel.tsx"),
       "utf8",
     );
-    const cutoffBlock = source.slice(
-      source.indexOf("function buildCutoffDisplay"),
-      source.indexOf("<div className=\"flex flex-nowrap", source.indexOf("今日截单")),
-    );
 
     expect(source).toContain("orderTasks?: OrderCutoffTask[]");
     expect(source).toContain("orderTasks = []");
-    expect(source).toContain("const [now, setNow] = useState(() => new Date())");
-    expect(source).toContain("window.setInterval(() => setNow(new Date()), 60_000)");
-    expect(cutoffBlock).toContain("buildCutoffDisplay(orderTasks, now)");
-    expect(cutoffBlock).toContain("{cutoffDisplay.cutoffText}");
-    expect(cutoffBlock).toContain("cutoffDisplay.detailLines.map");
+    expect(source).not.toContain("今日截单");
     expect(source).not.toContain("还有 3小时");
     expect(source).not.toContain("12分");
+  });
+
+  it("keeps the order management page focused on the list instead of top statistic cards", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/order-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).not.toContain('["今日待发货", summary.pendingShipment');
+    expect(source).not.toContain('["今日订单", summary.total');
+    expect(source).not.toContain('["已发货", summary.shipped');
+    expect(source).not.toContain('["已签收", summary.signed');
+    expect(source).not.toContain('<div className="text-sm font-medium text-[#66756d]">今日截单</div>');
+  });
+
+  it("requires a confirmation dialog before generating electronic waybills", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/order-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("AdminConfirmDialog");
+    expect(source).toContain("printConfirmOrderIds");
+    expect(source).toContain("requestElectronicWaybillConfirmation");
+    expect(source).toContain("确认生成电子面单");
+    expect(source).toContain("生成后会写入物流单号");
+    expect(source).toContain("onConfirm={confirmElectronicWaybillPrint}");
+    expect(source).not.toContain("onClick={() => void cloudPrintOrders()}");
+    expect(source).not.toContain("onClick={() => void cloudPrintOrders([order.id])}");
+  });
+
+  it("validates address completeness before generating electronic waybills", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/order-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("function electronicWaybillAddressIssue(order: OrderPanelItem)");
+    expect(source).toContain("function findElectronicWaybillAddressIssue(");
+    expect(source).toContain("详细地址过短，请补充街道、小区、楼栋或门牌号");
+    expect(source).toContain("请先编辑会员地址或让用户补充后再生成电子面单");
+    expect(source).toContain("const addressIssue = findElectronicWaybillAddressIssue(ids, items)");
+    expect(source).toContain("const addressIssue = findElectronicWaybillAddressIssue(orderIds, items)");
+    expect(source).toContain("省、市、区需要填写完整");
+  });
+
+  it("supports canceling pending orders with a required reason confirmation", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/order-management-panel.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("cancelCandidate");
+    expect(source).toContain("cancelReason");
+    expect(source).toContain("requestCancelOrder(order)");
+    expect(source).toContain("/cancel");
+    expect(source).toContain("取消原因");
+    expect(source).toContain("请输入取消原因");
+    expect(source).toContain("confirmDisabled={saving || !cancelReason.trim()}");
+    expect(source).toContain("确认取消订单");
+    expect(source).toContain("订单会保留在后台，并标记为已取消");
+  });
+
+  it("keeps order detail modal compact with four-column detail sections", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/order-management-panel.tsx"),
+      "utf8",
+    );
+    const detailBlock = source.slice(
+      source.indexOf("<h3 className=\"text-base font-semibold\">基础信息</h3>"),
+      source.indexOf("{modal.mode === \"edit\" ?", source.indexOf("配送处理")),
+    );
+
+    expect(detailBlock).toContain("md:grid-cols-2 xl:grid-cols-4");
+    expect(detailBlock).toContain("grid-cols-[repeat(auto-fill,minmax(112px,1fr))]");
+    expect(detailBlock).toContain("px-2.5 py-1.5 text-sm");
+    expect(detailBlock).toContain("modalIsReadOnly ? (");
+    expect(detailBlock).toContain("sm:grid-cols-2 xl:grid-cols-4");
+    expect(detailBlock).toContain("rounded-lg border border-[#dbe6dc] bg-[#f8fbf7] px-3 py-2 text-sm");
+    expect(detailBlock).toContain("h-9 w-full");
   });
 });

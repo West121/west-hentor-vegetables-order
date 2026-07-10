@@ -20,6 +20,38 @@ const PHONE_HEADERS = new Set([
 const NICKNAME_HEADERS = new Set(["nickname", "name", "昵称", "姓名", "会员"]);
 const REMARK_HEADERS = new Set(["remark", "备注"]);
 const STATUS_HEADERS = new Set(["status", "状态", "服务状态", "套餐状态"]);
+const ADDRESS_HEADERS = new Set([
+  "address",
+  "fulladdress",
+  "deliveryaddress",
+  "地址",
+  "完整地址",
+  "配送地址",
+  "默认地址",
+  "详细地址",
+]);
+const CITY_HEADERS = new Set(["city", "城市", "市"]);
+const DETAIL_HEADERS = new Set([
+  "detail",
+  "addressdetail",
+  "详细地址",
+  "门牌地址",
+  "街道门牌",
+]);
+const DISTRICT_HEADERS = new Set(["district", "area", "区县", "区", "县"]);
+const PROVINCE_HEADERS = new Set(["province", "省份", "省"]);
+const RECEIVER_NAME_HEADERS = new Set([
+  "receivername",
+  "contactname",
+  "收货人",
+  "联系人",
+]);
+const RECEIVER_PHONE_HEADERS = new Set([
+  "receiverphone",
+  "contactphone",
+  "收货电话",
+  "联系电话",
+]);
 const DISABLED_REASON_HEADERS = new Set([
   "disabledreason",
   "disabled_reason",
@@ -58,7 +90,15 @@ export type ParsedMemberImportRow = {
 };
 
 export type ParsedUserPackageImportRow = {
+  address?: string | null;
+  city?: string | null;
+  detail?: string | null;
+  district?: string | null;
+  nickname?: string | null;
   phone: string;
+  province?: string | null;
+  receiverName?: string | null;
+  receiverPhone?: string | null;
   remark?: string | null;
   rowNumber: number;
   status?: PackageStatus | null;
@@ -251,7 +291,15 @@ export function parseUserPackageImportRows(
     hasHeader(firstRow, PHONE_HEADERS) && hasHeader(firstRow, TEMPLATE_HEADERS);
   const indexes = startsWithHeader
     ? resolveHeaderIndexes(firstRow, {
+        address: ADDRESS_HEADERS,
+        city: CITY_HEADERS,
+        detail: DETAIL_HEADERS,
+        district: DISTRICT_HEADERS,
+        nickname: NICKNAME_HEADERS,
         phone: PHONE_HEADERS,
+        province: PROVINCE_HEADERS,
+        receiverName: RECEIVER_NAME_HEADERS,
+        receiverPhone: RECEIVER_PHONE_HEADERS,
         remark: REMARK_HEADERS,
         status: STATUS_HEADERS,
         templateName: TEMPLATE_HEADERS,
@@ -260,20 +308,36 @@ export function parseUserPackageImportRows(
         weightLimitJin: WEIGHT_LIMIT_HEADERS,
       })
     : {
+        address: 5,
+        city: 3,
+        detail: 5,
+        district: 4,
+        nickname: 1,
         phone: 0,
-        remark: 6,
-        status: 5,
-        templateName: 1,
-        totalTimes: 2,
-        usedTimes: 3,
-        weightLimitJin: 4,
+        province: 2,
+        receiverName: -1,
+        receiverPhone: -1,
+        remark: 10,
+        status: 9,
+        templateName: 6,
+        totalTimes: 7,
+        usedTimes: 8,
+        weightLimitJin: -1,
       };
   const dataRows = startsWithHeader ? rows.slice(1) : rows;
   const rowNumberOffset = startsWithHeader ? 2 : 1;
 
   return dataRows
     .map((cells, index) => ({
+      address: optionalCell(cellAt(cells, indexes.address)),
+      city: optionalCell(cellAt(cells, indexes.city)),
+      detail: optionalCell(cellAt(cells, indexes.detail)),
+      district: optionalCell(cellAt(cells, indexes.district)),
+      nickname: optionalCell(cellAt(cells, indexes.nickname)),
       phone: cellAt(cells, indexes.phone)?.trim() ?? "",
+      province: optionalCell(cellAt(cells, indexes.province)),
+      receiverName: optionalCell(cellAt(cells, indexes.receiverName)),
+      receiverPhone: optionalCell(cellAt(cells, indexes.receiverPhone)),
       remark: optionalCell(cellAt(cells, indexes.remark)),
       rowNumber: index + rowNumberOffset,
       status: normalizePackageStatus(cellAt(cells, indexes.status)),
@@ -282,5 +346,13 @@ export function parseUserPackageImportRows(
       usedTimes: numberCell(cellAt(cells, indexes.usedTimes)),
       weightLimitJin: numberCell(cellAt(cells, indexes.weightLimitJin)),
     }))
-    .filter((row) => row.phone || row.templateName || row.remark);
+    .filter(
+      (row) =>
+        row.phone ||
+        row.templateName ||
+        row.nickname ||
+        row.address ||
+        row.province ||
+        row.remark,
+    );
 }

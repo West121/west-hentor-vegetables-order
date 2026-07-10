@@ -274,7 +274,11 @@ public class ShipmentStatsService {
   }
 
   private String csvCell(String value) {
-    String text = value == null ? "" : value;
+    String rawText = value == null ? "" : value;
+    String trimmed = rawText.stripLeading();
+    String text = !trimmed.isEmpty() && "=+-@".indexOf(trimmed.charAt(0)) >= 0
+      ? "'" + rawText
+      : rawText;
     return text.matches(".*[\",\\n].*") ? "\"" + text.replace("\"", "\"\"") + "\"" : text;
   }
 

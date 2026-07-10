@@ -38,7 +38,9 @@ public class MiniStoreService {
     "login_subtitle",
     "login_title",
     "login_welcome",
+    "privacy_policy_content",
     "privacy_policy_url",
+    "user_agreement_content",
     "user_agreement_url"
   );
 
@@ -84,8 +86,10 @@ public class MiniStoreService {
       readJsonText(configs.get("login_subtitle")),
       readJsonText(configs.get("login_title")),
       readJsonText(configs.get("login_welcome")),
+      readJsonText(configs.get("privacy_policy_content")),
       readJsonText(configs.get("privacy_policy_url")),
       new MiniStorePublicSummaryDto(store.getCode(), store.getId(), store.getName()),
+      readJsonText(configs.get("user_agreement_content")),
       readJsonText(configs.get("user_agreement_url"))
     );
   }

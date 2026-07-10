@@ -6,6 +6,7 @@ describe("admin user menu model", () => {
   it("exposes profile, role switch, operation log and logout actions", () => {
     expect(buildAdminUserMenuItems({ canOpenOperationLogs: true })).toEqual([
       expect.objectContaining({ key: "profile", label: "个人资料" }),
+      expect.objectContaining({ key: "password", label: "修改密码" }),
       expect.objectContaining({ key: "role-switch", label: "切换角色" }),
       expect.objectContaining({ key: "layout-settings", label: "布局设置" }),
       expect.objectContaining({ key: "operation-logs", label: "操作日志" }),
@@ -30,6 +31,10 @@ describe("admin user menu model", () => {
     expect(items.find((item) => item.key === "profile")).toMatchObject({
       disabled: false,
       helper: "查看当前账号资料",
+    });
+    expect(items.find((item) => item.key === "password")).toMatchObject({
+      disabled: false,
+      helper: "修改当前登录密码",
     });
     expect(items.find((item) => item.key === "role-switch")).toMatchObject({
       disabled: false,

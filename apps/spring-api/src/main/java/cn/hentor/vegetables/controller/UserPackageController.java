@@ -59,7 +59,7 @@ public class UserPackageController {
     @RequestParam(required = false) String status,
     @RequestParam(required = false) String query,
     @RequestParam(defaultValue = "1") long page,
-    @RequestParam(defaultValue = "20") long pageSize,
+    @RequestParam(defaultValue = "10") long pageSize,
     @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
     @RequestHeader(value = "X-Admin-Token", required = false) String tokenHeader,
     @CookieValue(value = AdminAuthService.SESSION_COOKIE, required = false) String tokenCookie

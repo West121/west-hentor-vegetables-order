@@ -11,6 +11,7 @@ public class Kuaidi100Properties {
   private String code = "";
   private String callbackSalt = "";
   private String callbackUrl = "";
+  private String customer = "";
   private String expType = "标准快递";
   private String height = "100";
   private String key = "";
@@ -28,9 +29,16 @@ public class Kuaidi100Properties {
   private String payType = "SHIPPER";
   private String pollCallbackUrl = "";
   private String secret = "";
+  private String senderAddress = "";
   private String senderCompany = "";
+  private String senderMobile = "";
   private String siid = "";
   private String tempId = "";
+  private String trackCallbackUrl = "";
+  private String trackMapConfigKey = "";
+  private String trackMapUrl = "https://poll.kuaidi100.com/poll/maptrack.do";
+  private String trackQueryUrl = "https://poll.kuaidi100.com/poll/query.do";
+  private String trackSubscribeUrl = "https://poll.kuaidi100.com/poll";
   private String type = "10";
   private String width = "75";
 
@@ -72,6 +80,14 @@ public class Kuaidi100Properties {
 
   public void setCallbackUrl(String callbackUrl) {
     this.callbackUrl = callbackUrl;
+  }
+
+  public String getCustomer() {
+    return customer;
+  }
+
+  public void setCustomer(String customer) {
+    this.customer = customer;
   }
 
   public String getExpType() {
@@ -218,6 +234,22 @@ public class Kuaidi100Properties {
     this.senderCompany = senderCompany;
   }
 
+  public String getSenderAddress() {
+    return senderAddress;
+  }
+
+  public void setSenderAddress(String senderAddress) {
+    this.senderAddress = senderAddress;
+  }
+
+  public String getSenderMobile() {
+    return senderMobile;
+  }
+
+  public void setSenderMobile(String senderMobile) {
+    this.senderMobile = senderMobile;
+  }
+
   public String getSiid() {
     return siid;
   }
@@ -232,6 +264,46 @@ public class Kuaidi100Properties {
 
   public void setTempId(String tempId) {
     this.tempId = tempId;
+  }
+
+  public String getTrackCallbackUrl() {
+    return trackCallbackUrl;
+  }
+
+  public void setTrackCallbackUrl(String trackCallbackUrl) {
+    this.trackCallbackUrl = trackCallbackUrl;
+  }
+
+  public String getTrackMapConfigKey() {
+    return trackMapConfigKey;
+  }
+
+  public void setTrackMapConfigKey(String trackMapConfigKey) {
+    this.trackMapConfigKey = trackMapConfigKey;
+  }
+
+  public String getTrackMapUrl() {
+    return trackMapUrl;
+  }
+
+  public void setTrackMapUrl(String trackMapUrl) {
+    this.trackMapUrl = trackMapUrl;
+  }
+
+  public String getTrackQueryUrl() {
+    return trackQueryUrl;
+  }
+
+  public void setTrackQueryUrl(String trackQueryUrl) {
+    this.trackQueryUrl = trackQueryUrl;
+  }
+
+  public String getTrackSubscribeUrl() {
+    return trackSubscribeUrl;
+  }
+
+  public void setTrackSubscribeUrl(String trackSubscribeUrl) {
+    this.trackSubscribeUrl = trackSubscribeUrl;
   }
 
   public String getType() {

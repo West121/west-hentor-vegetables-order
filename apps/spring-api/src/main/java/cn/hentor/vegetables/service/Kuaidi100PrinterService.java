@@ -273,7 +273,9 @@ public class Kuaidi100PrinterService {
       nullableText(request.payType()),
       nullableText(request.remark()),
       request.requestParams() == null ? Map.of() : new LinkedHashMap<>(request.requestParams()),
+      nullableText(request.senderAddress()),
       nullableText(request.senderCompany()),
+      nullableText(request.senderMobile()),
       siid,
       request.sortOrder() == null ? 0 : request.sortOrder(),
       status,
@@ -294,7 +296,9 @@ public class Kuaidi100PrinterService {
     printer.setPayType(input.payType());
     printer.setRemark(input.remark());
     printer.setRequestParams(toJson(input.requestParams()));
+    printer.setSenderAddress(input.senderAddress());
     printer.setSenderCompany(input.senderCompany());
+    printer.setSenderMobile(input.senderMobile());
     printer.setSiid(input.siid());
     printer.setSortOrder(input.sortOrder());
     printer.setStatus(input.status());
@@ -321,7 +325,9 @@ public class Kuaidi100PrinterService {
       printer == null ? "环境变量默认打印机" : printer.getName(),
       printer == null ? Map.of() : parseRequestParams(printer.getRequestParams()),
       firstText(printer == null ? null : printer.getApiSecret(), properties.getSecret()),
+      firstText(printer == null ? null : printer.getSenderAddress(), properties.getSenderAddress()),
       firstText(printer == null ? null : printer.getSenderCompany(), properties.getSenderCompany()),
+      firstText(printer == null ? null : printer.getSenderMobile(), properties.getSenderMobile()),
       firstText(printer == null ? null : printer.getSiid(), properties.getSiid()),
       firstText(printer == null ? null : printer.getTempId(), properties.getTempId())
     );
@@ -343,7 +349,9 @@ public class Kuaidi100PrinterService {
       printer.getPayType(),
       printer.getRemark(),
       parseRequestParams(printer.getRequestParams()),
+      printer.getSenderAddress(),
       printer.getSenderCompany(),
+      printer.getSenderMobile(),
       printer.getSiid(),
       printer.getSortOrder() == null ? 0 : printer.getSortOrder(),
       printer.getStatus(),
@@ -437,6 +445,8 @@ public class Kuaidi100PrinterService {
     value.put("status", printer.getStatus());
     value.put("isDefault", printer.getDefaultPrinter());
     value.put("kuaidicom", printer.getKuaidicom());
+    value.put("senderAddress", printer.getSenderAddress());
+    value.put("senderMobile", printer.getSenderMobile());
     value.put("siid", printer.getSiid());
     value.put("tempId", printer.getTempId());
     value.put("sortOrder", printer.getSortOrder());
@@ -484,7 +494,9 @@ public class Kuaidi100PrinterService {
     String payType,
     String remark,
     Map<String, Object> requestParams,
+    String senderAddress,
     String senderCompany,
+    String senderMobile,
     String siid,
     int sortOrder,
     String status,

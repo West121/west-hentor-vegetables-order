@@ -7,6 +7,7 @@ import {
 import { Prisma } from "./generated/prisma/client";
 
 const CONFIG_KEYS = [
+  "admin_system_name",
   "about_text",
   "cutoff_time",
   "customer_service_tel",
@@ -25,6 +26,7 @@ export type GetSystemSettingsInput = {
 };
 
 export type UpdateSystemSettingsInput = GetSystemSettingsInput & {
+  adminSystemName: string;
   aboutText: string;
   cutoffTime: string;
   customerServiceTel: string;
@@ -40,6 +42,7 @@ export type UpdateSystemSettingsInput = GetSystemSettingsInput & {
 };
 
 export type SystemSettings = {
+  adminSystemName: string;
   aboutText: string;
   cutoffTime: string;
   customerServiceTel: string;
@@ -91,6 +94,7 @@ function configText(value: Prisma.JsonValue | undefined) {
 
 function settingsLogValue(settings: SystemSettings) {
   return {
+    adminSystemName: settings.adminSystemName,
     aboutText: settings.aboutText,
     cutoffTime: settings.cutoffTime,
     customerServiceTel: settings.customerServiceTel,
@@ -142,6 +146,7 @@ async function readSystemSettings(
   );
 
   return {
+    adminSystemName: configText(configByKey.get("admin_system_name")) || "HanYang Fresh",
     aboutText: configText(configByKey.get("about_text")),
     cutoffTime: store.cutoffTime,
     customerServiceTel: store.customerServiceTel ?? "",
@@ -184,6 +189,13 @@ export async function getSystemSettings(input: GetSystemSettingsInput) {
 }
 
 export async function updateSystemSettings(input: UpdateSystemSettingsInput) {
+  const adminSystemName = normalizeText(input.adminSystemName);
+  if (!adminSystemName) {
+    throw new SystemSettingsServiceError(
+      "ADMIN_SYSTEM_NAME_REQUIRED",
+      "请输入后台系统名称",
+    );
+  }
   const cutoffTime = normalizeCutoffTime(input.cutoffTime);
   const customerServiceTel = normalizeText(input.customerServiceTel);
   const deliveryCities = normalizeDeliveryRangeValues(input.deliveryCities);
@@ -191,6 +203,7 @@ export async function updateSystemSettings(input: UpdateSystemSettingsInput) {
     input.deliveryProvinces,
   );
   const configValues: Record<ConfigKey, string> = {
+    admin_system_name: adminSystemName,
     about_text: normalizeText(input.aboutText),
     cutoff_time: cutoffTime,
     customer_service_tel: customerServiceTel,
@@ -216,25 +229,20 @@ export async function updateSystemSettings(input: UpdateSystemSettingsInput) {
       },
     });
 
+    const allStores = await tx.store.findMany({ select: { id: true } });
     await Promise.all(
-      CONFIG_KEYS.map((key) =>
-        tx.systemConfig.upsert({
-          where: {
-            storeId_key: {
-              key,
-              storeId: input.storeId,
-            },
-          },
-          create: {
-            key,
-            storeId: input.storeId,
-            value: configValues[key],
-          },
-          update: {
-            value: configValues[key],
-          },
-        }),
-      ),
+      CONFIG_KEYS.flatMap((key) => {
+        const storeIds = key === "admin_system_name"
+          ? allStores.map((store) => store.id)
+          : [input.storeId];
+        return storeIds.map((storeId) =>
+          tx.systemConfig.upsert({
+            where: { storeId_key: { key, storeId } },
+            create: { key, storeId, value: configValues[key] },
+            update: { value: configValues[key] },
+          }),
+        );
+      }),
     );
 
     const after = await readSystemSettings(tx, { storeId: input.storeId });

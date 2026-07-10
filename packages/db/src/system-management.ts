@@ -153,6 +153,12 @@ function normalizeUsername(username: string) {
       "请输入登录账号",
     );
   }
+  if (/\s/u.test(normalized)) {
+    throw new SystemManagementServiceError(
+      "USERNAME_WHITESPACE",
+      "当前账号存在空格，请重新填写",
+    );
+  }
   return normalized;
 }
 

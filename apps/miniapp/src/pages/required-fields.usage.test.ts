@@ -29,10 +29,11 @@ describe("miniapp required field markers", () => {
     }
   });
 
-  it("marks nickname as required in profile editing", () => {
+  it("keeps first-login nickname completion optional and not marked as required", () => {
     const source = readMiniappSource("src/pages/me/index.tsx");
 
     expect(source).toContain('type="nickname"');
-    expect(source).toContain('昵称<Text className="required-mark">*</Text>');
+    expect(source).toContain("头像和昵称可先跳过，后续仍可继续使用");
+    expect(source).not.toContain('昵称<Text className="required-mark">*</Text>');
   });
 });

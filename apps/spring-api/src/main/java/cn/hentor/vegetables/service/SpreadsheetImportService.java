@@ -47,6 +47,38 @@ public class SpreadsheetImportService {
     "停用原因",
     "禁用原因"
   );
+  private static final Set<String> ADDRESS_HEADERS = Set.of(
+    "address",
+    "fulladdress",
+    "deliveryaddress",
+    "地址",
+    "完整地址",
+    "配送地址",
+    "默认地址",
+    "详细地址"
+  );
+  private static final Set<String> CITY_HEADERS = Set.of("city", "城市", "市");
+  private static final Set<String> DETAIL_HEADERS = Set.of(
+    "detail",
+    "addressdetail",
+    "详细地址",
+    "门牌地址",
+    "街道门牌"
+  );
+  private static final Set<String> DISTRICT_HEADERS = Set.of("district", "area", "区县", "区", "县");
+  private static final Set<String> PROVINCE_HEADERS = Set.of("province", "省份", "省");
+  private static final Set<String> RECEIVER_NAME_HEADERS = Set.of(
+    "receivername",
+    "contactname",
+    "收货人",
+    "联系人"
+  );
+  private static final Set<String> RECEIVER_PHONE_HEADERS = Set.of(
+    "receiverphone",
+    "contactphone",
+    "收货电话",
+    "联系电话"
+  );
   private static final Set<String> TEMPLATE_HEADERS = Set.of(
     "template",
     "templatename",
@@ -197,23 +229,39 @@ public class SpreadsheetImportService {
     List<String> firstRow = rows.getFirst();
     boolean startsWithHeader = hasHeader(firstRow, PHONE_HEADERS) && hasHeader(firstRow, TEMPLATE_HEADERS);
     Map<String, Integer> indexes = startsWithHeader
-      ? resolveHeaderIndexes(firstRow, Map.of(
-        "phone", PHONE_HEADERS,
-        "remark", REMARK_HEADERS,
-        "status", STATUS_HEADERS,
-        "templateName", TEMPLATE_HEADERS,
-        "totalTimes", TOTAL_TIMES_HEADERS,
-        "usedTimes", USED_TIMES_HEADERS,
-        "weightLimitJin", WEIGHT_LIMIT_HEADERS
+      ? resolveHeaderIndexes(firstRow, Map.ofEntries(
+        Map.entry("address", ADDRESS_HEADERS),
+        Map.entry("city", CITY_HEADERS),
+        Map.entry("detail", DETAIL_HEADERS),
+        Map.entry("district", DISTRICT_HEADERS),
+        Map.entry("nickname", NICKNAME_HEADERS),
+        Map.entry("phone", PHONE_HEADERS),
+        Map.entry("province", PROVINCE_HEADERS),
+        Map.entry("receiverName", RECEIVER_NAME_HEADERS),
+        Map.entry("receiverPhone", RECEIVER_PHONE_HEADERS),
+        Map.entry("remark", REMARK_HEADERS),
+        Map.entry("status", STATUS_HEADERS),
+        Map.entry("templateName", TEMPLATE_HEADERS),
+        Map.entry("totalTimes", TOTAL_TIMES_HEADERS),
+        Map.entry("usedTimes", USED_TIMES_HEADERS),
+        Map.entry("weightLimitJin", WEIGHT_LIMIT_HEADERS)
       ))
-      : Map.of(
-        "phone", 0,
-        "remark", 6,
-        "status", 5,
-        "templateName", 1,
-        "totalTimes", 2,
-        "usedTimes", 3,
-        "weightLimitJin", 4
+      : Map.ofEntries(
+        Map.entry("address", 5),
+        Map.entry("city", 3),
+        Map.entry("detail", 5),
+        Map.entry("district", 4),
+        Map.entry("nickname", 1),
+        Map.entry("phone", 0),
+        Map.entry("province", 2),
+        Map.entry("receiverName", -1),
+        Map.entry("receiverPhone", -1),
+        Map.entry("remark", 10),
+        Map.entry("status", 9),
+        Map.entry("templateName", 6),
+        Map.entry("totalTimes", 7),
+        Map.entry("usedTimes", 8),
+        Map.entry("weightLimitJin", -1)
       );
     List<List<String>> dataRows = startsWithHeader ? rows.subList(1, rows.size()) : rows;
     int rowNumberOffset = startsWithHeader ? 2 : 1;
@@ -222,7 +270,15 @@ public class SpreadsheetImportService {
     for (int index = 0; index < dataRows.size(); index += 1) {
       List<String> cells = dataRows.get(index);
       UserPackageImportRow row = new UserPackageImportRow(
+        optionalCell(cellAt(cells, indexes.get("address"))),
+        optionalCell(cellAt(cells, indexes.get("city"))),
+        optionalCell(cellAt(cells, indexes.get("detail"))),
+        optionalCell(cellAt(cells, indexes.get("district"))),
+        optionalCell(cellAt(cells, indexes.get("nickname"))),
         cellAt(cells, indexes.get("phone")).trim(),
+        optionalCell(cellAt(cells, indexes.get("province"))),
+        optionalCell(cellAt(cells, indexes.get("receiverName"))),
+        optionalCell(cellAt(cells, indexes.get("receiverPhone"))),
         optionalCell(cellAt(cells, indexes.get("remark"))),
         index + rowNumberOffset,
         normalizePackageStatus(cellAt(cells, indexes.get("status"))),
@@ -231,7 +287,14 @@ public class SpreadsheetImportService {
         integerCell(cellAt(cells, indexes.get("usedTimes"))),
         decimalCell(cellAt(cells, indexes.get("weightLimitJin")))
       );
-      if (StringUtils.hasText(row.phone()) || StringUtils.hasText(row.templateName()) || StringUtils.hasText(row.remark())) {
+      if (
+        StringUtils.hasText(row.phone()) ||
+          StringUtils.hasText(row.templateName()) ||
+          StringUtils.hasText(row.nickname()) ||
+          StringUtils.hasText(row.address()) ||
+          StringUtils.hasText(row.province()) ||
+          StringUtils.hasText(row.remark())
+      ) {
         result.add(row);
       }
     }

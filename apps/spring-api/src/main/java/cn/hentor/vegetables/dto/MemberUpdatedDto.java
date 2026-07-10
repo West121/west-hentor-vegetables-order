@@ -5,5 +5,6 @@ public record MemberUpdatedDto(
   MemberAddressDto defaultAddress,
   String disabledReason,
   String id,
+  String nickname,
   String remark
 ) {}

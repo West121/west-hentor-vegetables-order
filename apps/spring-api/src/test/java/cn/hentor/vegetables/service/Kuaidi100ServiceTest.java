@@ -123,7 +123,9 @@ class Kuaidi100ServiceTest {
       "前台热敏打印机",
       Map.of("type", "10"),
       "printer-secret",
+      "南京市六合区打印机发货仓",
       "涵氧生态",
+      "18800002222",
       "printer-siid-02",
       "template-002"
     );
@@ -136,6 +138,9 @@ class Kuaidi100ServiceTest {
     assertEquals("printer-siid-02", param.get("siid"));
     assertEquals("template-002", param.get("tempId"));
     assertEquals("10", param.get("type"));
+    Map<?, ?> sendMan = (Map<?, ?>) param.get("sendMan");
+    assertEquals("南京市六合区打印机发货仓", sendMan.get("printAddr"));
+    assertEquals("18800002222", sendMan.get("mobile"));
   }
 
   private Kuaidi100Properties configuredProperties() {

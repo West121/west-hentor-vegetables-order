@@ -442,7 +442,8 @@ function getHomeThreeColumnCardContentFreeSpace(scss) {
 }
 
 export function assertMiniappProjectConfig(config) {
-  if (config.appid !== EXPECTED_APP_ID || config.miniprogramRoot !== "dist") {
+  const miniprogramRoot = String(config.miniprogramRoot ?? "").replace(/\/+$/, "");
+  if (config.appid !== EXPECTED_APP_ID || miniprogramRoot !== "dist") {
     throw new Error(
       `MINIAPP_PROJECT_ROOT_MISMATCH: expected ${EXPECTED_APP_ID} with miniprogramRoot=dist`,
     );
@@ -450,7 +451,7 @@ export function assertMiniappProjectConfig(config) {
 
   return {
     appid: config.appid,
-    miniprogramRoot: config.miniprogramRoot,
+    miniprogramRoot,
   };
 }
 
@@ -995,7 +996,11 @@ export function assertMiniappLoginPrototypeSource({ scss, tsx }) {
     "Hentor Fresh",
     "社区鲜蔬会员",
     "立即登录",
-    'openType="getPhoneNumber"',
+    'openType={agreementAccepted ? "getPhoneNumber" : undefined}',
+    "promptAgreementRequired",
+    "login__agreement-check",
+    "返回",
+    "returnToPreviousPage",
     'className="login__agreement"',
     "《用户协议》",
     "《隐私政策》",
@@ -1006,12 +1011,12 @@ export function assertMiniappLoginPrototypeSource({ scss, tsx }) {
     }
   }
 
-  const phoneLoginActionCount = (tsx.match(/openType="getPhoneNumber"/g) ?? [])
-    .length;
-  if (phoneLoginActionCount !== 1) {
-    throw new Error(
-      `MINIAPP_LOGIN_PROTOTYPE_MISMATCH: got ${phoneLoginActionCount} phone login actions`,
-    );
+  const phoneLoginActionCount = (tsx.match(/getPhoneNumber/g) ?? []).length;
+  if (phoneLoginActionCount < 1) {
+    throw new Error("MINIAPP_LOGIN_PROTOTYPE_MISMATCH: missing phone login action");
+  }
+  if (tsx.includes('openType="getPhoneNumber"')) {
+    throw new Error("MINIAPP_LOGIN_PROTOTYPE_MISMATCH: phone auth cannot be requested before agreement");
   }
 
   const forbiddenContent = [
@@ -1165,11 +1170,15 @@ export function assertMiniappMePrototypeSource({ scss, tsx }) {
   );
   const heroImageHeight = extractPxDeclaration(heroImageBlock, "height");
   const heroImageWidth = extractPxDeclaration(heroImageBlock, "width");
+  const hasAbsoluteHeroImagePlacement =
+    /right\s*:\s*20px/.test(heroImageBlock) && /top\s*:\s*84px/.test(heroImageBlock);
+  const hasFlexHeroImagePlacement = /flex\s*:\s*0\s+0\s+104px/.test(
+    heroImageBlock,
+  );
   if (
     heroImageHeight !== FIGMA_ME_HERO_IMAGE_HEIGHT_PX ||
     heroImageWidth !== FIGMA_ME_HERO_IMAGE_WIDTH_PX ||
-    extractPxDeclaration(heroImageBlock, "right") !== FIGMA_ME_HERO_INNER_PADDING_PX ||
-    extractPxDeclaration(heroImageBlock, "top") !== 84
+    (!hasAbsoluteHeroImagePlacement && !hasFlexHeroImagePlacement)
   ) {
     throw new Error("MINIAPP_ME_FIGMA_LAYOUT_MISMATCH: hero image");
   }
@@ -1397,7 +1406,6 @@ export function assertMiniappHomePrototypeSource({ scss, tsx }) {
     ".package-card--empty",
     ".package-card__empty-title",
     ".package-card__empty-meta",
-    ".package-card__empty-reserve",
     ".reservation-confirm",
     ".confirm-dish-list",
     ".confirm-dish-item",
@@ -1440,8 +1448,6 @@ export function assertMiniappHomePrototypeSource({ scss, tsx }) {
     "package-card--empty",
     'className="package-card__empty-title"',
     'className="package-card__empty-meta"',
-    'className="package-card__empty-reserve"',
-    "微信支付入口已预留",
     'className="confirm-dish-list"',
     'className="confirm-dish-item"',
     'className="summary"',
@@ -1452,12 +1458,12 @@ export function assertMiniappHomePrototypeSource({ scss, tsx }) {
     'className="address-switch-panel"',
     'className="address-option__tag"',
     "今天已有订单",
-    "仍然提交",
+    "再来一单",
+    "去修改",
     "提交订单",
     "确认修改",
     "confirmationView.title",
     "confirmationView.secondaryText",
-    "getDishDisplayImage",
     "getDishImage",
     'reservationAddress.id ? "切换" : "新增地址"',
   ];
@@ -1678,8 +1684,9 @@ export function assertMiniappOrdersPrototypeSource({ lib, scss, tsx }) {
     "editOrder",
     "/pages/order-edit/index?orderId=",
     "cancelOrder",
-    "Taro.showModal",
-    "取消后会返还本次套餐次数和菜品库存",
+    "MiniConfirmModal",
+    "showConfirmDialog",
+    "取消后会恢复本次套餐次数和附加权益",
     "copyLogisticsNo",
     "Taro.setClipboardData",
     "data: logisticsNo",

@@ -7,6 +7,8 @@ if [ -f .env ]; then
   set +a
 fi
 
+export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-dev}"
+
 if [ -n "${MINIO_ENDPOINT:-}" ] && [ -z "${SPRING_MINIO_ENDPOINT:-}" ]; then
   minio_scheme="http"
   case "${MINIO_USE_SSL:-false}" in

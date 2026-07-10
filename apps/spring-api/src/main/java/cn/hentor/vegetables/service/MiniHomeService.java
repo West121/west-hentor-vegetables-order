@@ -1,5 +1,6 @@
 package cn.hentor.vegetables.service;
 
+import cn.hentor.vegetables.common.ApiException;
 import cn.hentor.vegetables.dto.MiniAddressDto;
 import cn.hentor.vegetables.dto.MiniCurrentOrderBenefitDto;
 import cn.hentor.vegetables.dto.MiniCurrentOrderDto;
@@ -43,10 +44,12 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -97,11 +100,35 @@ public class MiniHomeService {
 
   public MiniHomeData getHome(MiniSessionContext session, String storeCode, String orderId) {
     StoreEntity store = miniAuthService.findAvailableStore(storeCode);
+    TaskEntity activeTask = loadActiveTask(store.getId());
+    List<MiniHomeDishDto> dishes = loadDishes(store.getId(), activeTask);
+    if (session == null) {
+      if (StringUtils.hasText(orderId)) {
+        throw new ApiException("UNAUTHORIZED", "请先登录后修改订单", HttpStatus.UNAUTHORIZED);
+      }
+      return new MiniHomeData(
+        toHomeStoreDto(store, activeTask),
+        activeTask == null
+          ? null
+          : new MiniTaskDto(
+            activeTask.getCutoffTime(),
+            activeTask.getEndsAt(),
+            activeTask.getId(),
+            activeTask.getName(),
+            activeTask.getStartsAt(),
+            activeTask.getTag()
+          ),
+        null,
+        null,
+        null,
+        dishes,
+        null
+      );
+    }
+
     UserEntity user = userMapper.selectById(session.userId());
     MemberStoreBindingEntity binding = loadBinding(session.userId(), store.getId());
     MiniPackageDto packageInfo = loadCurrentPackage(session.userId(), store.getId());
-    TaskEntity activeTask = loadActiveTask(store.getId());
-    List<MiniHomeDishDto> dishes = loadDishes(store.getId(), activeTask);
     MiniCurrentOrderDto currentOrder = loadCurrentOrder(
       session.userId(),
       store.getId(),
@@ -260,6 +287,10 @@ public class MiniHomeService {
     Map<String, Integer> sortOrderByDishId = taskDishes
       .stream()
       .collect(Collectors.toMap(TaskDishEntity::getDishId, TaskDishEntity::getSortOrder, Math::min));
+    Map<String, TaskDishEntity> taskDishByDishId = taskDishes
+      .stream()
+      .collect(Collectors.toMap(TaskDishEntity::getDishId, Function.identity(), (first, ignored) -> first));
+    Map<String, BigDecimal> usedWeightByDishId = loadTaskUsedWeights(storeId, activeTask, dishIds);
     Map<String, DishEntity> dishById = dishMapper.selectList(
         new LambdaQueryWrapper<DishEntity>()
           .in(DishEntity::getId, dishIds)
@@ -275,20 +306,58 @@ public class MiniHomeService {
       .map(dishById::get)
       .filter(java.util.Objects::nonNull)
       .sorted(Comparator.comparing(dish -> sortOrderByDishId.getOrDefault(dish.getId(), 0)))
-      .map(this::toDishDto)
+      .map(dish -> toDishDto(dish, taskDishByDishId.get(dish.getId()), usedWeightByDishId.get(dish.getId())))
       .toList();
   }
 
-  private MiniHomeDishDto toDishDto(DishEntity dish) {
+  private MiniHomeDishDto toDishDto(DishEntity dish, TaskDishEntity taskDish, BigDecimal usedWeightJin) {
+    BigDecimal totalWeightJin = zeroIfNull(taskDish == null ? null : taskDish.getTotalWeightJin());
+    if (totalWeightJin.compareTo(BigDecimal.ZERO) <= 0) {
+      totalWeightJin = zeroIfNull(dish.getStockJin());
+    }
+    BigDecimal used = zeroIfNull(usedWeightJin);
+    BigDecimal remaining = totalWeightJin.subtract(used).max(BigDecimal.ZERO);
     return new MiniHomeDishDto(
       dish.getId(),
       dish.getName(),
       dish.getCategory(),
       zeroIfNull(dish.getStepJin()),
-      zeroIfNull(dish.getStockJin()),
+      remaining,
+      totalWeightJin,
+      used,
+      remaining,
       dish.getImageUrl(),
       dish.getDescription()
     );
+  }
+
+  private Map<String, BigDecimal> loadTaskUsedWeights(
+    String storeId,
+    TaskEntity activeTask,
+    List<String> dishIds
+  ) {
+    if (dishIds.isEmpty()) {
+      return Map.of();
+    }
+    List<OrderEntity> orders = orderMapper.selectList(
+      new LambdaQueryWrapper<OrderEntity>()
+        .eq(OrderEntity::getStoreId, storeId)
+        .ge(OrderEntity::getCreatedAt, activeTask.getStartsAt())
+        .lt(OrderEntity::getCreatedAt, activeTask.getEndsAt())
+        .notIn(OrderEntity::getStatus, List.of("CANCELED", "VOIDED"))
+    );
+    if (orders.isEmpty()) {
+      return Map.of();
+    }
+    List<String> orderIds = orders.stream().map(OrderEntity::getId).toList();
+    Map<String, BigDecimal> result = new HashMap<>();
+    orderItemMapper.selectList(
+        new LambdaQueryWrapper<OrderItemEntity>()
+          .in(OrderItemEntity::getOrderId, orderIds)
+          .in(OrderItemEntity::getDishId, dishIds)
+      )
+      .forEach(item -> result.merge(item.getDishId(), zeroIfNull(item.getWeightJin()), BigDecimal::add));
+    return result;
   }
 
   private MiniAddressDto loadDefaultAddress(String userId, String storeId) {

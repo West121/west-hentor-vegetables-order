@@ -8,5 +8,7 @@ public record AdminOrderShipmentDto(
   String packageName,
   String packageType,
   LocalDateTime shippedAt,
-  String status
+  String status,
+  String kuaidicom,
+  OrderShipmentTrackDto track
 ) {}

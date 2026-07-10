@@ -339,11 +339,12 @@ model Task {
 }
 
 model TaskDish {
-  taskId    String
-  dishId    String
-  sortOrder Int    @default(0)
-  task      Task   @relation(fields: [taskId], references: [id])
-  dish      Dish   @relation(fields: [dishId], references: [id])
+  taskId         String
+  dishId         String
+  sortOrder      Int     @default(0)
+  totalWeightJin Decimal @default(0) @db.Decimal(10, 2)
+  task           Task    @relation(fields: [taskId], references: [id])
+  dish           Dish    @relation(fields: [dishId], references: [id])
 
   @@id([taskId, dishId])
 }
@@ -497,8 +498,22 @@ model AdminUser {
   orderChangeLogs OrderChangeLog[]
   packageLogs    PackageOperationLog[]
   operationLogs  AdminOperationLog[]
+  wechatBinding  AdminWechatBinding?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
+}
+
+model AdminWechatBinding {
+  id          String    @id @default(cuid())
+  adminUserId String    @unique
+  openid      String    @unique
+  unionid     String?
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id])
+
+  @@index([unionid])
 }
 
 model AdminRole {

@@ -57,6 +57,12 @@ public class Kuaidi100PrinterEntity {
   @TableField("\"senderCompany\"")
   private String senderCompany;
 
+  @TableField("\"senderMobile\"")
+  private String senderMobile;
+
+  @TableField("\"senderAddress\"")
+  private String senderAddress;
+
   @TableField("\"requestParams\"")
   private String requestParams;
 

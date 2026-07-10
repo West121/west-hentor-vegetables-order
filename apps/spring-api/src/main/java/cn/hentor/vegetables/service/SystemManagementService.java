@@ -64,6 +64,7 @@ public class SystemManagementService {
   private static final Pattern ROLE_CODE_PATTERN = Pattern.compile("^[a-z][a-z0-9_.-]*$");
   private static final Set<String> ADMIN_STATUSES = Set.of("ACTIVE", "DISABLED");
 
+  private final AdminAuthService adminAuthService;
   private final AdminOperationLogMapper adminOperationLogMapper;
   private final AdminPermissionMapper adminPermissionMapper;
   private final AdminRoleMapper adminRoleMapper;
@@ -76,6 +77,7 @@ public class SystemManagementService {
   private final StoreMapper storeMapper;
 
   public SystemManagementService(
+    AdminAuthService adminAuthService,
     AdminOperationLogMapper adminOperationLogMapper,
     AdminPermissionMapper adminPermissionMapper,
     AdminRoleMapper adminRoleMapper,
@@ -86,6 +88,7 @@ public class SystemManagementService {
     ObjectMapper objectMapper,
     StoreMapper storeMapper
   ) {
+    this.adminAuthService = adminAuthService;
     this.adminOperationLogMapper = adminOperationLogMapper;
     this.adminPermissionMapper = adminPermissionMapper;
     this.adminRoleMapper = adminRoleMapper;
@@ -128,7 +131,7 @@ public class SystemManagementService {
     );
     long total = nullToZero(adminUserMapper.countAdminUsers(keyword, normalizedStatus, storeIds));
     AdminUserSummaryDto summary = buildUserSummary(
-      adminUserMapper.countAdminUsersByStatus(keyword, normalizedStatus, storeIds)
+      adminUserMapper.countAdminUsersByStatus(null, null, storeIds)
     );
     return new AdminUserListResponse(
       buildUserItems(users),
@@ -244,6 +247,7 @@ public class SystemManagementService {
     update.setPasswordHash(passwordEncoder.encode(newPassword));
     update.setUpdatedAt(LocalDateTime.now());
     adminUserMapper.updateAdminUserPassword(update);
+    adminAuthService.invalidateAdminSessions(adminUserId, session.token());
 
     writeOperationLog(
       operator.getId(),
@@ -255,6 +259,41 @@ public class SystemManagementService {
       Map.of("passwordResetAt", LocalDateTime.now().toString())
     );
     return getAdminUserById(adminUserId);
+  }
+
+  @Transactional
+  public AdminUserListResponse deleteAdminUser(AdminSessionDto session, String adminUserId) {
+    AdminUserEntity existing = requireAdminUser(adminUserId);
+    ensureTargetUserAccessible(session, adminUserId);
+    AdminUserEntity operator = requireActiveOperator(session.adminUserId());
+    ensureOperatorSuperAdmin(session);
+    if (operator.getId().equals(adminUserId)) {
+      throw new ApiException("ADMIN_USER_DELETE_SELF", "不能删除当前登录账号", HttpStatus.BAD_REQUEST);
+    }
+    AdminUserSnapshot before = snapshotAdminUser(existing);
+    if (isSuperAdminRoleIds(before.value().get("roleIds"))) {
+      throw new ApiException("ADMIN_USER_PROTECTED", "超级管理员账号不能删除", HttpStatus.BAD_REQUEST);
+    }
+
+    adminUserRoleMapper.delete(
+      new LambdaQueryWrapper<AdminUserRoleEntity>().eq(AdminUserRoleEntity::getAdminUserId, adminUserId)
+    );
+    adminUserStoreMapper.delete(
+      new LambdaQueryWrapper<AdminUserStoreEntity>().eq(AdminUserStoreEntity::getAdminUserId, adminUserId)
+    );
+    adminUserMapper.deleteById(adminUserId);
+    adminAuthService.invalidateAdminSessions(adminUserId, null);
+
+    writeOperationLog(
+      operator.getId(),
+      firstOrNull(before.storeIds()),
+      "admin_user",
+      adminUserId,
+      "ADMIN_USER_DELETED",
+      before.value(),
+      Map.of("deleted", true)
+    );
+    return listAdminUsers(session, null, null, null, 1, 10);
   }
 
   public AdminRoleListResponse listAdminRoles(String query, long page, long pageSize) {
@@ -274,10 +313,11 @@ public class SystemManagementService {
       wrapper
     );
     long total = result.getTotal();
+    long summaryTotal = nullToZero(adminRoleMapper.selectCount(new LambdaQueryWrapper<>()));
     return new AdminRoleListResponse(
       buildRoleItems(result.getRecords()),
       new PaginationDto(normalizedPage, normalizedPageSize, total, totalPages(total, normalizedPageSize)),
-      new AdminRoleSummaryDto(total)
+      new AdminRoleSummaryDto(summaryTotal)
     );
   }
 
@@ -581,6 +621,28 @@ public class SystemManagementService {
     }
   }
 
+  private void ensureOperatorSuperAdmin(AdminSessionDto session) {
+    if (session.roles().stream().noneMatch(role -> "super_admin".equals(role.code()))) {
+      throw new ApiException("FORBIDDEN", "只有超级管理员可以删除后台用户", HttpStatus.FORBIDDEN);
+    }
+  }
+
+  private boolean isSuperAdminRoleIds(Object roleIdsValue) {
+    if (!(roleIdsValue instanceof List<?> roleIds) || roleIds.isEmpty()) {
+      return false;
+    }
+    List<String> roleIdStrings = roleIds.stream()
+      .filter(String.class::isInstance)
+      .map(String.class::cast)
+      .toList();
+    if (roleIdStrings.isEmpty()) {
+      return false;
+    }
+    return adminRoleMapper.selectBatchIds(roleIdStrings)
+      .stream()
+      .anyMatch(role -> "super_admin".equals(role.getCode()));
+  }
+
   private List<String> resolveListStoreIds(AdminSessionDto session, String storeId) {
     if (StringUtils.hasText(storeId)) {
       String normalizedStoreId = storeId.trim();
@@ -738,7 +800,7 @@ public class SystemManagementService {
     List<String> storeIds,
     String password
   ) {
-    String normalizedUsername = normalizeUsername(username);
+    String normalizedUsername = AdminUsernamePolicy.normalizeForCreate(username);
     String normalizedName = trimToNull(name);
     if (!StringUtils.hasText(normalizedName)) {
       throw new ApiException("NAME_REQUIRED", "请输入用户姓名", HttpStatus.BAD_REQUEST);
@@ -791,14 +853,6 @@ public class SystemManagementService {
       throw new ApiException(code, message, HttpStatus.BAD_REQUEST);
     }
     return distinct;
-  }
-
-  private String normalizeUsername(String username) {
-    String normalized = trimToNull(username);
-    if (!StringUtils.hasText(normalized)) {
-      throw new ApiException("USERNAME_REQUIRED", "请输入登录账号", HttpStatus.BAD_REQUEST);
-    }
-    return normalized;
   }
 
   private String normalizePassword(String password) {

@@ -2,8 +2,10 @@
 
 import { Copy, Download, RefreshCw, Truck } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 
 import { AdminDatePicker } from "./admin-date-time-picker";
+import { AdminSelect } from "./admin-select";
 
 type StoreOption = {
   id: string;
@@ -53,7 +55,6 @@ type ShipmentStatsPanelProps = {
 };
 
 type ShipmentStatsFilters = {
-  addressKeyword: string;
   dateFrom: string;
   dateTo: string;
   dishCategory: "" | DishCategory;
@@ -68,6 +69,8 @@ const STATUS_OPTIONS: Array<{ label: string; value: "" | OrderStatus }> = [
   { label: "已取消", value: "CANCELED" },
   { label: "已作废", value: "VOIDED" },
 ];
+
+const DEFAULT_SHIPMENT_STATUS: OrderStatus = "PENDING_SHIPMENT";
 
 const DEFAULT_CATEGORY_OPTIONS: DishCategoryOption[] = [
   { code: "LEAFY", enabled: true, name: "叶菜", sortOrder: 1 },
@@ -106,9 +109,8 @@ export function ShipmentStatsPanel({
   store,
 }: ShipmentStatsPanelProps) {
   const [stats, setStats] = useState<ShipmentStats | null>(null);
-  const [status, setStatus] = useState<"" | OrderStatus>("SHIPPED");
+  const [status, setStatus] = useState<"" | OrderStatus>(DEFAULT_SHIPMENT_STATUS);
   const [dishCategory, setDishCategory] = useState<"" | DishCategory>("");
-  const [addressKeyword, setAddressKeyword] = useState("");
   const [dateFrom, setDateFrom] = useState(todayInputValue());
   const [dateTo, setDateTo] = useState(todayInputValue());
   const [loading, setLoading] = useState(false);
@@ -126,8 +128,6 @@ export function ShipmentStatsPanel({
 
     const effectiveStatus = nextFilters?.status ?? status;
     const effectiveDishCategory = nextFilters?.dishCategory ?? dishCategory;
-    const effectiveAddressKeyword =
-      nextFilters?.addressKeyword ?? addressKeyword;
     const effectiveDateFrom = nextFilters?.dateFrom ?? dateFrom;
     const effectiveDateTo = nextFilters?.dateTo ?? dateTo;
     const params = new URLSearchParams({ storeId: store.id });
@@ -136,9 +136,6 @@ export function ShipmentStatsPanel({
     }
     if (effectiveDishCategory) {
       params.set("dishCategory", effectiveDishCategory);
-    }
-    if (effectiveAddressKeyword.trim()) {
-      params.set("addressKeyword", effectiveAddressKeyword.trim());
     }
     if (effectiveDateFrom) {
       params.set("dateFrom", buildDateStart(effectiveDateFrom));
@@ -181,17 +178,15 @@ export function ShipmentStatsPanel({
 
   function resetFilters() {
     const today = todayInputValue();
-    setStatus("SHIPPED");
+    setStatus(DEFAULT_SHIPMENT_STATUS);
     setDishCategory("");
-    setAddressKeyword("");
     setDateFrom(today);
     setDateTo(today);
     void loadStats({
-      addressKeyword: "",
       dateFrom: today,
       dateTo: today,
       dishCategory: "",
-      status: "SHIPPED",
+      status: DEFAULT_SHIPMENT_STATUS,
     });
   }
 
@@ -212,34 +207,37 @@ export function ShipmentStatsPanel({
             按菜品汇总
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#66756d]">
-            支持日期、状态、菜品分类和地址筛选，可复制或导出 CSV。
+            支持日期、状态和菜品分类筛选，可复制或导出 CSV。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            className="flex h-10 items-center gap-2 rounded-xl border border-[#cfe3d3] bg-[#eff8f1] px-4 text-sm font-semibold text-[#1f8f4f] disabled:opacity-50"
+          <Button
+            className="border-[#cfe3d3] text-[#1f8f4f] disabled:opacity-50"
             disabled={!stats}
             onClick={copyStats}
+            size="lg"
             type="button"
+            variant="outline"
           >
-            <Copy size={16} />
+            <Copy data-icon="inline-start" />
             复制
-          </button>
-          <button
-            className="flex h-10 items-center gap-2 rounded-xl bg-[#1f8f4f] px-4 text-sm font-semibold text-white disabled:opacity-50"
+          </Button>
+          <Button
+            className="disabled:opacity-50"
             disabled={!stats}
             onClick={() =>
               stats ? downloadCsv(`shipment-stats-${dateFrom || "all"}.csv`, stats.csvText) : null
             }
+            size="lg"
             type="button"
           >
-            <Download size={16} />
+            <Download data-icon="inline-start" />
             导出
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="mb-4 grid gap-3 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-3 md:grid-cols-2 xl:grid-cols-7">
+      <div className="mb-4 grid gap-3 rounded-xl border border-[#dbe6dc] bg-[#f8fbf7] p-3 md:grid-cols-2 xl:grid-cols-6">
         <AdminDatePicker
           buttonClassName="h-11 w-full bg-white"
           onChange={setDateFrom}
@@ -252,36 +250,28 @@ export function ShipmentStatsPanel({
           placeholder="结束日期"
           value={dateTo}
         />
-        <select
-          className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm outline-none focus:border-[#1f8f4f]"
-          onChange={(event) => setStatus(event.target.value as "" | OrderStatus)}
+        <AdminSelect
+          contentLabel="订单状态"
+          onChange={(value) => setStatus(value as "" | OrderStatus)}
+          options={STATUS_OPTIONS.map((option) => ({
+            label: option.label,
+            value: option.value,
+          }))}
+          triggerClassName="h-11 w-full border-[#dbe6dc] bg-white"
           value={status}
-        >
-          {STATUS_OPTIONS.map((option) => (
-            <option key={option.value || "ALL"} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <select
-          className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm outline-none focus:border-[#1f8f4f]"
-          onChange={(event) =>
-            setDishCategory(event.target.value as "" | DishCategory)
-          }
+        />
+        <AdminSelect
+          contentLabel="菜品分类"
+          onChange={(value) => setDishCategory(value as "" | DishCategory)}
+          options={[
+            { label: "全部菜品", value: "" },
+            ...resolvedCategoryOptions.map((option) => ({
+              label: option.name,
+              value: option.code,
+            })),
+          ]}
+          triggerClassName="h-11 w-full border-[#dbe6dc] bg-white"
           value={dishCategory}
-        >
-          <option value="">全部菜品</option>
-          {resolvedCategoryOptions.map((option) => (
-            <option key={option.code} value={option.code}>
-              {option.name}
-            </option>
-          ))}
-        </select>
-        <input
-          className="h-11 rounded-xl border border-[#dbe6dc] bg-white px-3 text-sm outline-none focus:border-[#1f8f4f]"
-          onChange={(event) => setAddressKeyword(event.target.value)}
-          placeholder="地址关键词"
-          value={addressKeyword}
         />
         <button
           className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#12351f] px-4 text-sm font-semibold text-white disabled:opacity-60"

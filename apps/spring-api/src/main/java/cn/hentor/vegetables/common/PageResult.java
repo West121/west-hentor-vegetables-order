@@ -7,5 +7,16 @@ public record PageResult<T>(
   long page,
   long pageSize,
   long total,
-  long totalPages
-) {}
+  long totalPages,
+  Object summary
+) {
+  public PageResult(
+    List<T> items,
+    long page,
+    long pageSize,
+    long total,
+    long totalPages
+  ) {
+    this(items, page, pageSize, total, totalPages, null);
+  }
+}

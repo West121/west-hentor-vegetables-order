@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import java.util.List;
 
 public record SystemSettingsRequest(
+  @NotNull String adminSystemName,
   @NotNull String aboutText,
   @NotNull String customerServiceTel,
   List<String> deliveryCities,
@@ -14,7 +15,9 @@ public record SystemSettingsRequest(
   @NotNull String loginSubtitle,
   @NotNull String loginTitle,
   @NotNull String loginWelcome,
+  @NotNull String privacyPolicyContent,
   @NotNull String privacyPolicyUrl,
   @NotBlank String storeId,
+  @NotNull String userAgreementContent,
   @NotNull String userAgreementUrl
 ) {}
