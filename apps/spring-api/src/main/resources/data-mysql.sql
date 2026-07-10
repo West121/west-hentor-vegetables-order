@@ -6,7 +6,7 @@ INSERT IGNORE INTO `Store` (
   `province`, `city`, `district`, `address`, `deliveryProvinces`, `deliveryCities`,
   `customerServiceTel`, `cutoffTime`, `franchiseEndsAt`, `createdAt`, `updatedAt`
 ) VALUES (
-  'seed-store-lotus', 'seed-franchisee-hentor', 'lotus-garden', '涵养总店', 'DIRECT', 'ACTIVE',
+  'seed-store-lotus', 'seed-franchisee-hentor', 'lotus-garden', '涵氧', 'DIRECT', 'ACTIVE',
   '张建国', '13800005678', '江苏省', '南京市', '六合区', '龙池街道冠城大通',
   JSON_ARRAY('江苏省'), JSON_ARRAY('南京市'), '400-800-1000', '18:00', '2027-12-31 23:59:59',
   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP

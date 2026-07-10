@@ -18,14 +18,14 @@ async function main() {
   const store = await prisma.store.upsert({
     where: { code: "lotus-garden" },
     update: {
-      name: "涵养总店",
+      name: "涵氧",
       status: "ACTIVE",
     },
     create: {
       id: "seed-store-lotus",
       franchiseeId: franchisee.id,
       code: "lotus-garden",
-      name: "涵养总店",
+      name: "涵氧",
       type: "FRANCHISE",
       contactName: "张店长",
       contactPhone: "13900000001",

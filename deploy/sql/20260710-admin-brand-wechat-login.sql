@@ -2,7 +2,7 @@
 -- Safe to run repeatedly on an existing MySQL database.
 
 UPDATE `Store`
-SET `name` = '涵养总店',
+SET `name` = '涵氧',
     `updatedAt` = CURRENT_TIMESTAMP
 WHERE `id` = 'seed-store-lotus';
 
