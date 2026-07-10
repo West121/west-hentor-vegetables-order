@@ -18,11 +18,10 @@ describe("dashboard permission wiring", () => {
     expect(source).toContain('canWrite={hasPermission("tasks.write")}');
   });
 
-  it("shows a clear business data scope notice when no active store is available", () => {
-    expect(source).toContain("STORE_SCOPED_SECTIONS");
-    expect(source).toContain("showStoreScopeNotice");
-    expect(source).toContain("当前账号未分配数据范围");
-    expect(source).toContain("新增、编辑、电子面单等操作已禁用");
+  it("uses the reserved primary store internally when no store is assigned", () => {
+    expect(source).toContain("DEFAULT_DATA_STORE");
+    expect(source).toMatch(/session\.stores\[0\]\s*\?\?\s*DEFAULT_DATA_STORE/);
+    expect(source).not.toContain("当前账号未分配数据范围");
   });
 
   it("refreshes and remounts section lists after menu switching", () => {

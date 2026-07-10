@@ -172,7 +172,8 @@ public class AdminAuthService {
   private AdminSessionDto buildSession(String token, AdminUserEntity admin) {
     List<AdminRoleEntity> roles = loadRoles(admin.getId());
     List<String> roleIds = roles.stream().map(AdminRoleEntity::getId).toList();
-    boolean hasAllStoreScope = roles.stream().anyMatch(role -> "super_admin".equals(role.getCode()));
+    // 门店仅为后续扩展预留；当前阶段所有已授权后台用户使用同一业务数据域。
+    boolean hasGlobalDataScope = true;
 
     return new AdminSessionDto(
       token,
@@ -182,8 +183,8 @@ public class AdminAuthService {
       admin.getPhone(),
       roles.stream().map(role -> new AdminRoleDto(role.getId(), role.getCode(), role.getName())).toList(),
       loadPermissionCodes(roleIds),
-      loadStores(admin.getId(), hasAllStoreScope),
-      hasAllStoreScope ? "ALL" : "ASSIGNED",
+      loadStores(admin.getId(), hasGlobalDataScope),
+      hasGlobalDataScope ? "ALL" : "ASSIGNED",
       LocalDateTime.now().plus(SESSION_TTL)
     );
   }

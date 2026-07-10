@@ -27,4 +27,12 @@ class OrderListItemsSourceTest {
     assertThat(service).contains("record.setBenefitItems");
     assertThat(service).contains("record.setShipments");
   }
+
+  @Test
+  void adminSessionsUseTheSingleGlobalDataScopeBeforeStoresAreEnabled() throws Exception {
+    String auth = read("src/main/java/cn/hentor/vegetables/service/AdminAuthService.java");
+
+    assertThat(auth).contains("hasGlobalDataScope = true");
+    assertThat(auth).contains("hasGlobalDataScope ? \"ALL\" : \"ASSIGNED\"");
+  }
 }

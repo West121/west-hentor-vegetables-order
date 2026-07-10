@@ -61,19 +61,7 @@ import { TaskManagementPanel, type TaskDishOption, type TaskPanelItem } from "./
 const ADMIN_LIST_PAGE_SIZE = 10;
 const ADMIN_LOG_PAGE_SIZE = 10;
 const ADMIN_OPTION_LIMIT = 200;
-const STORE_SCOPED_SECTIONS = new Set<AdminSectionId>([
-  "orders",
-  "shipment-stats",
-  "members",
-  "user-packages",
-  "package-templates",
-  "dishes",
-  "tasks",
-  "dictionaries",
-  "kuaidi-printers",
-  "delivery-ranges",
-  "system-settings",
-]);
+const DEFAULT_DATA_STORE = { id: "seed-store-lotus", name: "涵氧" };
 
 type StoreOption = {
   id: string;
@@ -349,7 +337,7 @@ async function loadDashboardData(
   const activeStore =
     session.stores.find((store) => store.id === selectedStoreId) ??
     session.stores[0] ??
-    null;
+    DEFAULT_DATA_STORE;
   const storeId = activeStore?.id ?? "";
   const storeParam = storeId ? `storeId=${encodeURIComponent(storeId)}` : "";
   const withStore = (path: string, take = ADMIN_LIST_PAGE_SIZE) => {
@@ -694,10 +682,8 @@ export default function DashboardPage() {
   }
 
   const activeStore = data.activeStore;
-  const showStoreScopeNotice =
-    STORE_SCOPED_SECTIONS.has(activeSection) && !activeStore;
   const userDisplay = data.userDisplay;
-  const scopeLabel = data.storeAccessScope === "ALL" ? "全部数据" : "授权数据";
+  const scopeLabel = "全部数据";
   const orderTotal = metricValue(data.storeOrderSummary.total ?? data.orders);
   const pendingOrders = metricValue(data.storeOrderSummary.pendingShipment);
   const shippedOrders = metricValue(data.storeOrderSummary.shipped);
@@ -888,12 +874,6 @@ export default function DashboardPage() {
       topBarActions={renderTopBarActions()}
     >
       <main className="admin-shell-main space-y-6 p-7">
-        {showStoreScopeNotice ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900 shadow-sm">
-            当前账号未分配数据范围，业务列表会显示为空，新增、编辑、电子面单等操作已禁用。请使用超级管理员在后台用户中分配数据范围后再操作。
-          </div>
-        ) : null}
-
         <div key={`${activeSection}-${dataRevision}-${initialListQuery}`} className="contents">
           {activeSection === "overview" ? (
             <div className="space-y-4">
