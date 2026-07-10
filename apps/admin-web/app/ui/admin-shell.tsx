@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import {
   useEffect,
   useMemo,
@@ -10,6 +11,7 @@ import {
   type ComponentType,
   type FocusEvent,
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import {
@@ -43,6 +45,7 @@ import {
 } from "@/app/lib/admin-navigation";
 import { cn } from "@/app/lib/cn";
 
+import { AdminCollapsedFlyout } from "./admin-collapsed-flyout";
 import {
   ADMIN_SHELL_PREFERENCES_CHANGED_EVENT,
   readAdminShellPreferences,
@@ -59,6 +62,14 @@ import {
 
 const HORIZONTAL_VISIBLE_GROUP_LIMIT = 5;
 const HORIZONTAL_MORE_BUTTON_WIDTH = 96;
+const COLLAPSED_FLYOUT_GAP = 12;
+const COLLAPSED_FLYOUT_CLOSE_DELAY = 120;
+
+type CollapsedFlyoutState = {
+  anchorLeft: number;
+  anchorTop: number;
+  label: string;
+};
 
 function estimateHorizontalGroupWidth(group: AdminNavGroup) {
   const textWidth = Math.max(group.label.length, 2) * 16;
@@ -147,15 +158,18 @@ export function AdminShell({
   const [horizontalOpenGroup, setHorizontalOpenGroup] = useState<string | null>(
     null,
   );
-  const [collapsedOpenGroup, setCollapsedOpenGroup] = useState<string | null>(
-    null,
-  );
+  const [collapsedFlyout, setCollapsedFlyout] =
+    useState<CollapsedFlyoutState | null>(null);
   const [horizontalVisibleLimit, setHorizontalVisibleLimit] = useState(
     HORIZONTAL_VISIBLE_GROUP_LIMIT,
   );
   const horizontalNavListRef = useRef<HTMLDivElement | null>(null);
+  const collapsedCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const CollapseIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
+  const collapsedOpenGroup = collapsedFlyout?.label ?? null;
 
   useEffect(() => {
     const preferences = readAdminShellPreferences(window.localStorage, {
@@ -207,6 +221,21 @@ export function AdminShell({
     });
   }, [collapsed, density, layoutMode, openGroups, preferencesLoaded, width]);
 
+  useEffect(() => {
+    if (!collapsed || layoutMode !== "vertical") {
+      setCollapsedFlyout(null);
+    }
+  }, [collapsed, layoutMode]);
+
+  useEffect(
+    () => () => {
+      if (collapsedCloseTimerRef.current) {
+        clearTimeout(collapsedCloseTimerRef.current);
+      }
+    },
+    [],
+  );
+
   function sectionHref(section: string) {
     return adminSectionHref(searchParams, section);
   }
@@ -228,21 +257,39 @@ export function AdminShell({
     );
   }
 
-  function handleCollapsedGroupBlur(
-    event: FocusEvent<HTMLDivElement>,
-    groupLabel: string,
-  ) {
-    const nextFocusTarget = event.relatedTarget;
-    if (
-      nextFocusTarget &&
-      event.currentTarget.contains(nextFocusTarget as Node)
-    ) {
+  function cancelCollapsedGroupClose() {
+    if (!collapsedCloseTimerRef.current) {
       return;
     }
 
-    setCollapsedOpenGroup((value) =>
-      value === groupLabel ? null : value,
-    );
+    clearTimeout(collapsedCloseTimerRef.current);
+    collapsedCloseTimerRef.current = null;
+  }
+
+  function closeCollapsedGroup() {
+    cancelCollapsedGroupClose();
+    setCollapsedFlyout(null);
+  }
+
+  function scheduleCollapsedGroupClose() {
+    cancelCollapsedGroupClose();
+    collapsedCloseTimerRef.current = setTimeout(() => {
+      setCollapsedFlyout(null);
+      collapsedCloseTimerRef.current = null;
+    }, COLLAPSED_FLYOUT_CLOSE_DELAY);
+  }
+
+  function openCollapsedGroup(
+    event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>,
+    groupLabel: string,
+  ) {
+    cancelCollapsedGroupClose();
+    const trigger = event.currentTarget.getBoundingClientRect();
+    setCollapsedFlyout({
+      anchorLeft: trigger.right + COLLAPSED_FLYOUT_GAP,
+      anchorTop: trigger.top,
+      label: groupLabel,
+    });
   }
 
   function handleHorizontalTriggerKeyDown(
@@ -263,6 +310,9 @@ export function AdminShell({
   const sidebarVisible = layoutMode === "vertical" || layoutMode === "double";
   const activeGroup =
     groups.find((group) => group.items.some((item) => item.active)) ?? groups[0];
+  const activeCollapsedGroup = groups.find(
+    (group) => group.label === collapsedOpenGroup,
+  );
   const horizontalEligibleGroups = useMemo(
     () =>
       groups.filter((group) =>
@@ -337,39 +387,68 @@ export function AdminShell({
       <button
         aria-label={collapsed ? "展开侧边栏" : "折叠侧边栏"}
         className="absolute right-0 top-6 z-30 grid h-10 w-10 translate-x-1/2 place-items-center rounded-2xl border border-[#cfe3d3] bg-white text-[#1f8f4f] shadow-lg shadow-[#0f2418]/18 transition hover:border-[#9fc8ab] hover:bg-[#f4fbf5]"
-        onClick={() => setCollapsed((value) => !value)}
+        onClick={() => {
+          closeCollapsedGroup();
+          setCollapsed((value) => !value);
+        }}
         title={collapsed ? "展开侧边栏" : "折叠侧边栏"}
         type="button"
       >
-        <CollapseIcon size={20} />
+        <AnimatePresence initial={false} mode="wait">
+          <motion.span
+            animate={{ opacity: 1, rotate: 0, scale: 1 }}
+            className="grid place-items-center"
+            exit={{ opacity: 0, rotate: collapsed ? -18 : 18, scale: 0.82 }}
+            initial={{ opacity: 0, rotate: collapsed ? 18 : -18, scale: 0.82 }}
+            key={collapsed ? "expand" : "collapse"}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+          >
+            <CollapseIcon size={20} />
+          </motion.span>
+        </AnimatePresence>
       </button>
     );
   }
 
   return (
-    <div
-      className={cn(
-        "min-h-screen bg-[#f5f8f3]",
-        density === "compact" && "admin-density-compact",
-      )}
-      data-admin-layout-density={density}
-      data-admin-layout-mode={layoutMode}
-      data-admin-layout-width={width}
-    >
+    <MotionConfig reducedMotion="user">
+      <div
+        className={cn(
+          "min-h-screen bg-[#f5f8f3]",
+          density === "compact" && "admin-density-compact",
+        )}
+        data-admin-layout-density={density}
+        data-admin-layout-mode={layoutMode}
+        data-admin-layout-width={width}
+        onKeyDown={(event) => event.key === "Escape" && closeCollapsedGroup()}
+      >
       {layoutMode === "vertical" ? (
-        <aside
+        <motion.aside
+        animate={{ width: collapsed ? 72 : 220 }}
         className={cn(
           "fixed inset-y-0 left-0 z-20 flex flex-col bg-[#0f2418] text-white transition-[width] duration-200",
           collapsed ? "w-[72px]" : "w-[220px]",
         )}
+        initial={false}
+        transition={{ duration: 0.2, ease: "easeOut" }}
       >
         {renderCollapseButton()}
 
-        <div className="flex h-20 items-center px-5">
-          <div className={cn("min-w-0", collapsed && "hidden")}>
-            <div className="text-xl font-semibold">{brand}</div>
-            <div className="mt-1 text-sm text-white/62">蔬菜预订运营台</div>
-          </div>
+        <div className="flex h-20 items-center overflow-hidden px-5">
+          <AnimatePresence initial={false}>
+            {!collapsed ? (
+              <motion.div
+                animate={{ opacity: 1, x: 0 }}
+                className="min-w-0 whitespace-nowrap"
+                exit={{ opacity: 0, x: -8 }}
+                initial={{ opacity: 0, x: -8 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+              >
+                <div className="text-xl font-semibold">{brand}</div>
+                <div className="mt-1 text-sm text-white/62">蔬菜预订运营台</div>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
         </div>
 
         <nav
@@ -385,17 +464,18 @@ export function AdminShell({
               collapsed,
               groupOpen,
             });
-            const collapsedFlyoutOpen = collapsedOpenGroup === group.label;
             const GroupIcon = iconMap[group.icon];
             return (
               <div className="mb-4" key={group.label}>
                 {collapsed && collapsedGroupTarget ? (
                   <div
                     className="relative mb-1"
-                    onBlur={(event) => handleCollapsedGroupBlur(event, group.label)}
-                    onFocus={() => setCollapsedOpenGroup(group.label)}
-                    onMouseEnter={() => setCollapsedOpenGroup(group.label)}
-                    onMouseLeave={() => setCollapsedOpenGroup(null)}
+                    onBlur={scheduleCollapsedGroupClose}
+                    onFocus={(event) => openCollapsedGroup(event, group.label)}
+                    onMouseEnter={(event) =>
+                      openCollapsedGroup(event, group.label)
+                    }
+                    onMouseLeave={scheduleCollapsedGroupClose}
                   >
                     <Link
                       className={cn(
@@ -403,45 +483,11 @@ export function AdminShell({
                         collapsedGroupTarget.active && "bg-[#2c9858] text-white",
                       )}
                       href={sectionHref(collapsedGroupTarget.section)}
-                      onClick={() => setCollapsedOpenGroup(null)}
+                      onClick={closeCollapsedGroup}
                       title={collapsedGroupTarget.title}
                     >
                       <GroupIcon size={20} />
                     </Link>
-                    <div
-                      className={cn(
-                        "absolute left-full top-0 z-40 min-w-44 pl-3 transition",
-                        collapsedFlyoutOpen
-                          ? "pointer-events-auto translate-x-0 opacity-100"
-                          : "pointer-events-none translate-x-1 opacity-0",
-                      )}
-                    >
-                      <div className="rounded-2xl border border-[#dbe6dc] bg-white p-2 text-[#14231a] shadow-2xl shadow-[#0f2418]/18">
-                        <div className="px-3 pb-2 pt-1 text-xs font-semibold text-[#66756d]">
-                          {group.label}
-                        </div>
-                        <div className="space-y-1">
-                          {group.items.map((item) => {
-                            const FlyoutIcon = iconMap[item.icon];
-
-                            return (
-                              <Link
-                                className={cn(
-                                  "flex h-9 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-[#435247] transition hover:bg-[#eef8f0] hover:text-[#1f8f4f]",
-                                  item.active && "bg-[#1f8f4f] text-white hover:bg-[#1f8f4f] hover:text-white",
-                                )}
-                                href={sectionHref(item.section)}
-                                key={item.section}
-                                onClick={() => setCollapsedOpenGroup(null)}
-                              >
-                                <FlyoutIcon size={15} />
-                                <span className="whitespace-nowrap">{item.label}</span>
-                              </Link>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 ) : (
                   <button
@@ -495,8 +541,43 @@ export function AdminShell({
               </div>
             );
           })}
+          <AnimatePresence initial={false} mode="wait">
+            {collapsed && collapsedFlyout && activeCollapsedGroup ? (
+              <AdminCollapsedFlyout
+                anchorLeft={collapsedFlyout.anchorLeft}
+                anchorTop={collapsedFlyout.anchorTop}
+                key={activeCollapsedGroup.label}
+                label={activeCollapsedGroup.label}
+                onBlur={scheduleCollapsedGroupClose}
+                onFocus={cancelCollapsedGroupClose}
+                onMouseEnter={cancelCollapsedGroupClose}
+                onMouseLeave={scheduleCollapsedGroupClose}
+              >
+                {activeCollapsedGroup.items.map((item) => {
+                  const FlyoutIcon = iconMap[item.icon];
+
+                  return (
+                    <Link
+                      className={cn(
+                        "flex h-9 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-[#435247] transition hover:bg-[#eef8f0] hover:text-[#1f8f4f]",
+                        item.active &&
+                          "bg-[#1f8f4f] text-white hover:bg-[#1f8f4f] hover:text-white",
+                      )}
+                      href={sectionHref(item.section)}
+                      key={item.section}
+                      onClick={closeCollapsedGroup}
+                      role="menuitem"
+                    >
+                      <FlyoutIcon size={15} />
+                      <span className="whitespace-nowrap">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </AdminCollapsedFlyout>
+            ) : null}
+          </AnimatePresence>
         </nav>
-      </aside>
+      </motion.aside>
       ) : null}
 
       {layoutMode === "double" ? (
@@ -803,6 +884,7 @@ export function AdminShell({
           {children}
         </div>
       </div>
-    </div>
+      </div>
+    </MotionConfig>
   );
 }

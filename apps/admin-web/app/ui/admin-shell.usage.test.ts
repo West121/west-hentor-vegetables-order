@@ -26,7 +26,7 @@ describe("admin shell sidebar affordance", () => {
     expect(source).toContain("getCollapsedAdminNavGroupTarget(group)");
     expect(source).toContain("collapsedGroupTarget.title");
     expect(source).toContain("sectionHref(collapsedGroupTarget.section)");
-    expect(source).toContain("collapsedFlyoutOpen");
+    expect(source).toContain("AdminCollapsedFlyout");
     expect(source).toContain("group.items.map((item)");
     expect(source).not.toContain("collapsed && \"justify-center px-0\"");
   });
@@ -37,10 +37,13 @@ describe("admin shell sidebar affordance", () => {
       "utf8",
     );
 
+    expect(source).toContain('from "motion/react"');
+    expect(source).toContain("AdminCollapsedFlyout");
     expect(source).toContain("collapsedOpenGroup");
-    expect(source).toContain("collapsedFlyoutOpen");
-    expect(source).toContain("onMouseEnter={() => setCollapsedOpenGroup(group.label)}");
-    expect(source).toContain("onMouseLeave={() => setCollapsedOpenGroup(null)}");
+    expect(source).toContain("openCollapsedGroup");
+    expect(source).toContain("scheduleCollapsedGroupClose");
+    expect(source).toContain("cancelCollapsedGroupClose");
+    expect(source).toContain('onKeyDown={(event) => event.key === "Escape"');
     expect(source).not.toContain("group-focus-within/nav");
   });
 
