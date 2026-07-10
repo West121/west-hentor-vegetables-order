@@ -92,6 +92,8 @@ describe("admin shell sidebar affordance", () => {
     expect(source).toContain("duration-[140ms]");
     expect(source).not.toContain("transition-[width] duration-200");
     expect(flyoutSource).toContain("const FLYOUT_MOTION_DURATION = 0.12;");
+    expect(flyoutSource).toContain("panel.offsetHeight");
+    expect(flyoutSource).not.toContain("panel.getBoundingClientRect().height");
   });
 
   it("keeps long two-level navigation visibly scrollable", () => {

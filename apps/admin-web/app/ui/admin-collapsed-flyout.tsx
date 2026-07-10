@@ -49,7 +49,7 @@ export function AdminCollapsedFlyout({
       setTop(
         getCollapsedFlyoutTop(
           anchorTop,
-          panel.getBoundingClientRect().height,
+          panel.offsetHeight,
           window.innerHeight,
           VIEWPORT_EDGE_GAP,
         ),
