@@ -64,6 +64,8 @@ const HORIZONTAL_VISIBLE_GROUP_LIMIT = 5;
 const HORIZONTAL_MORE_BUTTON_WIDTH = 96;
 const COLLAPSED_FLYOUT_GAP = 12;
 const COLLAPSED_FLYOUT_CLOSE_DELAY = 120;
+const SIDEBAR_MOTION_DURATION = 0.14;
+const SIDEBAR_MOTION_EASE = [0.16, 1, 0.3, 1] as const;
 
 type CollapsedFlyoutState = {
   anchorLeft: number;
@@ -401,7 +403,7 @@ export function AdminShell({
             exit={{ opacity: 0, rotate: collapsed ? -18 : 18, scale: 0.82 }}
             initial={{ opacity: 0, rotate: collapsed ? 18 : -18, scale: 0.82 }}
             key={collapsed ? "expand" : "collapse"}
-            transition={{ duration: 0.18, ease: "easeOut" }}
+            transition={{ duration: 0.12, ease: SIDEBAR_MOTION_EASE }}
           >
             <CollapseIcon size={20} />
           </motion.span>
@@ -426,15 +428,17 @@ export function AdminShell({
         <motion.aside
         animate={{ width: collapsed ? 72 : 220 }}
         className={cn(
-          "fixed inset-y-0 left-0 z-20 flex flex-col bg-[#0f2418] text-white transition-[width] duration-200",
+          "fixed inset-y-0 left-0 z-20 flex flex-col bg-[#0f2418] text-white",
           collapsed ? "w-[72px]" : "w-[220px]",
         )}
         initial={false}
-        transition={{ duration: 0.2, ease: "easeOut" }}
+        transition={{ duration: SIDEBAR_MOTION_DURATION, ease: SIDEBAR_MOTION_EASE }}
       >
         {renderCollapseButton()}
 
-        <div className="flex h-20 items-center overflow-hidden px-5">
+        <div className="flex h-full min-w-0 flex-col overflow-hidden">
+
+        <div className="flex h-20 w-[220px] shrink-0 items-center overflow-hidden px-5">
           <AnimatePresence initial={false}>
             {!collapsed ? (
               <motion.div
@@ -442,7 +446,7 @@ export function AdminShell({
                 className="min-w-0 whitespace-nowrap"
                 exit={{ opacity: 0, x: -8 }}
                 initial={{ opacity: 0, x: -8 }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
+                transition={{ duration: 0.1, ease: SIDEBAR_MOTION_EASE }}
               >
                 <div className="text-xl font-semibold">{brand}</div>
                 <div className="mt-1 text-sm text-white/62">蔬菜预订运营台</div>
@@ -453,8 +457,8 @@ export function AdminShell({
 
         <nav
           className={cn(
-            "flex-1 pb-6",
-            collapsed ? "overflow-visible px-3" : "overflow-y-auto px-4",
+            "flex-1 shrink-0 overflow-y-auto pb-6",
+            collapsed ? "w-[72px] px-3" : "w-[220px] px-4",
           )}
         >
           {groups.map((group) => {
@@ -507,7 +511,7 @@ export function AdminShell({
                   >
                     <>
                       <GroupIcon size={17} />
-                      <span className="flex-1">{group.label}</span>
+                      <span className="flex-1 whitespace-nowrap">{group.label}</span>
                       {group.collapsible ? (
                         <ChevronDown
                           className={cn("transition", !groupOpen && "-rotate-90")}
@@ -541,53 +545,62 @@ export function AdminShell({
               </div>
             );
           })}
-          <AnimatePresence initial={false} mode="wait">
-            {collapsed && collapsedFlyout && activeCollapsedGroup ? (
-              <AdminCollapsedFlyout
-                anchorLeft={collapsedFlyout.anchorLeft}
-                anchorTop={collapsedFlyout.anchorTop}
-                key={activeCollapsedGroup.label}
-                label={activeCollapsedGroup.label}
-                onBlur={scheduleCollapsedGroupClose}
-                onFocus={cancelCollapsedGroupClose}
-                onMouseEnter={cancelCollapsedGroupClose}
-                onMouseLeave={scheduleCollapsedGroupClose}
-              >
-                {activeCollapsedGroup.items.map((item) => {
-                  const FlyoutIcon = iconMap[item.icon];
-
-                  return (
-                    <Link
-                      className={cn(
-                        "flex h-9 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-[#435247] transition hover:bg-[#eef8f0] hover:text-[#1f8f4f]",
-                        item.active &&
-                          "bg-[#1f8f4f] text-white hover:bg-[#1f8f4f] hover:text-white",
-                      )}
-                      href={sectionHref(item.section)}
-                      key={item.section}
-                      onClick={closeCollapsedGroup}
-                      role="menuitem"
-                    >
-                      <FlyoutIcon size={15} />
-                      <span className="whitespace-nowrap">{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </AdminCollapsedFlyout>
-            ) : null}
-          </AnimatePresence>
         </nav>
+        </div>
       </motion.aside>
       ) : null}
 
+      <AnimatePresence initial={false} mode="wait">
+        {layoutMode === "vertical" &&
+        collapsed &&
+        collapsedFlyout &&
+        activeCollapsedGroup ? (
+          <AdminCollapsedFlyout
+            anchorLeft={collapsedFlyout.anchorLeft}
+            anchorTop={collapsedFlyout.anchorTop}
+            key={activeCollapsedGroup.label}
+            label={activeCollapsedGroup.label}
+            onBlur={scheduleCollapsedGroupClose}
+            onFocus={cancelCollapsedGroupClose}
+            onMouseEnter={cancelCollapsedGroupClose}
+            onMouseLeave={scheduleCollapsedGroupClose}
+          >
+            {activeCollapsedGroup.items.map((item) => {
+              const FlyoutIcon = iconMap[item.icon];
+
+              return (
+                <Link
+                  className={cn(
+                    "flex h-9 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-[#435247] transition hover:bg-[#eef8f0] hover:text-[#1f8f4f]",
+                    item.active &&
+                      "bg-[#1f8f4f] text-white hover:bg-[#1f8f4f] hover:text-white",
+                  )}
+                  href={sectionHref(item.section)}
+                  key={item.section}
+                  onClick={closeCollapsedGroup}
+                  role="menuitem"
+                >
+                  <FlyoutIcon size={15} />
+                  <span className="whitespace-nowrap">{item.label}</span>
+                </Link>
+              );
+            })}
+          </AdminCollapsedFlyout>
+        ) : null}
+      </AnimatePresence>
+
       {layoutMode === "double" ? (
-        <aside
+        <motion.aside
+          animate={{ width: collapsed ? 72 : 236 }}
           className={cn(
-            "fixed inset-y-0 left-0 z-20 flex bg-[#0f2418] text-white transition-[width] duration-200",
+            "fixed inset-y-0 left-0 z-20 flex bg-[#0f2418] text-white",
             collapsed ? "w-[72px]" : "w-[236px]",
           )}
+          initial={false}
+          transition={{ duration: SIDEBAR_MOTION_DURATION, ease: SIDEBAR_MOTION_EASE }}
         >
           {renderCollapseButton()}
+          <div className="flex h-full overflow-hidden">
           <div className="flex w-[72px] shrink-0 flex-col border-r border-white/10 px-3 py-4">
             <div className="mb-5 grid h-10 w-10 place-items-center rounded-2xl bg-[#1f8f4f] text-sm font-semibold">
               {brand.slice(0, 1)}
@@ -620,7 +633,7 @@ export function AdminShell({
           </div>
 
           {!collapsed && activeGroup ? (
-            <div className="min-w-0 flex-1 px-4 py-5">
+            <div className="w-[164px] shrink-0 whitespace-nowrap px-4 py-5">
               <div className="mb-4">
                 <div className="text-base font-semibold">{activeGroup.label}</div>
                 <div className="mt-1 text-xs text-white/48">当前一级菜单</div>
@@ -647,7 +660,8 @@ export function AdminShell({
               </div>
             </div>
           ) : null}
-        </aside>
+          </div>
+        </motion.aside>
       ) : null}
 
       {layoutMode === "horizontal" ? (
@@ -862,7 +876,7 @@ export function AdminShell({
 
       <div
         className={cn(
-          "min-h-screen transition-[padding-left] duration-200",
+          "min-h-screen transition-[padding-left] duration-[140ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
           contentPaddingClass,
         )}
       >

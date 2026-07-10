@@ -13,6 +13,7 @@ import {
 import { getCollapsedFlyoutTop } from "./admin-collapsed-flyout-position";
 
 const VIEWPORT_EDGE_GAP = 12;
+const FLYOUT_MOTION_DURATION = 0.12;
 
 type AdminCollapsedFlyoutProps = {
   anchorLeft: number;
@@ -79,7 +80,7 @@ export function AdminCollapsedFlyout({
         top,
         transformOrigin: "left center",
       }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
+      transition={{ duration: FLYOUT_MOTION_DURATION, ease: [0.16, 1, 0.3, 1] }}
     >
       <div className="px-3 pb-2 pt-1 text-xs font-semibold text-[#66756d]">
         {label}

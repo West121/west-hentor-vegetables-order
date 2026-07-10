@@ -74,13 +74,34 @@ describe("admin shell sidebar affordance", () => {
     expect(source).not.toContain("pl-[260px]");
   });
 
+  it("keeps sidebar motion fast without reflowing labels during intermediate widths", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/admin-shell.tsx"),
+      "utf8",
+    );
+    const flyoutSource = readFileSync(
+      join(process.cwd(), "app/ui/admin-collapsed-flyout.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("const SIDEBAR_MOTION_DURATION = 0.14;");
+    expect(source).toContain("flex h-full min-w-0 flex-col overflow-hidden");
+    expect(source).toContain("flex h-full overflow-hidden");
+    expect(source).toContain('collapsed ? "w-[72px]" : "w-[220px]"');
+    expect(source).toContain("whitespace-nowrap");
+    expect(source).toContain("duration-[140ms]");
+    expect(source).not.toContain("transition-[width] duration-200");
+    expect(flyoutSource).toContain("const FLYOUT_MOTION_DURATION = 0.12;");
+  });
+
   it("keeps long two-level navigation visibly scrollable", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/admin-shell.tsx"),
       "utf8",
     );
 
-    expect(source).toContain('collapsed ? "overflow-visible px-3" : "overflow-y-auto px-4"');
+    expect(source).toContain('"flex-1 shrink-0 overflow-y-auto pb-6"');
+    expect(source).toContain('collapsed ? "w-[72px] px-3" : "w-[220px] px-4"');
     expect(source).not.toContain("no-scrollbar flex-1 overflow-y-auto");
   });
 
