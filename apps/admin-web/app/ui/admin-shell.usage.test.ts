@@ -26,9 +26,22 @@ describe("admin shell sidebar affordance", () => {
     expect(source).toContain("getCollapsedAdminNavGroupTarget(group)");
     expect(source).toContain("collapsedGroupTarget.title");
     expect(source).toContain("sectionHref(collapsedGroupTarget.section)");
-    expect(source).toContain("group-hover/nav:pointer-events-auto");
+    expect(source).toContain("collapsedFlyoutOpen");
     expect(source).toContain("group.items.map((item)");
     expect(source).not.toContain("collapsed && \"justify-center px-0\"");
+  });
+
+  it("keeps only one collapsed sidebar flyout open while preserving hover access", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/admin-shell.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("collapsedOpenGroup");
+    expect(source).toContain("collapsedFlyoutOpen");
+    expect(source).toContain("onMouseEnter={() => setCollapsedOpenGroup(group.label)}");
+    expect(source).toContain("onMouseLeave={() => setCollapsedOpenGroup(null)}");
+    expect(source).not.toContain("group-focus-within/nav");
   });
 
   it("exposes stable labels for two-level group collapse controls", () => {

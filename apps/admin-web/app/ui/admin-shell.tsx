@@ -147,6 +147,9 @@ export function AdminShell({
   const [horizontalOpenGroup, setHorizontalOpenGroup] = useState<string | null>(
     null,
   );
+  const [collapsedOpenGroup, setCollapsedOpenGroup] = useState<string | null>(
+    null,
+  );
   const [horizontalVisibleLimit, setHorizontalVisibleLimit] = useState(
     HORIZONTAL_VISIBLE_GROUP_LIMIT,
   );
@@ -221,6 +224,23 @@ export function AdminShell({
     }
 
     setHorizontalOpenGroup((value) =>
+      value === groupLabel ? null : value,
+    );
+  }
+
+  function handleCollapsedGroupBlur(
+    event: FocusEvent<HTMLDivElement>,
+    groupLabel: string,
+  ) {
+    const nextFocusTarget = event.relatedTarget;
+    if (
+      nextFocusTarget &&
+      event.currentTarget.contains(nextFocusTarget as Node)
+    ) {
+      return;
+    }
+
+    setCollapsedOpenGroup((value) =>
       value === groupLabel ? null : value,
     );
   }
@@ -365,23 +385,38 @@ export function AdminShell({
               collapsed,
               groupOpen,
             });
+            const collapsedFlyoutOpen = collapsedOpenGroup === group.label;
             const GroupIcon = iconMap[group.icon];
             return (
               <div className="mb-4" key={group.label}>
                 {collapsed && collapsedGroupTarget ? (
-                  <div className="group/nav relative mb-1">
+                  <div
+                    className="relative mb-1"
+                    onBlur={(event) => handleCollapsedGroupBlur(event, group.label)}
+                    onFocus={() => setCollapsedOpenGroup(group.label)}
+                    onMouseEnter={() => setCollapsedOpenGroup(group.label)}
+                    onMouseLeave={() => setCollapsedOpenGroup(null)}
+                  >
                     <Link
                       className={cn(
                         "flex h-11 w-full items-center justify-center rounded-xl text-white/76 transition hover:bg-white/8 hover:text-white",
                         collapsedGroupTarget.active && "bg-[#2c9858] text-white",
                       )}
                       href={sectionHref(collapsedGroupTarget.section)}
+                      onClick={() => setCollapsedOpenGroup(null)}
                       title={collapsedGroupTarget.title}
                     >
                       <GroupIcon size={20} />
                     </Link>
-                    <div className="absolute left-full top-0 z-40 min-w-44 pl-3 translate-x-1 opacity-0 transition group-hover/nav:translate-x-0 group-hover/nav:opacity-100 group-focus-within/nav:translate-x-0 group-focus-within/nav:opacity-100">
-                      <div className="pointer-events-none rounded-2xl border border-[#dbe6dc] bg-white p-2 text-[#14231a] shadow-2xl shadow-[#0f2418]/18 group-hover/nav:pointer-events-auto group-focus-within/nav:pointer-events-auto">
+                    <div
+                      className={cn(
+                        "absolute left-full top-0 z-40 min-w-44 pl-3 transition",
+                        collapsedFlyoutOpen
+                          ? "pointer-events-auto translate-x-0 opacity-100"
+                          : "pointer-events-none translate-x-1 opacity-0",
+                      )}
+                    >
+                      <div className="rounded-2xl border border-[#dbe6dc] bg-white p-2 text-[#14231a] shadow-2xl shadow-[#0f2418]/18">
                         <div className="px-3 pb-2 pt-1 text-xs font-semibold text-[#66756d]">
                           {group.label}
                         </div>
@@ -397,6 +432,7 @@ export function AdminShell({
                                 )}
                                 href={sectionHref(item.section)}
                                 key={item.section}
+                                onClick={() => setCollapsedOpenGroup(null)}
                               >
                                 <FlyoutIcon size={15} />
                                 <span className="whitespace-nowrap">{item.label}</span>
