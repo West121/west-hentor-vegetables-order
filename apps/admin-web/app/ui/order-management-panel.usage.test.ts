@@ -100,6 +100,25 @@ describe("order management panel", () => {
     expect(source).toContain("avatarUrl={modal.item.user?.avatarUrl}");
   });
 
+  it("shows the delivery recipient from the order address snapshot in the detail modal", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/ui/order-management-panel.tsx"),
+      "utf8",
+    );
+    const detailBlock = source.slice(
+      source.indexOf("<h3 className=\"text-base font-semibold\">基础信息</h3>"),
+      source.indexOf("<h3 className=\"text-base font-semibold\">菜品明细</h3>"),
+    );
+
+    expect(detailBlock).toContain("收货人");
+    expect(detailBlock).toContain(
+      'textFromSnapshot(modal.item.addressSnapshot, "receiverName")',
+    );
+    expect(detailBlock).toContain(
+      'textFromSnapshot(modal.item.addressSnapshot, "receiverPhone")',
+    );
+  });
+
   it("does not keep fixed cutoff copy on the order management page", () => {
     const source = readFileSync(
       join(process.cwd(), "app/ui/order-management-panel.tsx"),

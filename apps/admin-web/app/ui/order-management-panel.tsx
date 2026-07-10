@@ -2092,9 +2092,17 @@ export function OrderManagementPanel({
                             </div>
                           </div>
                           <div className="min-w-0 rounded-lg bg-[#f8fbf7] px-3 py-2">
-                            <div className="text-xs font-medium text-[#66756d]">配送地址</div>
+                            <div className="text-xs font-medium text-[#66756d]">收货人</div>
+                            <div className="mt-1 truncate font-semibold text-[#102017]">
+                              {textFromSnapshot(modal.item.addressSnapshot, "receiverName") ||
+                                "未记录收货人"}
+                            </div>
+                            <div className="truncate text-[#66756d]">
+                              {textFromSnapshot(modal.item.addressSnapshot, "receiverPhone") ||
+                                "未记录收货手机号"}
+                            </div>
                             <div
-                              className="mt-1 truncate font-semibold text-[#102017]"
+                              className="mt-1 truncate text-[#66756d]"
                               title={addressText(modal.item.addressSnapshot)}
                             >
                               {addressText(modal.item.addressSnapshot)}
