@@ -151,7 +151,8 @@ public class UserPackageQueryService {
         .selectAs(UserEntity::getStatus, UserPackageListItem::getUserStatus)
         .leftJoin(UserEntity.class, UserEntity::getId, UserPackageEntity::getUserId)
         .eq(UserPackageEntity::getStoreId, storeId)
-        .orderByDesc(UserPackageEntity::getCreatedAt);
+        .orderByDesc(UserPackageEntity::getCreatedAt)
+        .orderByDesc(UserPackageEntity::getId);
 
     if (StringUtils.hasText(status) && !"ALL".equalsIgnoreCase(status)) {
       validatePackageStatus(status);

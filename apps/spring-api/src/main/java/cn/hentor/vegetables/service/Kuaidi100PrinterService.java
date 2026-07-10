@@ -81,6 +81,7 @@ public class Kuaidi100PrinterService {
         .orderByDesc(Kuaidi100PrinterEntity::getDefaultPrinter)
         .orderByAsc(Kuaidi100PrinterEntity::getSortOrder)
         .orderByDesc(Kuaidi100PrinterEntity::getCreatedAt)
+        .orderByDesc(Kuaidi100PrinterEntity::getId)
     );
     long totalPages =
       result.getSize() == 0 ? 0 : (long) Math.ceil((double) result.getTotal() / result.getSize());

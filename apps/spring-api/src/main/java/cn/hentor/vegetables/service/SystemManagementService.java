@@ -300,7 +300,8 @@ public class SystemManagementService {
     long normalizedPage = Math.max(page, 1);
     long normalizedPageSize = Math.min(Math.max(pageSize, 1), 100);
     LambdaQueryWrapper<AdminRoleEntity> wrapper = new LambdaQueryWrapper<AdminRoleEntity>()
-      .orderByDesc(AdminRoleEntity::getCreatedAt);
+      .orderByDesc(AdminRoleEntity::getCreatedAt)
+      .orderByDesc(AdminRoleEntity::getId);
     String keyword = trimToNull(query);
     if (StringUtils.hasText(keyword)) {
       wrapper.and(w -> w

@@ -169,7 +169,8 @@ public class OrderQueryService {
       )
       .eq(OrderEntity::getStoreId, storeId)
       .isNull(OrderEntity::getDeletedByUserAt)
-      .orderByDesc(OrderEntity::getCreatedAt);
+      .orderByDesc(OrderEntity::getCreatedAt)
+      .orderByDesc(OrderEntity::getId);
 
     if (StringUtils.hasText(status) && !"ALL".equalsIgnoreCase(status)) {
       wrapper.eq(OrderEntity::getStatus, status.trim());

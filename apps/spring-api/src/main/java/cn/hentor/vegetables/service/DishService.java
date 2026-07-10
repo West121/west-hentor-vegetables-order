@@ -91,7 +91,8 @@ public class DishService {
     long normalizedPage = Math.max(page, 1);
     long normalizedPageSize = Math.min(Math.max(pageSize, 1), 100);
     LambdaQueryWrapper<DishEntity> wrapper = buildListWrapper(storeId, category, status, query)
-      .orderByDesc(DishEntity::getCreatedAt);
+      .orderByDesc(DishEntity::getCreatedAt)
+      .orderByDesc(DishEntity::getId);
     Page<DishEntity> result = dishMapper.selectPage(
       new Page<>(normalizedPage, normalizedPageSize),
       wrapper

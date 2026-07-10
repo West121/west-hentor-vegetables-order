@@ -77,7 +77,8 @@ public class OperationLogQueryService {
         .leftJoin(AdminUserEntity.class, AdminUserEntity::getId, AdminOperationLogEntity::getOperatorId)
         .leftJoin(UserEntity.class, UserEntity::getId, AdminOperationLogEntity::getUserId)
         .leftJoin(StoreEntity.class, StoreEntity::getId, AdminOperationLogEntity::getStoreId)
-        .orderByDesc(AdminOperationLogEntity::getCreatedAt);
+        .orderByDesc(AdminOperationLogEntity::getCreatedAt)
+        .orderByDesc(AdminOperationLogEntity::getId);
 
     if (StringUtils.hasText(action)) {
       wrapper.eq(AdminOperationLogEntity::getAction, action.trim());

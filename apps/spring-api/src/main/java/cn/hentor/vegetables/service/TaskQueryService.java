@@ -94,6 +94,7 @@ public class TaskQueryService {
       new Page<>(normalizedPage, normalizedPageSize),
       buildListWrapper(storeId, status, query)
         .orderByDesc(TaskEntity::getCreatedAt)
+        .orderByDesc(TaskEntity::getId)
     );
     StoreEntity store = requireStore(storeId);
     Map<String, List<TaskDishEntity>> linksByTask = loadTaskDishLinks(result.getRecords());

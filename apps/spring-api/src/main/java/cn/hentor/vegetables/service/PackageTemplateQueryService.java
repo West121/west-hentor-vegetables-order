@@ -89,7 +89,8 @@ public class PackageTemplateQueryService {
         .eq(PackageTemplateEntity::getStoreId, storeId)
         .orderByAsc(PackageTemplateEntity::getStatus)
         .orderByAsc(PackageTemplateEntity::getSortOrder)
-        .orderByDesc(PackageTemplateEntity::getCreatedAt);
+        .orderByDesc(PackageTemplateEntity::getCreatedAt)
+        .orderByDesc(PackageTemplateEntity::getId);
 
     if (StringUtils.hasText(status) && !"ALL".equalsIgnoreCase(status)) {
       validateStatus(status);
