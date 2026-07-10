@@ -135,7 +135,8 @@ public class MemberService {
         .selectAs(UserEntity::getRemark, MemberListItem::getRemark)
         .leftJoin(UserEntity.class, UserEntity::getId, MemberStoreBindingEntity::getUserId)
         .eq(MemberStoreBindingEntity::getStoreId, storeId)
-        .orderByDesc(MemberStoreBindingEntity::getCreatedAt);
+        .orderByDesc(MemberStoreBindingEntity::getCreatedAt)
+        .orderByDesc(MemberStoreBindingEntity::getId);
 
     String normalizedStatus = StringUtils.hasText(status)
       ? status.trim().toUpperCase(Locale.ROOT)
